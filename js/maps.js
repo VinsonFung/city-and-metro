@@ -50,7 +50,7 @@
   }
   CM.MAPS = MAPS;
   // 选择列表由易到难；同难度保留既有城市顺序，新地图按登记顺序接在同档末尾。
-  const mapOrder = ['tutorial', 'gz', 'hz', 'hk', 'tp', 'tk'];
+  const mapOrder = ['tutorial', 'gz', 'hz', 'hk', 'tp', 'tk', 'ld'];
   for (const id of Object.keys(MAPS)) if (mapOrder.indexOf(id) < 0) mapOrder.push(id);
   const mapRank = new Map(mapOrder.map(function (id, i) { return [id, i]; }));
   CM.MAP_ORDER = mapOrder.filter(function (id) { return MAPS[id]; }).sort(function (a, b) {
