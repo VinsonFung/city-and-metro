@@ -1,5 +1,7 @@
 # City & Metro
 
+> **Candquarzy community edition — Beijing map**: adds Beijing (1990) with Financial Challenge and Free Build. Open this checkout's `index.html`, then choose Beijing. The upstream website does not include this map. This scenario deliberately starts with an empty network; Beijing already had a metro in 1990. See [map notes and sources](./docs/beijing-map.md). Original author: [VinsonFung](https://github.com/VinsonFung); [original repository](https://github.com/VinsonFung/city-and-metro).
+
 [简体中文](./README.md) · [繁體中文](./README.zh-TW.md) · **English**
 
 **Draw your own metro through real cities.**
@@ -24,7 +26,7 @@ Community-edition links will be collected and integrated into the original game 
 
 ## What you can do
 
-- **Choose a city and era.** Eight real cities and the separate Qingwan tutorial have distinct geography, development stages, and local goals. Free Build also lets you choose a starting year and unlock construction across the map.
+- **Choose a city and era.** Nine real cities and the separate Qingwan tutorial have distinct geography, development stages, and local goals. Free Build also lets you choose a starting year and unlock construction across the map.
 - **Design your network.** Build underground, surface, and elevated lines, curves, loops, branches, and multilevel interchanges. Adjust platform directions, split or merge lines, and preview or undo drafts before construction.
 - **Run a city's metro.** Choose unlimited funds or balance construction, operations, fares, grants, and debt in financial challenges. Use ridership, congestion, walking coverage, and construction impact reports to plan your next move.
 - **Grow with the city.** New districts, airports, campuses, and attractions open over time. Historical events affect travel and the economy; complete facility-access tasks and review stage summaries and the city chronicle. Airports outside the map show direction, distance, and demand beyond the boundary; connect a line to their boundary entrance to serve them.
@@ -67,6 +69,7 @@ Economic statistics show GDP, growth, local finances, and transport efficiency. 
 | Map | Default year | Planning features |
 | --- | --- | --- |
 | Qingwan | 2000 | Fictional city, 12-step tutorial, unlimited funds |
+| Beijing | 1990 | Custom empty network, Chang'an Avenue, Zhongguancun, Olympic venues and two airports |
 | Guangzhou | 1990 | The Pearl River, old city, Tianhe, Panyu, and University Town |
 | Hangzhou | 2000 | West Lake, the Qiantang River, new districts, and Xiaoshan Airport |
 | Hong Kong | 1970 | Mountains, harbor, new towns, reclamation, and Chek Lap Kok Airport |
@@ -76,7 +79,7 @@ Economic statistics show GDP, growth, local finances, and transport efficiency. 
 | Wuhan | 2000 | Three towns, two rivers, East Lake, Optics Valley, and Tianhe Airport |
 | Paris | 1900 | A century of change, cross-city commuting, and two major airports |
 
-All eight real cities support financial challenges and Free Build, with currency, fares, and financial parameters appropriate to each city and era. Later real-world metro lines do not appear automatically; you design the network.
+All nine real cities support financial challenges and Free Build, with currency, fares, and financial parameters appropriate to each city and era. Later real-world metro lines do not appear automatically; you design the network.
 
 ## Running and saving
 
