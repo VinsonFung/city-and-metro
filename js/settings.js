@@ -5,11 +5,14 @@
   const DEF = {
     language: 'zh-CN',    // 仅切换显示语言，不改地图、模拟与存档中的原文
     lighting: true, // Directional light for Canvas ground and buildings.
+    stationModels: true, // Canvas station architecture and decoration in 2.5D.
+    immersive: false, // 城市中隐藏界面；键位和触屏按钮均可恢复。
     theme: 'auto',        // light | dark | auto（跟随系统）
     uiScale: 1,           // 界面大小
     labels: 'all',        // 地图标注：all 全部 | stations 仅车站 | none 关闭
     colorBlind: false,    // 色盲辅助配色及非颜色识别提示，只影响显示
     agents: true,         // 车辆、行人与列车动画
+    gfx: 'auto',
     sound: true, volume: 0.6,   // 总开关与总音量
     trainVol: 0.7, ambVol: 0.6, // 列车音效、城市环境音（v2.0）
     autosave: true,
@@ -17,6 +20,7 @@
     grid: false, gridSnap: true,  // 视图工具及设置「游戏」页中的网格吸附
     keys: {},             // 自定义物理键位
     recentColors: [],      // 最近使用的自定义线路颜色
+    lineTags: false, taskPins: false,
   };
   let cur = Object.assign({}, DEF);
   try {
@@ -31,6 +35,8 @@
     }
   } catch (e) { /* 存储不可用时使用默认值 */ }
   cur.colorBlind = cur.colorBlind === true;
+  if (!['auto','standard','high'].includes(cur.gfx)) cur.gfx='auto';
+  cur.immersive = cur.immersive === true;
   if (!['zh-CN', 'zh-TW', 'en'].includes(cur.language)) cur.language = 'zh-CN';
   const recent = function (v) { return Array.isArray(v) ? v.filter(function (c) { return typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c); }).map(function (c) { return c.toLowerCase(); }).filter(function (c, i, a) { return a.indexOf(c) === i; }).slice(0, 8) : []; };
   cur.recentColors = recent(cur.recentColors);
@@ -46,7 +52,7 @@
     all: function () { return Object.assign({}, cur); },
     set: function (k, v) {
       if (k === 'language' && !['zh-CN', 'zh-TW', 'en'].includes(v)) v = 'zh-CN';
-      if (k === 'colorBlind') v = v === true;
+      if (k === 'colorBlind' || k === 'immersive') v = v === true;
       if (k === 'recentColors') v = recent(v);
       if (cur[k] === v) return;
       cur[k] = v; save();
@@ -79,6 +85,8 @@
       if (CM.Sound && (!k || k === 'trainVol')) CM.Sound.setTrainVolume(cur.trainVol);
       if (CM.Sound && (!k || k === 'ambVol')) CM.Sound.setAmbVolume(cur.ambVol);
       if (CM.R && (!k || k === 'labels' || k === 'agents')) { CM.R.labelsOn = cur.labels !== 'none'; CM.R.mapLabelsOn = cur.labels === 'all'; CM.R.agentsOn = cur.agents; }
+      if (CM.R && (!k || k === 'lineTags')) CM.R.labelImage = null;
+      if (!k || k === 'lighting') { root.dataset.lighting = cur.lighting === false ? 'off' : 'on'; if (CM.R && CM.R.setLighting) CM.R.setLighting(cur.lighting !== false); }
     },
   };
   if (mq && mq.addEventListener) mq.addEventListener('change', function () { if (cur.theme === 'auto') Settings.apply('theme'); });

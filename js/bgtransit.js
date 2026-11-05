@@ -134,7 +134,7 @@
   };
   // 2D：车厢为圆头粗线，渡轮为白色船身与淡淡的尾迹
   BG.draw2D = function (ctx, R, alpha) {
-    if (R.p3 || (!BG.trains.length && !BG.boats.length)) return;
+    if ((!BG.trains.length && !BG.boats.length)) return;
     const q = {}, a = {}, b = {}, pa = {}, pb = {}, w = U.clamp(R.z * 0.05, 2, 6.5);
     ctx.save(); ctx.lineCap = 'butt';   // 车厢方头，渡轮圆头
     for (const t of BG.trains) {

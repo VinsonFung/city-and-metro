@@ -8,9 +8,10 @@
   //   融资到账 bond（债券募集，进入建设专项资金，不算收入）
   //   建设支出 construction · demolition · upgrade · relocation（其中 capexUse 为专项资金支付的部分）
   //   运营成本 ops · 利息 interest · 本金偿还 principal · 逾期费用 penalty
+  //   v2.5：车站商业（TOD）运营成本 todCost · 政府合同收入 ppp（建设补助、可用性付费、客流保底、退还保证金）· 合同支出 pppOut（保证金、地价、超额分成、违约金）
   function blankMonth(y, m, funds, capex) {
     return { y: y, m: m, start: funds, grant: 0, fare: 0, construction: 0, demolition: 0, upgrade: 0, relocation: 0, ops: 0, reward: 0,
-      bond: 0, interest: 0, principal: 0, penalty: 0, capexUse: 0, capexStart: capex || 0, days: 0, wdDays: 0, weDays: 0, end: funds };
+      bond: 0, interest: 0, principal: 0, penalty: 0, capexUse: 0, capexStart: capex || 0, days: 0, wdDays: 0, weDays: 0, end: funds, commerce: 0, todCost: 0, ppp: 0, pppOut: 0, fleetSale: 0 };
   }
   const BUILD_KINDS = ['construction', 'demolition', 'upgrade', 'relocation'];
   const MONEY_EPS = 1e-7;   // 内部单位是万元；只忽略浮点误差，不能把不足 0.5 万的真实债务清零
@@ -54,6 +55,47 @@
     this.cur[kind] = (this.cur[kind] || 0) + amount;
     if (!this.isFree()) this.funds += amount;
   };
+  // ======================== 车站商业开发（TOD，v2.3） ========================
+  // 玩家只决定是否开发及投入等级；收入按车站的日进出站与换乘人次（当天日型）× 每人次收益，换乘站有枢纽溢价。
+  // 每人次收益以本城默认票价为基准、随价格指数上涨；客流很大时边际收益递减（商铺面积有限）。
+  // 投入为同年中型地下站造价的比例 × 车站规模（换乘站面积更大、投入更多），一次支付、不退还。
+  // 数值目标（v2.3 平衡）：日客流约 1 万人次的普通站，三级分别约 3 / 6 / 9 年回本；大型换乘枢纽约 1.5 / 2.5 / 4 年
+  // v2.5「经营不善也会亏钱」：开发后每年有运营、维护与财务成本（累计投入的 6% / 4.5% / 3.5%），日客流低于约 1,500 / 2,300 / 3,000 人次
+  // 的车站入不敷出（日客流 1 万人次的普通站约 3 / 7 / 14 年回本，大型枢纽仍很快）；商业街与站城一体的收入随城市经济周期涨落，衰退时更容易亏损
+  const TOD = CM.TOD = {
+    LEVELS: [
+      { name: '未开发', k: 0, cost: 0, upkeep: 0, cyc: 0 },
+      { name: '广告与便利店', k: 0.06, cost: 0.0045, upkeep: 0.06, cyc: 0.4, desc: '站内灯箱广告与便利店' },
+      { name: '站内商业街', k: 0.15, cost: 0.022, upkeep: 0.045, cyc: 0.75, desc: '通道与站厅的连续商铺' },
+      { name: '站城一体开发', k: 0.3, cost: 0.075, upkeep: 0.035, cyc: 1, desc: '车站上盖与周边物业联合开发' },
+    ],
+    HUB: 1.25,   // 两条及以上线路的换乘站
+    SIZE: { S: 0.7, M: 1, L: 1.5 },
+    pi: function (y) { return U.priceIndex(y, CFG.cost.inflation, CFG.econBase || 1990); },
+    cost: function (level, y, size, hub) { return TOD.LEVELS[level].cost * CFG.cost.station.underground.M * (TOD.SIZE[size] || 1) * (hub ? 1.3 : 1) * TOD.pi(y); },
+    // 经济周期系数：城市经济的商业系数（约 0.7–1.25），按等级的敏感度折算；没有城市经济的地图为 1。每月缓存一次
+    cycle: function (g, level) {
+      if (!g || !CM.Macro || !g.macro) return 1;
+      const ym = g.ym(); if (!g._todCyc || g._todCyc.ym !== ym) { const f = CM.Macro.cityFactors(g); g._todCyc = { ym: ym, com: f ? U.clamp(f.com, 0.7, 1.25) : 1 }; }
+      return 1 + (g._todCyc.com - 1) * TOD.LEVELS[level].cyc;
+    },
+    // 单站日收入（万元）：flow 为当天进出站 + 换乘人次（12 万人次以上逐渐饱和）；g 给出时计入经济周期
+    stationDaily: function (level, flow, hub, y, g) { return flow / (1 + flow / 120000) * CFG.fareDefault.flat * TOD.LEVELS[level].k * (CFG.economy.todK || 1) * (hub ? TOD.HUB : 1) * TOD.pi(y) / 10000 * (g ? TOD.cycle(g, level) : 1); },
+    // 单站日成本（万元）：累计投入（到该等级为止）× 年成本率 ÷ 365
+    stationCost: function (level, y, size, hub) { return level ? TOD.cost(level, y, size, hub) * TOD.LEVELS[level].upkeep / 365 : 0; },
+    // 全网当天的商业收入与成本（万元）
+    daily: function (g, dt) {
+      const m = g.model, C = m.net ? m.net.C : null, sd = dt === 'we' ? m.stDailyWe : m.stDailyWk, out = { rev: 0, cost: 0 }; if (!C) return out;
+      const y = g.clock.y, live = sd && !m.dailyStale;
+      for (let i = 0; i < C.stations.length; i++) {
+        const s = g.net.stations[C.stations[i].id], lv = s && s.tod; if (!lv) continue;
+        const hub = C.stationLines[i].size >= 2;
+        if (live && i < sd.inn.length) out.rev += TOD.stationDaily(lv, sd.inn[i] + sd.out[i] + sd.xfer[i], hub, y, g);
+        out.cost += TOD.stationCost(lv, y, s.size, hub);
+      }
+      return out;
+    },
+  };
   // 价格指数以本地图的价格基年（CFG.econBase）为 1，涨幅可分段
   Economy.prototype.costIndex = function (year) { return U.priceIndex(year, CFG.cost.inflation, CFG.econBase || 1990); };
   Economy.prototype.opsIndex = function (year) { return U.priceIndex(year, CFG.ops.inflation, CFG.econBase || 1990); };
@@ -64,7 +106,7 @@
     let ops = 0;
     if (daily && compiled) {
       const oi = this.opsIndex(year);
-      ops += daily.carKm * CFG.ops.carKmCost * oi;
+      ops += (daily.carKmW != null ? daily.carKmW : daily.carKm) * CFG.ops.carKmCost * oi;   // v2.5：车厢公里按车型的运营成本系数加权
       for (const s of compiled.stations) ops += CFG.ops.stationDaily[s.size] * oi;
     }
     this.income('fare', fareWan);
@@ -82,20 +124,23 @@
   // v2.1 第二轮：原来只按固定表每年约 1.7% 增长，跟不上城市财力与运营成本，后期入不敷出）。没有城市经济的地图仍按表
   Economy.prototype.grantQuota = function (y, m) {
     const t = y + ((m || 1) - 1) / 12, R = this.revIdx;
-    if (!R || t <= R.he) return U.interp(CFG.economy.grantBase, t);
+    if (!R || t <= R.he) return U.interp(CFG.economy.grantBase, t) * (CM.Eras ? CM.Eras.finance(t).grant : 1);
     return U.interp(CFG.economy.grantBase, R.he) * R.f(t);
   };
   Economy.prototype.grantFor = function (y, m) {
     const ym = U.ymIndex(y, m);
     let f = 0.6 + 0.8 * this.sat / 100, mf = 1;
     for (const md of this.mods) if (md.kind === 'grant' && md.until >= ym) mf *= md.factor;
-    return this.grantQuota(y, m) * this.fiscalFactor() * f * Math.max(0.6, mf);
+    return this.grantQuota(y, m) * this.fiscalFactor() * f * this.rateFactor() * Math.max(CFG.economy.grantModFloor || 0.6, mf);
   };
+  // 履约信誉系数（v2.5，corp.js）：政府合同开放后，拨款随地铁公司的履约信誉 ×0.95–1.05；开放前为 1
+  Economy.prototype.rateFactor = function () { return this.rate && isFinite(this.rate.f) ? this.rate.f : 1; };
   Economy.prototype.grantFactors = function (y, m) {
     const ym = U.ymIndex(y, m);
     const list = [];
     if (this.fisc) list.push({ label: '财力系数（' + (this.fisc.y || y) + ' 年预算）', f: this.fiscalFactor(), kind: 'fisc' });
     list.push({ label: '满意度系数（' + Math.round(this.sat) + '）', f: 0.6 + 0.8 * this.sat / 100, kind: 'sat' });
+    if (this.rate) list.push({ label: '履约信誉（' + this.rate.grade + ' 级 · ' + this.rate.score + ' 分）', f: this.rateFactor(), kind: 'corp' });
     for (const md of this.mods) if (md.kind === 'grant' && md.until >= ym) list.push({ label: md.reason + '（至 ' + Math.floor(md.until / 12) + '年' + (md.until % 12 + 1) + '月）', f: md.factor, kind: 'task' });
     return list;
   };
@@ -116,6 +161,8 @@
     if (!this.isFree()) {
       const c = this.cur, when = { y: c.y, m: c.m, d: U.daysInMonth(c.y, c.m) };
       if (c.fare > 0.5) this.log('fare', c.fare, 'gen', '本月票款（' + c.days + ' 天' + (c.wdDays || c.weDays ? '：' + (c.wdDays || 0) + ' 个工作日、' + (c.weDays || 0) + ' 个周末日' : '') + '）', when);
+      if (c.commerce > 0.5) this.log('commerce', c.commerce, 'gen', '本月车站商业收入（广告与租金）', when);
+      if (c.todCost > 0.5) this.log('ops', -c.todCost, 'gen', '本月车站商业运营与维护成本', when);
       if (c.ops > 0.5) this.log('ops', -c.ops, 'gen', '本月运营成本（' + c.days + ' 天）', when);
     }
     this.cur.closed = true;
@@ -161,7 +208,7 @@
     if (this.funds < limit) reasons.push('资金低于负债下限（' + U.fmtMoney(this.funds) + '，下限 ' + U.fmtMoney(limit) + '）');
     if (this.negMonths >= E.negMonthsLimit) reasons.push('连续 ' + this.negMonths + ' 个月负余额（上限 ' + E.negMonthsLimit + ' 个月）');
     if (this.lowSatMonths >= E.satFailMonths) reasons.push('居民满意度连续 ' + this.lowSatMonths + ' 个月低于 ' + E.satFail + '，交通持续恶化');
-    if (reasons.length) { this.failed = { reasons: reasons }; return this.failed; }
+    if (reasons.length) { this.failed = { reasons: reasons, funds: this.funds }; return this.failed; }
     return null;
   };
   Economy.prototype.warnings = function () {
@@ -189,10 +236,11 @@
 
   // ======================== 建设支出：先用建设专项资金，不足部分用一般资金 ========================
   Economy.prototype.canAffordBuild = function (amount) { return this.isFree() || amount <= MONEY_EPS || Math.max(0, this.funds) + Math.max(0, this.capex) >= amount; };
-  Economy.prototype.spendBuild = function (byKind, note, when) {
+  Economy.prototype.spendBuild = function (byKind, note, when, side) {
     let total = 0; for (const k of BUILD_KINDS) total += byKind[k] || 0;
     if (total <= 0) return { total: 0, capex: 0, gen: 0 };
     for (const k of BUILD_KINDS) if (byKind[k] > 0) this.cur[k] = (this.cur[k] || 0) + byKind[k];
+    if (!side) this.built = (this.built || 0) + total;   // 累计建设支出（v2.3，含自由建造）：预算类挑战按接受后的增量计算；车站商业开发（side）不计入
     if (this.isFree()) return { total: total, capex: 0, gen: 0 };
     const use = Math.min(Math.max(0, this.capex), total), gen = total - use;
     this.capex -= use; this.funds -= gen; this.cur.capexUse = (this.cur.capexUse || 0) + use;
@@ -355,14 +403,15 @@
   Economy.prototype.serialize = function () {
     return { mode: this.mode, funds: this.funds, fare: this.fare, cur: this.cur, ledger: this.ledger, sat: this.sat, mods: this.mods, negMonths: this.negMonths, lowSatMonths: this.lowSatMonths, failed: this.failed, satFactors: this.satFactors, lastDay: this.lastDay,
       capex: this.capex, bonds: this.bonds, bondIssued: this.bondIssued, overdue: this.overdue, overdueParts: this.overdueParts || null, overdueMonths: this.overdueMonths, flow: this.flow, bondSeq: this.bondSeq, svc: this._svc == null ? null : this._svc,
-      fisc: this.fisc || null };
+      fisc: this.fisc || null, built: this.built || 0, rate: this.rate || undefined };
   };
   Economy.restore = function (s) {
     const e = new Economy(s.mode, s.cur.y, s.cur.m);
     Object.assign(e, { funds: s.funds, fare: Economy.normFare(s.fare), cur: s.cur, ledger: s.ledger || [], sat: s.sat, mods: s.mods || [], negMonths: s.negMonths || 0, lowSatMonths: s.lowSatMonths || 0, failed: s.failed || null, satFactors: s.satFactors || null, lastDay: s.lastDay || null,
-      capex: s.capex || 0, bonds: s.bonds || [], bondIssued: s.bondIssued || {}, overdue: s.overdue || 0, overdueParts: s.overdueParts || null, overdueMonths: s.overdueMonths || 0, flow: s.flow || [], bondSeq: s.bondSeq || 1 });
+      capex: s.capex || 0, bonds: s.bonds || [], bondIssued: s.bondIssued || {}, overdue: s.overdue || 0, overdueParts: s.overdueParts || null, overdueMonths: s.overdueMonths || 0, flow: s.flow || [], bondSeq: s.bondSeq || 1, built: s.built || 0 });
     e._svc = s.svc == null ? null : s.svc;
     e.fisc = s.fisc && isFinite(s.fisc.f) ? { y: s.fisc.y, f: s.fisc.f } : null;   // 1.7 及更早的存档没有财力系数，按 1 处理
+    e.rate = s.rate && isFinite(s.rate.f) ? { score: s.rate.score, grade: s.rate.grade, f: s.rate.f } : null;   // 2.4 及更早没有政府合同
     // 1.6 及更早的正式存档没有债券，默认债务为零。早期 1.7 开发档可能只保存逾期总账，
     // 没有每券构成：从较晚发行的债券开始分摊剩余逾期，保留总额、已用额度与现金余额。
     const P = e.odParts();
@@ -383,21 +432,23 @@
       if (seq) e.bondSeq = Math.max(e.bondSeq, Number(seq[1]) + 1);
     }
     // 旧存档的账本没有新科目：补零，保证收支汇总不出现 NaN
-    for (const r of e.ledger.concat([e.cur])) for (const k of ['bond', 'interest', 'principal', 'penalty', 'capexUse']) if (r[k] == null) r[k] = 0;
+    for (const r of e.ledger.concat([e.cur])) for (const k of ['bond', 'interest', 'principal', 'penalty', 'capexUse', 'commerce', 'todCost', 'ppp', 'pppOut', 'fleetSale']) if (r[k] == null) r[k] = 0;
     return e;
   };
   // 票价（v2.1 第二轮）：统一票价 { mode: 'flat', flat } 或按里程计费 { mode: 'dist', flat 起步价, km0 起步里程, step 每段公里, inc 每段加价, cap 封顶（0 不封顶） }。
   // 统一票价存档读入后与原来完全相同；更早版本的里程计价存档（没有 km0 字段）仍按起步价换算为统一票价
   const fareQ = function (v, lo, hi) { const R = CFG.fareRange; return U.clamp(+(Math.round(v / R.step) * R.step).toFixed(6), lo, hi); };
+  // 读档时规范票价。fareRange.scale 的地图（巴黎）滑块上限随物价放大，fareRange.max 只是价格基年的上限，读档时不按它截断——
+  // 否则 1960 年约 80 法郎的票价读档后变成 1 法郎
   Economy.normFare = function (f) {
-    const R = CFG.fareRange, D = CFG.fareDist, newDist = !!f && f.mode === 'dist' && f.km0 != null;
+    const R = CFG.fareRange, D = CFG.fareDist, newDist = !!f && f.mode === 'dist' && f.km0 != null, max = R.scale ? Infinity : R.max;
     let v = f ? (f.mode === 'flat' || newDist ? f.flat : f.base) : CFG.fareDefault.flat;
     if (!isFinite(v)) v = CFG.fareDefault.flat;
-    if (!newDist) return { mode: 'flat', flat: U.clamp(Math.round(v / R.step) * R.step, R.min, R.max) };
+    if (!newDist) return { mode: 'flat', flat: U.clamp(Math.round(v / R.step) * R.step, R.min, max) };
     const num = function (x, d) { x = +x; return isFinite(x) ? x : d; };
-    const flat = fareQ(v, R.min, R.max), cap = fareQ(num(f.cap, 0), 0, R.max * 5);
+    const flat = fareQ(v, R.min, max), cap = fareQ(num(f.cap, 0), 0, max * 5);
     return { mode: 'dist', flat: flat, km0: U.clamp(num(f.km0, D.km0), 0, 50), step: U.clamp(num(f.step, D.step), 0.5, 50),
-      inc: fareQ(num(f.inc, 0), 0, R.max), cap: cap > 0 ? Math.max(flat, cap) : 0 };
+      inc: fareQ(num(f.inc, 0), 0, max), cap: cap > 0 ? Math.max(flat, cap) : 0 };
   };
   // 新开局的票价：按里程计费，起步价沿用本图默认票价，加价与封顶按起步价的比例取整；
   // fareDefault.dist 为 false 的地图（巴黎地铁历来单一票价）仍为统一票价
@@ -432,9 +483,27 @@
     return { find: find, serviced: C.serviced };
   }
   Tasks.stationComponents = stationComponents;
+  // 同上，但不能经过 avoid 一带的车站（「不经市中心」）：只有相邻两站都在范围外才算连通
+  function componentsAvoiding(C, acc, avoid) {
+    const N = C.stations.length, par = new Int32Array(N), out = new Uint8Array(N);
+    for (let i = 0; i < N; i++) { par[i] = i; out[i] = U.dist(C.stations[i].x, C.stations[i].y, avoid.x, avoid.y) > avoid.r ? 1 : 0; }
+    const find = function (x) { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    const uni = function (a, b) { if (out[a] && out[b]) { a = find(a); b = find(b); if (a !== b) par[a] = b; } };
+    for (const r of C.routes) { const st = r.stIdx; for (let k = 1; k < st.length; k++) uni(st[k - 1], st[k]); if (r.loop && st.length > 2) uni(st[st.length - 1], st[0]); }
+    if (acc) for (const t of acc.transfers) uni(t.a, t.b);
+    return { find: find, serviced: C.serviced };
+  }
 
   // 统计口径（v1.9）：通勤、上学与高峰类目标用工作日数据，旅游与商业休闲类可用周末数据，长期客流目标用周平均
   Tasks.BASIS = { wd: '工作日', we: '周末', avg: '周平均（5 个工作日 + 2 个周末日）', wdAM: '工作日早高峰', wdPeak: '工作日高峰小时', ledger: '上月实际账目', net: '线路连通', cover: '步行 15 分钟覆盖' };
+  // 一个月的经营覆盖率：（票款 + 车站商业净收入）÷ 运营费用（v2.5 起扣除车站商业的运营与维护成本）
+  Tasks.recoveryOf = function (r) { return r && r.ops > 0 ? ((r.fare || 0) + (r.commerce || 0) - (r.todCost || 0)) / r.ops : 0; };
+  // 任务未完成的后果（v2.3 平衡）：历史参考任务按原规则（拨款 ×0.85，12 个月，满意度 −6）；
+  // 系统按城市现状发布的动态任务较轻（拨款 ×0.92，6 个月，满意度 −3），后期多项任务同时到期时不至于连续重罚
+  Tasks.failPenalty = function (t) {
+    const E = CFG.economy;
+    return t && t.kind === 'dyn' ? { factor: E.failDynGrantFactor || 0.92, months: E.failDynMonths || 6, sat: E.failDynSat || -3 } : { factor: E.failGrantFactor, months: E.failGrantMonths, sat: E.failSat };
+  };
   Tasks.basisOf = function (t) {
     switch (t.type) {
       case 'connect': return 'net';
@@ -471,6 +540,22 @@
     servCache.set(key, ok);
     return ok;
   };
+  // 票价门槛（v2.4 玩家反馈：把票价临时调到 0 再调回来，就能完成拥堵与设施接驳任务）：按 10 km 行程的票价比较；
+  // 这两类任务记下发布时的票价水平，票价低于它的月份不计入样本与连续月数——任务要靠线网完成
+  Tasks.FARE_GATED = { zoneCong: 1, facShare: 1 };
+  Tasks.fareLevel = function (f) {
+    if (!f) return 0;
+    let v = f.flat || 0;
+    if (f.mode === 'dist' && f.inc > 0 && f.step > 0) { v += Math.max(0, Math.ceil((10 - (f.km0 || 0)) / f.step - 1e-9)) * f.inc; if (f.cap > 0) v = Math.min(v, f.cap); }
+    return v;
+  };
+  Tasks.fareCheap = function (t, g) { return !!Tasks.FARE_GATED[t.type] && t.fare0 != null && Tasks.fareLevel(g.econ.fare) < t.fare0 * 0.95 - 1e-9; };
+  // 到最近运营车站的距离（格）
+  Tasks.netDist = function (g, x, y) {
+    const C = g.compiled; let d = Infinity;
+    C.stations.forEach(function (s, i) { if (C.serviced[i]) { const v = U.dist(s.x, s.y, x, y); if (v < d) d = v; } });
+    return d;
+  };
   Tasks.facShareOf = function (model, f, basis) {
     const s = model.facStats(f.id, basis); if (!s) return null;
     const vol = f.T.hub ? s.inn + s.out : s.inn, m = f.T.hub ? s.innM + s.outM : s.innM;
@@ -480,7 +565,7 @@
   Tasks.prototype.evaluate = function (t, g) {
     const C = g.compiled, model = g.model, acc = model.net ? model.net.acc : null;
     if (t.type === 'connect') {
-      const comp = stationComponents(C, acc);
+      const comp = t.avoid ? componentsAvoiding(C, acc, t.avoid) : stationComponents(C, acc);
       const anchorSets = t.anchors.map(function (a) {
         const set = [];
         C.stations.forEach(function (s, i) { if (C.serviced[i] && U.dist(s.x, s.y, a.x, a.y) <= a.r) set.push(i); });
@@ -493,15 +578,15 @@
         for (const r of roots[0]) if (roots.every(function (S) { return S.has(r); })) { ok = true; break; }
       }
       const n = hits.filter(Boolean).length;
-      return { ok: ok, value: ok ? 1 : n / (t.anchors.length + 1), text: t.anchors.map(function (a, i) { return (hits[i] ? '✓ ' : '✗ ') + a.name; }).join('；') + (hits.every(Boolean) && !ok ? '（车站尚未连通）' : '') };
+      return { ok: ok, value: ok ? 1 : n / (t.anchors.length + 1), text: t.anchors.map(function (a, i) { return (hits[i] ? '✓ ' : '✗ ') + a.name; }).join('；') + (hits.every(Boolean) && !ok ? (t.avoid ? '（目前只能经过' + t.avoid.name + '才连得上）' : '（车站尚未连通）') : '') + (t.avoid && ok ? ' · 不经' + t.avoid.name : '') };
     }
     if (t.type === 'coverage') {
       const v = acc ? acc.coverage : 0;
       return { ok: v >= t.target, value: v / t.target, text: '当前覆盖 ' + U.fmtPct(v) + ' / 目标 ' + U.fmtPct(t.target, 0) };
     }
     if (t.type === 'zoneCong' && t.metric==='carShare') {
-      const v=model.zoneTraffic(t.zone).carShare;
-      return{ok:v<=t.target,value:U.clamp((t.start-v)/Math.max(.001,t.start-t.target),0,1),text:'片区工作日早高峰汽车出行占比 '+U.fmtPct(v,1)+' / 目标 ≤ '+U.fmtPct(t.target,1),sample:v};
+      const v=model.zoneTraffic(t.zone).carShare,cheap=Tasks.fareCheap(t,g);
+      return{ok:v<=t.target&&!cheap,cheap,value:U.clamp((t.start-v)/Math.max(.001,t.start-t.target),0,1),text:'片区工作日早高峰汽车出行占比 '+U.fmtPct(v,1)+' / 目标 ≤ '+U.fmtPct(t.target,1)+(cheap?'（票价低于任务发布时，本月不计）':''),sample:v};
     }
     if (t.type === 'zoneCong') {
       const v = g.zoneCong(t.zone, 'wd');
@@ -530,14 +615,360 @@
       if (!f || model.facIndex(t.fac) < 0) return { ok: false, value: 0, text: '设施目前不在运营' };
       const r = Tasks.facShareOf(model, f, t.basis);
       if (!r) return { ok: false, value: 0, text: '客流计算中' };
-      return { ok: r.share >= t.target, value: U.clamp(r.share / t.target, 0, 1), text: (t.basis === 'we' ? '周末' : (t.basis === 'wd' ? '工作日' : '周平均')) + '乘地铁' + (f.T.hub ? '接驳' : '到访') + '比例 ' + U.fmtPct(r.share, 0) + ' / 目标 ' + U.fmtPct(t.target, 0) };
+      const cheap = Tasks.fareCheap(t, g);
+      return { ok: r.share >= t.target && !cheap, cheap: cheap, value: U.clamp(r.share / t.target, 0, 1), text: (t.kind ? f.name + ' ' : '') + (t.basis === 'we' ? '周末' : (t.basis === 'wd' ? '工作日' : '周平均')) + '乘地铁' + (f.T.hub ? '接驳' : '到访') + '比例 ' + U.fmtPct(r.share, 0) + ' / 目标 ' + U.fmtPct(t.target, 0) + (cheap ? '（票价低于任务发布时，本月不计）' : '') };
     }
     if (t.type === 'recovery') {
+      // 票款与车站商业收入（v2.3 起计入 TOD 收入）÷ 运营费用
       const last = g.econ.ledger[g.econ.ledger.length - 1];
-      const v = last && last.ops > 0 ? last.fare / last.ops : 0;
-      return { ok: v >= t.target, value: v / t.target, text: '上月票款/运营费用 ' + U.fmtPct(v, 0) + ' / 目标 ' + U.fmtPct(t.target, 0) + (t.sustain ? '（需连续 ' + t.sustain + ' 个月，已 ' + (t.streak || 0) + ' 个月）' : '') };
+      const v = Tasks.recoveryOf(last);
+      return { ok: v >= t.target, value: v / t.target, text: '上月（票款 + 车站商业）/ 运营费用 ' + U.fmtPct(v, 0) + ' / 目标 ' + U.fmtPct(t.target, 0) + (t.sustain ? '（需连续 ' + t.sustain + ' 个月，已 ' + (t.streak || 0) + ' 个月）' : '') };
     }
-    return { ok: false, value: 0, text: '' };
+    // ---- v2.3 可选挑战与城市策略难题 ----
+    if (t.type === 'budgetConnect') {
+      const c = this.evaluate(Object.assign({}, t, { type: 'connect' }), g), spent = Math.max(0, (g.econ.built || 0) - (t.spent0 || 0)), over = spent > t.budget + 0.5;
+      return { ok: c.ok && !over, dead: over, value: over ? 0 : c.value, text: c.text + ' · 已花 ' + U.fmtMoney(spent) + ' / 预算 ' + U.fmtMoney(t.budget) + (over ? '（已超预算）' : '') };
+    }
+    if (t.type === 'lineCrowd') {
+      const L = g.net.lines[t.line]; if (!L) return { ok: false, dead: true, value: 0, text: '线路已拆除' };
+      const cr = Tasks.crowdOf(g).find(function (x) { return x.lid === t.line; });
+      if (!cr) return { ok: false, value: 0, text: '客流计算中' };
+      const S = g.model.net.C.stations, sa = S[cr.a], sb = S[cr.b];
+      return { ok: cr.lf <= t.target, value: U.clamp((t.start - cr.lf) / Math.max(0.01, t.start - t.target), 0, 1), text: L.name + ' 最拥挤区段' + (sa && sb ? '「' + sa.name + '—' + sb.name + '」' : '') + '早高峰满载率 ' + U.fmtPct(cr.lf, 0) + ' / 目标 ≤ ' + U.fmtPct(t.target, 0) };
+    }
+    if (t.type === 'lineCars') {
+      const L = g.net.lines[t.line]; if (!L) return { ok: false, dead: true, value: 0, text: '线路已拆除' };
+      const rs = C.routes.filter(function (r) { return r.lineId === t.line; }); if (!rs.length) return { ok: false, value: 0, text: '线路未运营' };
+      const cars = Math.min.apply(null, rs.map(function (r) { return r.cars; }));
+      return { ok: cars >= t.target, value: U.clamp((cars - t.start) / Math.max(1, t.target - t.start), 0, 1), text: L.name + ' 列车编组 ' + cars + ' 节 / 目标 ' + t.target + ' 节（受沿线最小车站限制）' };
+    }
+    if (t.type === 'fiscal') {
+      const last = g.econ.ledger[g.econ.ledger.length - 1], v = last && last.ops > 0 ? last.fare / last.ops : 0;
+      const km = CM.Milestones ? CM.Milestones.netInfo(g).km : 0, over = km > t.kmCap + 0.05;
+      return { ok: v >= t.target && !over, value: over ? 0 : U.clamp(v / t.target, 0, 1), text: '上月票款/运营费用 ' + U.fmtPct(v, 0) + ' / 目标 ' + U.fmtPct(t.target, 0) + ' · 线网 ' + U.fmtNum(km, 1) + ' km / 上限 ' + U.fmtNum(t.kmCap, 1) + ' km' + (over ? '（超出里程上限，本月不计）' : '') };
+    }
+    if (t.type === 'lineEff') {
+      const L = g.net.lines[t.line]; if (!L) return { ok: false, dead: true, value: 0, text: '线路已拆除' };
+      const s = Tasks.lineStats(g).get(t.line); if (!s) return { ok: false, value: 0, text: '客流计算中' };
+      const v = s.riders / Math.max(0.1, s.km);
+      return { ok: v >= t.target, value: U.clamp((v - t.start) / Math.max(1, t.target - t.start), 0, 1), text: L.name + ' 每公里日客流 ' + U.fmtPeople(v) + ' 人次 / 目标 ' + U.fmtPeople(t.target) + ' 人次' };
+    }
+    if (t.type === 'regionCov') {
+      const v = Tasks.regionCoverage(g, t.regions);
+      return { ok: v >= t.target, value: U.clamp(v / t.target, 0, 1), text: (t.areaName || '目标片区') + '步行 15 分钟可达地铁的人口 ' + U.fmtPct(v, 0) + ' / 目标 ' + U.fmtPct(t.target, 0) };
+    }
+    if (t.type === 'xferHub') {
+      let n = 0; if (C.stationLines) C.stationLines.forEach(function (s) { if (s.size >= 2) n++; });
+      return { ok: n >= t.target, value: U.clamp(n / t.target, 0, 1), text: '换乘站 ' + n + ' 座 / 目标 ' + t.target + ' 座' };
+    }
+    const done = this.evaluatePart(t, g);
+    return done || { ok: false, value: 0, text: '' };
+  };
+  // ======================== 复合任务 ========================
+  // 一个任务同时考核几方面（Tasks.PART_KIND）。parts 的每一项都是一个条件（type 可以是上面任何一种单项任务，也可以是下面的新判定）；
+  // 全部达成才算完成。core 项（原任务的目标）是主体：到期时主体已达成、其余未达成，算「部分完成」：奖励打折，不扣拨款。
+  // 各城市的方案在 taskplans.js，按任务编号套用；已经发布的旧任务（含旧存档）保持原样
+  Tasks.PART_KIND = { net: '网络形态', reach: '覆盖范围', ops: '运营结果', fin: '成本收益', dev: '发展效果' };
+  Tasks.PARTIAL = 0.6;   // 部分完成的奖励比例；满奖励是原任务的 1.5 倍，只完成主体也比原来只差一点
+  const TRAFFIC_PART = { ridership: 1, facShare: 1, share: 1, lineRiders: 1, lineLoad: 1, netLoad: 1, regionShare: 1, regionCommute: 1, xferShare: 1, todNet: 1, regionPull: 1, lineCrowd: 1, lineEff: 1, zoneCong: 1, stationCrowd: 1 };
+  Tasks.trafficCombo = function (t) { return t.type === 'combo' && t.parts.some(function (p) { return TRAFFIC_PART[p.type]; }); };
+  // 地名 → 位置：任务自己的锚点、地名表、其他任务的同名锚点
+  Tasks.placeOf = function (name, own) {
+    for (const a of own || []) if (a && a.name === name && isFinite(a.x)) return a;
+    const p = (D.places || []).find(function (q) { return q[0] === name; });
+    if (p) return { name: name, x: p[1], y: p[2] };
+    for (const t of (D.histTasks || []).concat(D.dynTasks || [], D.scenarios || [])) for (const a of t.anchors || []) if (a && a.name === name && isFinite(a.x)) return a;
+    return null;
+  };
+  // 套用城市方案：原任务的目标成为主体，附加方案里的条件
+  Tasks.withPlan = function (g, h) {
+    const P = CM.TaskPlans && CM.TaskPlans[g.mapId], plan = P && P[h.id];
+    if (!plan || h.type === 'combo') return h;
+    const t = JSON.parse(JSON.stringify(h)), own = (h.anchors || []).filter(function (a) { return !Array.isArray(a); });
+    const scAnchors = (h.anchors || []).filter(Array.isArray).map(function (a) { const q = Tasks.placeOf(a[0]); return q ? { name: a[0], x: q.x, y: q.y, r: a[1] || 3 } : null; }).filter(Boolean);
+    const place = function (o) {
+      if (o.at === undefined) return o;
+      const q = Tasks.placeOf(o.at, own.concat(scAnchors));
+      if (!q) { console.warn('任务方案找不到地点：' + o.at); return null; }
+      o.x = q.x; o.y = q.y; o.place = o.at; return o;
+    };
+    const type0 = h.type === 'budgetConnect' ? 'connect' : h.type, base = Object.assign({ core: true, type: plan.base || type0, kind: plan.baseKind || (type0 === 'coverage' || type0 === 'regionCov' ? 'reach' : 'net') }, JSON.parse(JSON.stringify(plan.baseProps || {})));
+    for (const k of ['target', 'regions', 'areaName', 'line', 'start']) if (h[k] !== undefined && base[k] === undefined) base[k] = h[k];
+    if (plan.avoid) { const q = Tasks.placeOf(plan.avoid[0], own.concat(scAnchors)); if (q) base.avoid = { name: plan.avoid[0], x: q.x, y: q.y, r: plan.avoid[1] }; else console.warn('任务方案找不到地点：' + plan.avoid[0]); }
+    if (base.at !== undefined) place(base);
+    const parts = [base];
+    if (h.type === 'budgetConnect') parts.push({ kind: 'fin', type: 'budget', budgetX: h.budgetX || 1.2 });
+    for (const p of JSON.parse(JSON.stringify(plan.parts || []))) { const q = place(p); if (q) parts.push(q); }
+    t.type = 'combo'; t.parts = parts;
+    if (plan.desc) t.desc = plan.desc;
+    if (plan.tips) t.tips = plan.tips;
+    if (plan.sustain) t.sustain = plan.sustain;
+    const X = plan.rewardX || (plan.parts && plan.parts.length ? 1.5 : 1);
+    if (t.reward) t.reward *= X;
+    if (t.rewardMonths) t.rewardMonths *= X;
+    return t;
+  };
+  // 发布（或接受）时记下基准：预算、物价年份、人口岗位、票价
+  Tasks.prepare = function (t, g) {
+    if (t.type !== 'combo') return t;
+    const anchors = t.anchors || [], ready = g.model.trafficReady();
+    for (const p of t.parts) {
+      if (p.base0 == null && ready && (p.gain || p.drop)) {
+        const v = Tasks.partValue(p, g);
+        if (v != null) { p.base0 = v; p.target = p.gain ? v + p.gain : v * (1 - p.drop); }
+      }
+      if (p.type === 'budget') { if (p.spent0 == null) p.spent0 = g.econ.built || 0; if (p.budget == null) p.budget = Math.round(Tasks.estimateLink(g, anchors) * (p.budgetX || 1.2) / 1000) * 1000; }
+      else if (p.type === 'lineCost') { if (p.y0 == null) p.y0 = g.clock.y; if (p.budget == null) p.budget = Math.round(Tasks.estimateLink(g, anchors) * (p.x || 1) / 1000) * 1000; }
+      else if (p.type === 'facShare') { if (p.fare0 == null) p.fare0 = Tasks.fareLevel(g.econ.fare); const f = CM.Fac && CM.Fac.byId(p.fac); if (f && !p.basis) p.basis = Tasks.facBasis(f); }
+    }
+    return t;
+  };
+  // 相对目标用到的当前值：全市分担率、片区乘地铁比例、片区平均通勤
+  Tasks.partValue = function (p, g) {
+    const model = g.model;
+    if (p.type === 'share') return (model.daily && model.daily.metroShare) || 0;
+    if (p.type === 'regionShare') {
+      const fd = model.facData('wd'); if (!fd) return null;
+      const w = zoneWeights(g, p.regions); let a = 0, b = 0;
+      for (let z = 0; z < model.Z; z++) { a += fd.metro[z] * w[z]; b += fd.trips[z] * w[z]; }
+      return b > 0 ? a / b : 0;
+    }
+    if (p.type === 'regionCommute') {
+      const P = model.resultsFor('wd').per[0], w = zoneWeights(g, p.regions); let a = 0, b = 0;
+      if (P.zCW) for (let z = 0; z < model.Z; z++) { a += P.zCT[z] * w[z]; b += P.zCW[z] * w[z]; }
+      return b > 0 ? a / b : null;
+    }
+    return null;
+  };
+  // 经过 anchors 各处的路线：优先全部经过，否则取经过最多的；i0、i1 是最靠外两处在路线上的位置
+  Tasks.routeThrough = function (g, anchors) {
+    const C = g.compiled; let best = null, bn = -1;
+    for (const r of C.routes) {
+      if (r.svc) continue;
+      let n = 0;
+      for (const a of anchors) if (r.stIdx.some(function (i) { const s = C.stations[i]; return U.dist(s.x, s.y, a.x, a.y) <= a.r; })) n++;
+      if (n > bn) { bn = n; best = r; }
+    }
+    if (!best) return { route: null, n: 0, all: false };
+    let i0 = Infinity, i1 = -1;
+    for (const a of anchors) best.stIdx.forEach(function (i, k) { const s = C.stations[i]; if (U.dist(s.x, s.y, a.x, a.y) <= a.r) { i0 = Math.min(i0, k); i1 = Math.max(i1, k); } });
+    return { route: best, n: bn, all: bn === anchors.length, i0: i0, i1: i1 };
+  };
+  const inRegions = function (g, ids) { const city = g.city, set = new Set(ids); return function (x, y) { const rg = city.regionAt(x, y); return !!rg && set.has(rg.id); }; };
+  // 交通小区落在指定片区内的比例（小区可能跨片区）
+  const zoneWeights = function (g, ids) {
+    const m = g.model, city = g.city, key = ids.join(','), cache = m._zoneW || (m._zoneW = new Map());
+    if (cache.has(key)) return cache.get(key);
+    const ks = new Set(); city.regions.forEach(function (r, k) { if (ids.indexOf(r.id) >= 0) ks.add(k); });
+    const w = new Float32Array(m.Z);
+    for (let z = 0; z < m.Z; z++) { const cells = m.zoneCells[z]; if (!cells || !cells.length) continue; let n = 0; for (const c of cells) if (ks.has(city.region[c])) n++; w[z] = n / cells.length; }
+    cache.set(key, w);
+    return w;
+  };
+  // 已开发的车站商业：座数与每月净收益（ids 为空时统计全网）
+  Tasks.todStats = function (g, ids) {
+    const C = g.model.net ? g.model.net.C : null, sd = g.model.stDaily, T = CM.TOD, y = g.clock.y, inside = ids ? inRegions(g, ids) : null;
+    let n = 0, net = 0;
+    if (!C || !T) return { n: 0, net: 0 };
+    for (const id in g.net.stations) {
+      const s = g.net.stations[id], lv = s.tod || 0, k = C.sIndex.get(id);
+      if (!lv || k === undefined || !C.serviced[k] || (inside && !inside(s.x, s.y))) continue;
+      const flow = sd && k < sd.inn.length ? sd.inn[k] + sd.out[k] + sd.xfer[k] : 0, hub = !!(C.stationLines[k] && C.stationLines[k].size >= 2);
+      n++; net += (T.stationDaily(lv, flow, hub, y, g) - T.stationCost(lv, y, s.size, hub)) * 30.4;
+    }
+    return { n: n, net: net };
+  };
+  const pointInPoly = function (x, y, pts) {
+    let inside = false;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const a = pts[i], b = pts[j]; if ((a.y > y) !== (b.y > y) && x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x) inside = !inside; }
+    return inside;
+  };
+  Tasks.prototype.evaluatePart = function (t, g) {
+    const C = g.compiled, model = g.model, acc = model.net ? model.net.acc : null, M = CM.Metro, self = this, pct = function (v, d) { return U.fmtPct(v, d == null ? 0 : d); };
+    const atMost = function (v, target) { return U.clamp(target / Math.max(v, 1e-6), 0, 1); };
+    switch (t.type) {
+      case 'combo': {
+        const hasCore = t.parts.some(function (p) { return p.core; });
+        const parts = t.parts.map(function (p, i) {
+          const r = self.evaluate(p.anchors ? p : Object.assign({ anchors: t.anchors }, p), g);
+          return { kind: p.kind || 'net', core: !!p.core || (!hasCore && i === 0), ok: !!r.ok, value: r.ok ? 1 : U.clamp(r.value || 0, 0, 1), text: r.text, dead: !!r.dead };
+        });
+        return { ok: parts.every(function (p) { return p.ok; }), coreOk: parts.every(function (p) { return !p.core || p.ok; }), dead: parts.some(function (p) { return p.core && p.dead; }), value: parts.reduce(function (s, p) { return s + p.value; }, 0) / parts.length, parts: parts,
+          text: parts.map(function (p) { return (p.ok ? '✓ ' : '✗ ') + p.text; }).join('；') };
+      }
+      // ---- 网络形态 ----
+      case 'direct': {   // 各处由同一条线直达，不用换乘
+        const rt = Tasks.routeThrough(g, t.anchors), names = t.anchors.map(function (a) { return a.name; }).join('、');
+        return { ok: rt.all, value: rt.n / (t.anchors.length + 1), text: '同一条线直达：' + names + (rt.all ? '（' + rt.route.line.name + '）' : rt.n > 1 ? '（同一条线上已有 ' + rt.n + ' 处）' : '') };
+      }
+      case 'loop': {   // 环线：环绕 around、足够长，并串起一头在环内、一头在环外的放射线
+        let best = null;
+        for (const r of C.routes) {
+          if (!r.loop || r.svc) continue;
+          const poly = r.stIdx.map(function (i) { return C.stations[i]; }), others = new Set(), onRing = new Set(r.stIdx);
+          for (const i of r.stIdx) C.stationLines[i].forEach(function (l) { if (l !== r.lineId) others.add(l); });
+          if (acc) for (const tr of acc.transfers) if (onRing.has(tr.a) && C.stationLines[tr.b]) C.stationLines[tr.b].forEach(function (l) { if (l !== r.lineId) others.add(l); });
+          let radials = 0;
+          others.forEach(function (l) {
+            let inn = false, out = false;
+            for (const q of C.routes) if (q.lineId === l && !q.svc) for (const k of q.stIdx) { if (onRing.has(k)) continue; if (pointInPoly(C.stations[k].x, C.stations[k].y, poly)) inn = true; else out = true; }
+            if (inn && out) radials++;
+          });
+          const km = r.lenM / 1000, around = t.x == null || pointInPoly(t.x, t.y, poly), score = Math.min(1, km / t.minKm) * 0.4 + Math.min(1, radials / t.minRadials) * 0.4 + (around ? 0.2 : 0);
+          if (!best || score > best.score) best = { km: km, around: around, radials: radials, score: score, name: r.line.name };
+        }
+        if (!best) return { ok: false, value: 0, text: '还没有环线（目标：' + t.minKm + ' km 以上，环绕' + (t.label || t.place) + '，串起 ' + t.minRadials + ' 条放射线）' };
+        return { ok: best.km >= t.minKm && best.around && best.radials >= t.minRadials, value: best.score, text: best.name + ' 环长 ' + U.fmtNum(best.km, 1) + ' km / 目标 ' + t.minKm + ' km · ' + (best.around ? '环绕' : '未环绕') + (t.label || t.place) + ' · 串起放射线 ' + best.radials + ' 条 / 目标 ' + t.minRadials + ' 条' };
+      }
+      case 'hub': {   // 某处的车站有几条线路交汇
+        let n = 0;
+        C.stations.forEach(function (s, i) { if (C.serviced[i] && U.dist(s.x, s.y, t.x, t.y) <= (t.r || 3)) n = Math.max(n, C.stationLines[i] ? C.stationLines[i].size : 0); });
+        return { ok: n >= t.lines, value: n / t.lines, text: t.place + '换乘线路 ' + n + ' 条 / 目标 ' + t.lines + ' 条' };
+      }
+      case 'cross': {   // 跨越水面的轨道段数（共线只算一次）
+        const seen = new Set(); let n = 0;
+        C.segs.forEach(function (cs) { if (cs.g.waterM >= (t.minM || 100)) { const k = M.trackKey(cs.seg); if (!seen.has(k)) { seen.add(k); n++; } } });
+        return { ok: n >= t.target, value: n / t.target, text: (t.label || '跨水轨道') + ' ' + n + ' 段 / 目标 ' + t.target + ' 段' };
+      }
+      case 'typeKm': {   // 某种建设方式的线路长度（共线只算一次）
+        const seen = new Set(), types = [].concat(t.seg); let km = 0;
+        C.segs.forEach(function (cs) { if (types.indexOf(cs.seg.type) >= 0) { const k = M.trackKey(cs.seg); if (!seen.has(k)) { seen.add(k); km += cs.g.lenM / 1000; } } });
+        return { ok: km >= t.target, value: km / t.target, text: types.map(function (x) { return CFG.metro.typeName[x]; }).join('或') + '线路 ' + U.fmtNum(km, 1) + ' km / 目标 ' + t.target + ' km' };
+      }
+      case 'spacing': {   // 平均站距：anchors 所在的线路，或片区内的全部区段
+        let avg = 0, label = '';
+        if (t.regions) {
+          const inside = inRegions(g, t.regions); let len = 0, n = 0;
+          C.segs.forEach(function (cs) { const a = C.net.stations[cs.seg.a], b = C.net.stations[cs.seg.b]; if (a && b && inside(a.x, a.y) && inside(b.x, b.y)) { len += cs.g.lenM; n++; } });
+          if (!n) return { ok: false, value: 0, text: (t.areaName || '片区') + '内还没有轨道（平均站距目标 ≤ ' + t.max + ' m）' };
+          avg = len / n; label = t.areaName + '平均站距 ';
+        } else {
+          const rt = Tasks.routeThrough(g, t.anchors);
+          if (!rt.all || rt.route.stIdx.length < 2) return { ok: false, value: 0, text: '线路建成后计算平均站距（目标 ' + (t.max ? '≤ ' + t.max : '≥ ' + t.min) + ' m）' };
+          avg = rt.route.lenM / (rt.route.stIdx.length - (rt.route.loop ? 0 : 1)); label = rt.route.line.name + ' 平均站距 ';
+        }
+        const okMax = !t.max || avg <= t.max, okMin = !t.min || avg >= t.min;
+        return { ok: okMax && okMin, value: okMax && okMin ? 1 : t.max ? atMost(avg, t.max) : U.clamp(avg / t.min, 0, 1), text: label + Math.round(avg) + ' m / 目标 ' + (t.max ? '≤ ' + t.max : '≥ ' + t.min) + ' m' };
+      }
+      case 'lineSpeed': {
+        const rt = Tasks.routeThrough(g, t.anchors);
+        if (!rt.all) return { ok: false, value: 0, text: '线路建成后检查运行速度（目标 ≥ ' + t.kmh + ' km/h）' };
+        return { ok: rt.route.kmh >= t.kmh, value: rt.route.kmh / t.kmh, text: rt.route.line.name + ' 运行速度 ' + rt.route.kmh + ' km/h / 目标 ≥ ' + t.kmh + ' km/h' };
+      }
+      case 'lineTrain': {   // 列车编组：目标下限（重铁）或上限（中运量）
+        const rt = Tasks.routeThrough(g, t.anchors);
+        if (!rt.all) return { ok: false, value: 0, text: '线路建成后检查列车编组（目标 ' + (t.max ? '不超过 ' + t.max : '不少于 ' + t.min) + ' 节）' };
+        const cars = rt.route.cars, ok = (!t.min || cars >= t.min) && (!t.max || cars <= t.max);
+        return { ok: ok, value: ok ? 1 : t.min ? cars / t.min : atMost(cars, t.max), text: rt.route.line.name + ' 列车 ' + cars + ' 节 / 目标 ' + (t.max ? '≤ ' + t.max : '≥ ' + t.min) + ' 节' };
+      }
+      case 'noStation': {   // 片区内不能有运营车站
+        const inside = inRegions(g, t.regions); let n = 0;
+        C.stations.forEach(function (s, i) { if (C.serviced[i] && inside(s.x, s.y)) n++; });
+        return { ok: n === 0, value: n ? 0 : 1, text: t.areaName + '内的车站 ' + n + ' 座 / 目标 0 座' };
+      }
+      case 'coTrack': {   // 共线运营（直通运转）的轨道长度
+        const seen = new Set(); let km = 0;
+        C.segs.forEach(function (cs) { if (cs.coLines) { const k = M.trackKey(cs.seg); if (!seen.has(k)) { seen.add(k); km += cs.g.lenM / 1000; } } });
+        return { ok: km >= t.target, value: km / t.target, text: '共线直通的轨道 ' + U.fmtNum(km, 1) + ' km / 目标 ' + t.target + ' km' };
+      }
+      // ---- 运营结果 ----
+      case 'share': {
+        const v = Tasks.partValue(t, g) || 0;
+        if (t.target == null) return { ok: false, value: 0, text: '客流计算中' };
+        return { ok: v >= t.target, value: t.base0 != null ? U.clamp((v - t.base0) / Math.max(0.001, t.target - t.base0), 0, 1) : v / t.target, text: '全市地铁分担率 ' + pct(v, 1) + ' / 目标 ' + pct(t.target, 1) + (t.base0 != null ? '（发布时 ' + pct(t.base0, 1) + '）' : '') };
+      }
+      case 'lineRiders': {   // 经过 anchors 的线路每公里日客流
+        const rt = Tasks.routeThrough(g, t.anchors);
+        if (!rt.all) return { ok: false, value: 0, text: '线路建成后统计客流（目标每公里 ' + U.fmtPeople(t.perKm) + ' 人次/日）' };
+        const s = Tasks.lineStats(g).get(rt.route.lineId);
+        if (!s) return { ok: false, value: 0, text: '客流计算中' };
+        const v = s.riders / Math.max(0.1, s.km);
+        return { ok: v >= t.perKm, value: v / t.perKm, text: rt.route.line.name + ' 每公里日客流 ' + U.fmtPeople(v) + ' 人次 / 目标 ' + U.fmtPeople(t.perKm) + ' 人次' };
+      }
+      case 'lineLoad': {   // 经过 anchors 的线路最拥挤区段的早高峰满载率
+        const rt = Tasks.routeThrough(g, t.anchors);
+        if (!rt.all) return { ok: false, value: 0, text: '线路建成后统计满载率（目标 ≤ ' + pct(t.target) + '）' };
+        const cr = Tasks.crowdOf(g).find(function (x) { return x.lid === rt.route.lineId; });
+        if (!cr) return { ok: false, value: 0, text: '客流计算中' };
+        return { ok: cr.lf <= t.target, value: atMost(cr.lf, t.target), text: rt.route.line.name + ' 早高峰最高满载率 ' + pct(cr.lf) + ' / 目标 ≤ ' + pct(t.target) };
+      }
+      case 'netLoad': {   // 全网最拥挤区段的早高峰满载率
+        const cr = Tasks.crowdOf(g)[0];
+        if (!cr) return { ok: false, value: 0, text: '客流计算中' };
+        return { ok: cr.lf <= t.target, value: atMost(cr.lf, t.target), text: '全网早高峰最高满载率 ' + pct(cr.lf) + ' / 目标 ≤ ' + pct(t.target) };
+      }
+      case 'regionShare': {   // 片区居民的出行乘地铁的比例（工作日全天）
+        const v = Tasks.partValue(t, g);
+        if (v == null || t.target == null) return { ok: false, value: 0, text: '客流计算中' };
+        return { ok: v >= t.target, value: t.base0 != null ? U.clamp((v - t.base0) / Math.max(0.001, t.target - t.base0), 0, 1) : v / t.target, text: t.areaName + '居民出行乘地铁 ' + pct(v, 1) + ' / 目标 ' + pct(t.target, 1) + (t.base0 != null ? '（发布时 ' + pct(t.base0, 1) + '）' : '') };
+      }
+      case 'regionCommute': {   // 住在片区的人平均通勤时间（工作日早高峰，门到门）
+        const v = Tasks.partValue(t, g);
+        if (v == null || t.target == null) return { ok: false, value: 0, text: '客流计算中' };
+        return { ok: v <= t.target, value: t.base0 != null ? U.clamp((t.base0 - v) / Math.max(0.01, t.base0 - t.target), 0, 1) : atMost(v, t.target), text: t.areaName + '居民平均通勤 ' + U.fmtNum(v, 1) + ' 分钟 / 目标 ≤ ' + U.fmtNum(t.target, 1) + ' 分钟' + (t.base0 != null ? '（发布时 ' + U.fmtNum(t.base0, 1) + ' 分钟）' : '') };
+      }
+      case 'xferShare': {   // 全网换乘客流里，发生在指定片区的比例（越低说明换乘越分散）
+        const sd = model.stDaily, MC = model.net ? model.net.C : null;
+        if (!sd || !MC || model.dailyStale) return { ok: false, value: 0, text: '客流计算中' };
+        const inside = inRegions(g, t.regions); let a = 0, b = 0;
+        MC.stations.forEach(function (s, i) { const v = sd.xfer[i] || 0; b += v; if (inside(s.x, s.y)) a += v; });
+        if (b <= 0) return { ok: false, value: 0, text: '还没有换乘客流' };
+        const v = a / b;
+        return { ok: v <= t.target, value: atMost(v, t.target), text: '换乘客流在' + t.areaName + '的比例 ' + pct(v) + ' / 目标 ≤ ' + pct(t.target) };
+      }
+      // ---- 成本收益 ----
+      case 'budget': {   // 任务发布以来的建设支出
+        const spent = Math.max(0, (g.econ.built || 0) - (t.spent0 || 0)), over = spent > t.budget + 0.5;
+        return { ok: !over, dead: over, value: over ? 0 : 1, text: '已花 ' + U.fmtMoney(spent) + ' / 预算 ' + U.fmtMoney(t.budget) + (over ? '（已超预算）' : '') };
+      }
+      case 'lineCost': {   // 这段线路（anchors 之间）按发布当年物价的造价：改用高架、取直、少设站都能省钱，改建后重新计算
+        const rt = Tasks.routeThrough(g, t.anchors);
+        if (!rt.all) return { ok: false, value: 0, text: '线路建成后核算造价（目标 ≤ ' + U.fmtMoney(t.budget) + '）' };
+        const r = rt.route, y = t.y0 || g.clock.y; let v = 0;
+        for (let k = rt.i0; k <= rt.i1; k++) { const st = C.stations[r.stIdx[k]]; if (st) v += M.stationCost(st.type, st.size, y); if (k < rt.i1) for (const ref of r.legSegs[k] || []) { const cs = C.segs.get(ref.id); if (cs) v += M.trackCost(cs.g, cs.seg.type, y); } }
+        return { ok: v <= t.budget, value: atMost(v, t.budget), text: '这段线路造价 ' + U.fmtMoney(v) + ' / 目标 ≤ ' + U.fmtMoney(t.budget) };
+      }
+      case 'todNet': {   // 车站商业（站城开发）：座数与每月净收益
+        const s = Tasks.todStats(g, t.regions), okN = s.n >= (t.stations || 1), okV = s.net > (t.net || 0);
+        return { ok: okN && okV, value: (Math.min(1, s.n / (t.stations || 1)) + (okV ? 1 : 0)) / 2, text: (t.areaName || '全网') + '站城开发 ' + s.n + ' 座 / 目标 ' + (t.stations || 1) + ' 座 · 每月净收益 ' + (s.net < 0 ? '−' : '') + U.fmtMoney(Math.abs(s.net)) + (t.net ? ' / 目标 ≥ ' + U.fmtMoney(t.net) : '（需为正）') };
+      }
+      // ---- 发展效果 ----
+      case 'regionPull': {   // 片区内带动较强的车站（与地图上「地铁带动」的标注同一标准：换乘、客流和商业开发都能提高）。自然增长不修地铁也会涨，不作为考核
+        const P = g.metroPull ? g.metroPull() : null, inside = inRegions(g, t.regions); let n = 0;
+        if (P) for (const s of P.all) if (s.k * P.w >= 0.45 && inside(s.x, s.y)) n++;
+        return { ok: n >= t.target, value: n / t.target, text: t.areaName + '带动较强的车站 ' + n + ' 座 / 目标 ' + t.target + ' 座' };
+      }
+    }
+    return null;
+  };
+  // 工作日早高峰各线路最拥挤的区段（满载率 = 区间断面客流 ÷ 线路运力），按满载率从高到低
+  Tasks.crowdOf = function (g) {
+    const m = g.model, net = m.net; if (!net || !net.R || !m.trafficReady()) return [];
+    const P = m.resultsFor('wd').per[0], out = new Map();
+    for (let r = 0; r < net.R; r++) {
+      const rt = net.C.routes[r], re = net.rideEdge[r], capT = m.capOf(r, net);   // v2.5：定员按车队，环线两个方向的频率分别计
+      for (let q = 0; q < re.length; q++) {
+        const lf = P.load[re[q]] / Math.max(1, CM.Model.dirFreq(P, net, r, q) * capT), cur = out.get(rt.lineId);
+        if (!cur || lf > cur.lf) { const k = q >> 1; out.set(rt.lineId, { lid: rt.lineId, lf: lf, a: rt.stIdx[k], b: rt.stIdx[(k + 1) % rt.stIdx.length], cars: rt.cars }); }
+      }
+    }
+    return Array.from(out.values()).sort(function (x, y) { return y.lf - x.lf; });
+  };
+  // 各线路的日客流（周平均上车人次）与线路长度
+  Tasks.lineStats = function (g) {
+    const m = g.model, sd = m.stDaily, out = new Map();
+    if (!sd || !sd.routeBoard || !m.net || m.dailyStale) return out;
+    m.net.C.routes.forEach(function (rt, r) { const s = out.get(rt.lineId) || { riders: 0, km: 0 }; s.riders += sd.routeBoard[r] || 0; out.set(rt.lineId, s); });
+    g.compiled.segs.forEach(function (cs) { const s = out.get(cs.seg.line); if (s && cs.g) s.km += cs.g.lenM / 1000; });
+    return out;
+  };
+  // 指定片区的人口里，步行 15 分钟可达运营车站的比例
+  Tasks.regionCoverage = function (g, ids) {
+    const city = g.city, acc = g.model.net ? g.model.net.acc : null; if (!acc) return 0;
+    const ks = new Set(); city.regions.forEach(function (r, k) { if (ids.indexOf(r.id) >= 0) ks.add(k); });
+    let tot = 0, cov = 0;
+    for (let c = 0; c < city.N; c++) { if (!ks.has(city.region[c])) continue; const p = city.pop[c]; tot += p; if (acc.cellWalk[c] <= CFG.walk.maxAccessM) cov += p; }
+    return tot > 0 ? cov / tot : 0;
   };
 
   // Review samples belong to this exact input and are never reused after a change.
@@ -571,12 +1002,24 @@
     const floor=t.type==='ridership'?Math.max(1,t.target*.02):((t.type==='stationCrowd'||(t.type==='zoneCong'&&t.metric!=='carShare'))?.03:.005);
     return Math.abs(last-t.target)>Math.max(floor,spread*2);
   };
+  // 正在等结论的交通任务，最近三轮是否都已明显越过门槛（是则不必算满，v2.6）。复合任务没有单一门槛，仍算满
+  Tasks.prototype.reviewsSettled=function(g){
+    let any=false;
+    for(const t of this.active){
+      if(t.type==='combo'&&t.evaluatedYM!==g.ym()&&(t.parts||[]).some(function(p){return p.kind==='ops';}))return false;
+      if(t.evaluatedYM===g.ym()||!['zoneCong','stationCrowd','ridership','facShare'].includes(t.type))continue;
+      if(!this.nearTrafficThreshold(t,g,this.evaluate(t,g)))continue;
+      any=true;if(!this.reviewSafe(t,g))return false;
+    }
+    return any;
+  };
   Tasks.prototype.startTrafficReview=function(t,g){
-    g.model.reviewObserver=()=>this.sampleTrafficReview(g);this.sampleTrafficReview(g);return g.model.requestReview(Tasks.basisOf(t));
+    g.model.reviewObserver=()=>this.sampleTrafficReview(g);g.model.reviewEnough=()=>this.reviewsSettled(g);this.sampleTrafficReview(g);return g.model.requestReview(Tasks.basisOf(t));
   };
 
   Tasks.prototype.nearTrafficThreshold=function(t,g,ev){
-    const ym=g.ym();let near=ev.ok||ev.value>=.9||ym>=U.ymIndex(t.deadline[0],t.deadline[1]);
+    // 只在这个月真要下结论时才复核（达成或到期）：进度到九成但还没达成时不必算到严格收敛，否则任务多的后期几乎每月都要多算 12 轮（v2.6）
+    const ym=g.ym();let near=ev.ok||ym>=U.ymIndex(t.deadline[0],t.deadline[1]);
     if(t.type==='zoneCong'&&t.metric==='carShare'){
       const samples=(t.samples||[]).filter(x=>x.ym>=ym-2&&x.ym<ym).slice(-2),avg=(samples.reduce((n,x)=>n+x.value,0)+ev.sample)/(samples.length+1);
       near=near||avg<=t.target+.005;
@@ -586,7 +1029,7 @@
   Tasks.prototype.prepareTrafficReviews=function(g){
     if(!g.model.trafficReady())return;
     for(const t of this.active)if(t.evaluatedYM!==g.ym()&&['zoneCong','stationCrowd','ridership','facShare'].includes(t.type)){
-      const basis=Tasks.basisOf(t);if(!g.model.trafficVerified(basis)&&this.nearTrafficThreshold(t,g,this.evaluate(t,g)))this.startTrafficReview(t,g);
+      const basis=Tasks.basisOf(t);if(!g.model.trafficVerified(basis)&&this.nearTrafficThreshold(t,g,this.evaluate(t,g))&&!this.reviewSafe(t,g))this.startTrafficReview(t,g);
     }
   };
 
@@ -600,8 +1043,9 @@
       if (ym < U.ymIndex(h.appear[0], h.appear[1])) continue;
       this.issued[h.id] = 1;
       if (ym > U.ymIndex(h.deadline[0], h.deadline[1])) continue;
-      const t = Object.assign({ kind: 'hist', status: 'active', issuedAt: [y, m], streak: 0 }, JSON.parse(JSON.stringify(h)));
-      t.reward = h.reward * g.econ.costIndex(y);
+      const t = Object.assign({ kind: 'hist', status: 'active', issuedAt: [y, m], streak: 0 }, JSON.parse(JSON.stringify(Tasks.withPlan(g, h))));
+      t.reward = t.reward * g.econ.costIndex(y);
+      Tasks.prepare(t, g);
       this.active.push(t);
       out.push({ type: 'issued', task: t });
     }
@@ -612,35 +1056,64 @@
       if (t) { this.active.push(t); out.push({ type: 'issued', task: t }); }
       this.nextDyn = ym + 6;
     }
+    // 可选挑战与城市策略难题（v2.3）：只提出，由玩家决定是否接受
+    for (const o of this.offerMonthly(g)) out.push(o);
     // 评估。交通模型升级过渡期（旧存档升级当月）：未达标时不清零连续月数，到期任务顺延 1 个月，不判失败
     const transit = g.inTransition ? g.inTransition(ym) : false;
     for (const t of this.active.slice()) {
       if(t.evaluatedYM===ym)continue;
+      // 复合条件也可能包含已停用的设施；未来开放的设施不算停用。
+      const retired = function (p) {
+        if (p.type === 'facShare') { const f = CM.Fac && CM.Fac.byId(p.fac); return !f || (f.close != null && g.year() >= f.close); }
+        return p.type === 'combo' && p.parts.some(retired);
+      };
+      if (retired(t)) {
+        t.status = 'withdrawn'; t.closedAt = [y, m]; this.active.splice(this.active.indexOf(t), 1);
+        this.adjusted = (this.adjusted || []).concat([t]).slice(-60);
+        out.push({ type: 'withdrawn', task: t }); continue;
+      }
+      Tasks.prepare(t,g);   // 发布时交通结果还没好的相对目标，在这里补记基准
+      const comboTraffic=Tasks.trafficCombo(t);
+      if(comboTraffic&&!g.model.trafficReady()){
+        if(ym>=U.ymIndex(t.deadline[0],t.deadline[1])){const n=ym+1;t.deadline=[Math.floor(n/12),n%12+1];}
+        g.taskRecheckYM=ym;t.graced='交通结果正在更新，保留进度并顺延到期评估';continue;
+      }
       if(['zoneCong','stationCrowd','ridership','facShare'].includes(t.type)&&!g.model.trafficReady()){
         if(ym>=U.ymIndex(t.deadline[0],t.deadline[1])){const n=ym+1;t.deadline=[Math.floor(n/12),n%12+1];}
         g.taskRecheckYM=ym;t.graced='交通结果正在更新，保留进度并顺延到期评估';continue;
       }
+      if((t.type==='lineCrowd'||t.type==='lineEff')&&!g.model.trafficReady()){
+        if(ym>=U.ymIndex(t.deadline[0],t.deadline[1])){const n=ym+1;t.deadline=[Math.floor(n/12),n%12+1];}
+        g.taskRecheckYM=ym;t.graced='交通结果正在更新，保留进度并顺延到期评估';continue;
+      }
+      if (Tasks.FARE_GATED[t.type] && t.fare0 == null) t.fare0 = Tasks.fareLevel(g.econ.fare);   // 旧存档的进行中任务：以现在的票价为门槛
       const ev = this.evaluate(t, g);
       if(['zoneCong','stationCrowd','ridership','facShare'].includes(t.type)){
         const near=this.nearTrafficThreshold(t,g,ev),basis=Tasks.basisOf(t);
-        if(near&&!g.model.trafficVerified(basis)){
+        if(near&&!g.model.trafficVerified(basis)&&!this.reviewSafe(t,g)){
           this.startTrafficReview(t,g);
           if(!g.model.reviewComplete(basis)){g.taskRecheckYM=ym;t.graced='交通目标正在复核，暂不奖惩';continue;}
           // Strict stability or a clear margin outside recent variation permits a decision.
-          if(!this.reviewSafe(t,g)){
+          // 最多顺延 3 个月：结果一直在门槛附近时按当前结果结算，任务不会无限挂着，也不会每月多算一轮复核
+          if(!this.reviewSafe(t,g)&&(t.graceN=(t.graceN||0)+1)<=3){
             if(ym>=U.ymIndex(t.deadline[0],t.deadline[1])){const n=ym+1;t.deadline=[Math.floor(n/12),n%12+1];}
             t.graced='交通结果仍有波动，保留进度并顺延到期评估';continue;
           }
         }
       }
-      delete t.graced;
+      // 复合任务要结算时先确认交通结果已稳定，不因一时波动拿到奖励或判定未达成
+      if(comboTraffic&&(ev.ok||ym>=U.ymIndex(t.deadline[0],t.deadline[1]))&&!g.model.trafficVerified('avg')){
+        this.startTrafficReview({basis:'avg',type:'ridership'},g);
+        if(!g.model.reviewComplete('avg')){g.taskRecheckYM=ym;t.graced='交通目标正在复核，暂不奖惩';continue;}
+      }
+      delete t.graced;delete t.graceN;
       t.evaluatedYM=ym;
       t.progress = ev;
       let complete = false;
       if(t.type==='zoneCong'&&t.metric==='carShare'){
-        t.samples=t.samples||[];if(!t.samples.length||t.samples[t.samples.length-1].ym!==ym)t.samples.push({ym,value:ev.sample});
-        t.samples=t.samples.filter(x=>x.ym>=ym-2).slice(-3);const average=t.samples.reduce((v,x)=>v+x.value,0)/t.samples.length;
-        ev.ok=t.samples.length>=3&&average<=t.target;ev.text+=' · 近 '+t.samples.length+' 个月平均 '+U.fmtPct(average,1);
+        t.samples=t.samples||[];if(!ev.cheap&&(!t.samples.length||t.samples[t.samples.length-1].ym!==ym))t.samples.push({ym,value:ev.sample});
+        t.samples=t.samples.filter(x=>x.ym>=ym-2).slice(-3);const average=t.samples.length?t.samples.reduce((v,x)=>v+x.value,0)/t.samples.length:ev.sample;
+        ev.ok=!ev.cheap&&t.samples.length>=3&&average<=t.target;ev.text+=' · 近 '+t.samples.length+' 个月平均 '+U.fmtPct(average,1);
         t.streak=t.samples.length;complete=ev.ok;
       }
       if (ev.ok) {
@@ -659,14 +1132,26 @@
         t.status = 'done'; t.closedAt = [y, m];
         this.active.splice(this.active.indexOf(t), 1); this.done.push(t);
         if (challenge) { g.econ.income('reward', t.reward); g.econ.log('reward', t.reward, 'gen', '任务奖励：' + t.title, { y: y, m: m, d: 1 }); g.econ.mods.push({ kind: 'sat', delta: 4, until: ym + 5, reason: '完成任务「' + t.title + '」' }); }
+        if (t.kind === 'opt' && t.coolKey) { this.cool = this.cool || {}; this.cool[t.coolKey] = ym + 36; }
         out.push({ type: 'done', task: t });
-      } else if (ym >= U.ymIndex(t.deadline[0], t.deadline[1])) {
-        t.status = 'failed'; t.closedAt = [y, m];
+      } else if (t.type === 'combo' && ev.coreOk && !ev.dead && ym >= U.ymIndex(t.deadline[0], t.deadline[1])) {
+        // 部分完成：主体目标已达成、其余未达成。按比例给奖励，不扣拨款
+        t.status = 'done'; t.partial = true; t.closedAt = [y, m]; t.reward *= Tasks.PARTIAL;
+        this.active.splice(this.active.indexOf(t), 1); this.done.push(t);
+        if (challenge) { g.econ.income('reward', t.reward); g.econ.log('reward', t.reward, 'gen', '任务奖励（部分完成）：' + t.title, { y: y, m: m, d: 1 }); g.econ.mods.push({ kind: 'sat', delta: 2, until: ym + 5, reason: '部分完成任务「' + t.title + '」' }); }
+        if (t.kind === 'opt' && t.coolKey) { this.cool = this.cool || {}; this.cool[t.coolKey] = ym + 36; }
+        out.push({ type: 'done', task: t });
+      } else if (ym >= U.ymIndex(t.deadline[0], t.deadline[1]) || (t.kind === 'opt' && ev.dead)) {
+        t.status = 'failed'; t.closedAt = [y, m]; if (ev.dead) t.why = ev.text;
         this.active.splice(this.active.indexOf(t), 1); this.failed.push(t);
-        if (challenge) {
-          const E = CFG.economy;
-          g.econ.mods.push({ kind: 'grant', factor: E.failGrantFactor, until: ym + E.failGrantMonths - 1, reason: '任务未完成：' + t.title });
-          g.econ.mods.push({ kind: 'sat', delta: E.failSat, until: ym + E.failGrantMonths - 1, reason: '任务未完成：' + t.title });
+        if (t.kind === 'opt') {
+          // 可选挑战：自己选的目标，未完成只小幅降低满意度，不打折拨款
+          if (challenge) g.econ.mods.push({ kind: 'sat', delta: -2, until: ym + 5, reason: '可选挑战未完成：' + t.title });
+          if (t.coolKey) { this.cool = this.cool || {}; this.cool[t.coolKey] = ym + 24; }
+        } else if (challenge) {
+          const P = Tasks.failPenalty(t);
+          g.econ.mods.push({ kind: 'grant', factor: P.factor, until: ym + P.months - 1, reason: '任务未完成：' + t.title });
+          g.econ.mods.push({ kind: 'sat', delta: P.sat, until: ym + P.months - 1, reason: '任务未完成：' + t.title });
         }
         out.push({ type: 'failed', task: t });
       }
@@ -686,6 +1171,8 @@
     const cool = this.cool || (this.cool = {});
     const active = this.active;
     const free = function (key, type) { return !(cool[key] > ym) && !(cool['type:' + type] > ym) && !active.some(function (t) { return (t.coolKey || t.type) === key; }); };
+    // 线路、车站拥挤类任务（v2.5 玩家反馈：太多）：明显过载才发布，全局冷却 3 年且同时只有一个；日常的过载由地铁芯提醒处理
+    const crowdFree = !(cool.crowd > ym) && !active.some(function (t) { return t.type === 'stationCrowd' || t.type === 'lineCrowd'; });
     const cands = [];
     // 可替代需求不足、尚未有可用地铁服务的片区优先发布覆盖任务。
 
@@ -694,12 +1181,14 @@
     const zoneOpen=function(z){let n=0,o=0;for(const c of model.zoneCells[z]){if(city.landFrac[c]<.5)continue;n++;if(!city.cellLocked(c)&&!city.regions[city.region[c]].scenic)o++;}return n>0&&o>=n/2;};   // 可建设范围按格判断（v2.2）
     if(model.trafficReady())for(let z=0;z<model.Z;z++){
       if(model.zPop[z]+model.zJobs[z]<3000||!zoneOpen(z)||!free('cong:'+z,'zoneCong')||g.zoneCong(z)<1.25)continue;
+      if(Tasks.netDist(g,model.zCx[z],model.zCy[z])>12)continue;   // v2.4：离运营车站 3 km 以上的片区不发拥堵任务（偏远片区靠覆盖任务）
       const v=model.zoneTraffic(z),potential=model.zoneOpportunity(z)/Math.max(1,v.trips);
       if(v.trips>100&&potential>=.06&&potential>bestPotential){worst=z;bestPotential=potential;}
     }
     if(worst>=0){
-      const v=model.zoneTraffic(worst),drop=Math.min(.04,bestPotential*.2),target=Math.max(0,v.carShare-drop);
-      cands.push({type:'zoneCong',metric:'carShare',coolKey:'cong:'+worst,zone:worst,start:v.carShare,target,sustain:3,samples:[],title:'减少「'+g.zoneName(worst)+'」高峰汽车出行',desc:'改善该片区居民出行的地铁直达性、换乘或票价，使工作日早高峰汽车出行占比降低 '+(drop*100).toFixed(1)+' 个百分点。按最近 3 个月平均值评估；过境车辆不计为本地出行。',months:30,reward:60000*ci});
+      // v2.4 平衡：降幅按可替代的出行估算、更温和（一两处车站或一段延伸就能做到），票价低于发布时的月份不计
+      const v=model.zoneTraffic(worst),drop=U.clamp(bestPotential*.12,.008,.03),target=Math.max(0,v.carShare-drop);
+      cands.push({type:'zoneCong',metric:'carShare',coolKey:'cong:'+worst,zone:worst,start:v.carShare,target,sustain:3,samples:[],fare0:Tasks.fareLevel(g.econ.fare),title:'减少「'+g.zoneName(worst)+'」高峰汽车出行',desc:'让工作日早高峰汽车出行占比降低 '+(drop*100).toFixed(1)+' 个百分点（近 3 个月平均，降价月份不计）。',months:30,reward:60000*ci});
     }
     // 覆盖空白
     if (acc) {
@@ -714,49 +1203,67 @@
     }
     // 车站拥挤
     const sdw = model.stDailyWk || model.stDaily;
-    if (sdw && !model.dailyStale && g.compiled.stations.length) {
+    if (sdw && !model.dailyStale && g.compiled.stations.length && crowdFree) {
       let bs = -1, br = 0;
       g.compiled.stations.forEach(function (s, i) {
         if (!free('st:' + s.id, 'stationCrowd')) return;
         const r = sdw.peak[i] / CFG.metro.stationCap[s.size];
         if (r > br) { br = r; bs = i; }
       });
-      if (bs >= 0 && br > 1.0) {
+      if (bs >= 0 && br > 1.2) {
         const s = g.compiled.stations[bs];
         cands.push({ type: 'stationCrowd', coolKey: 'st:' + s.id, station: s.id, start: br, target: 0.9, title: '缓解「' + s.name + '」车站拥挤', desc: '工作日高峰时段车站负荷已达 ' + U.fmtPct(br, 0) + '。可升级车站或分流客流，使高峰负荷降至 90% 以下。统计口径：工作日高峰小时。', months: 12, reward: 30000 * ci });
       }
     }
-    // 客流增长
+    // 客流增长（v2.3 平衡）：线网越成熟（分担率越高）增幅要求越低——成熟线网两年再涨两成很难做到
     if (model.daily && model.daily.metro > 20000 && free('ridership', 'ridership')) {
-      cands.push({ type: 'ridership', basis: 'avg', target: Math.round(model.daily.metro * 1.2 / 1000) * 1000, title: '提升地铁客运量', desc: '在期限内使日均地铁客运量较当前提高 20%（可通过新线、延长线、换乘或调整票价实现）。统计口径：周平均（5 个工作日 + 2 个周末日）。', months: 24, reward: 40000 * ci });
+      const sh = model.daily.metroShare || 0, gr = sh < 0.08 ? 0.2 : (sh < 0.15 ? 0.12 : 0.08);
+      cands.push({ type: 'ridership', basis: 'avg', target: Math.round(model.daily.metro * (1 + gr) / 1000) * 1000, title: '提升地铁客运量', desc: '在期限内使日均地铁客运量较当前提高 ' + Math.round(gr * 100) + '%（可通过新线、延长线、换乘或调整票价实现）。统计口径：周平均（5 个工作日 + 2 个周末日）。', months: 24, reward: 40000 * ci });
     }
-    // 经营：票款覆盖
+    // 经营：票款覆盖（v2.3 平衡）：目标按近 3 个月的实际覆盖率提高一截（最高 70%），不再一律要求 70%——
+    // 大线网的运营费用随物价上涨，票价长期不变时覆盖率很低，固定目标几乎必然失败、反复扣减拨款
     if (g.econ.mode === 'challenge' && model.daily && model.daily.metro > 50000 && free('recovery', 'recovery')) {
-      cands.push({ type: 'recovery', target: 0.7, sustain: 3, title: '改善运营收支', desc: '连续 3 个月票款收入不低于运营费用的 70%。', months: 24, reward: 40000 * ci });
+      const L3 = g.econ.ledger.slice(-3), cur = L3.length ? L3.reduce(function (a, r) { return a + Tasks.recoveryOf(r); }, 0) / L3.length : 0;
+      if (cur >= 0.15 && cur < 0.66) {
+        const tg = Math.min(0.7, Math.ceil((cur + Math.max(0.06, cur * 0.25)) * 20) / 20);
+        cands.push({ type: 'recovery', target: tg, start: cur, sustain: 3, title: '改善运营收支', desc: '连续 3 个月（票款 + 车站商业收入）不低于运营费用的 ' + Math.round(tg * 100) + '%（近 3 个月约 ' + Math.round(cur * 100) + '%）。可以适当提高票价、开发高客流车站的商业空间，或提高线路客流强度。', months: 24, reward: 40000 * ci });
+      }
     }
     // 重要设施的地铁接驳（v1.9）：到访量较大、乘地铁比例很低的设施；口径按设施类型（见 Tasks.facBasis）
     if (model.facDaily && model.fn && model.net && g.compiled.stations.length) {
       let best = null;
       for (const f of model.fn.list) {
-        if (!free('fac:' + f.id, 'facShare') || !Tasks.facServable(g.city, f)) continue;
+        if (!free('fac:' + f.id, 'facShare') || !Tasks.facServable(g.city, f) || (f.close != null && f.close < g.clock.y + 3)) continue;
         const basis = Tasks.facBasis(f), r = Tasks.facShareOf(model, f, basis);
         if (!r || r.vol < 3000 || r.share > 0.12) continue;
-        const score = r.vol * (1 - r.share);
-        if (!best || score > best.score) best = { f: f, basis: basis, r: r, score: score };
+        const dNet = f.ext ? 0 : Tasks.netDist(g, f.x, f.y), score = r.vol * (1 - r.share) / (1 + dNet / 16);
+        if (!best || score > best.score) best = { f: f, basis: basis, r: r, score: score, dNet: dNet };
       }
-      if (best) {
-        // 目标随全市地铁分担率：至少比现在高 8 个百分点，并争取达到「全市分担率 + 6 个百分点」（上限 20%），线网尚小时也能完成
+      if (best && best.dNet > 16 && !best.f.ext) {
+        // v2.4 玩家反馈（番禺、香港新界等）：离线网 4 km 以上的设施，要把比例拉上去只能修好几条又长又空的线。
+        // 改为「接入线网」：在设施附近设站并连到现有线网即可完成，偏远地区一条线就够
+        const f = best.f, C0 = g.compiled; let ns = -1, nd = Infinity;
+        C0.stations.forEach(function (s, i) { if (C0.serviced[i]) { const d = U.dist(s.x, s.y, f.x, f.y); if (d < nd) { nd = d; ns = i; } } });
+        if (ns >= 0) {
+          const s = C0.stations[ns], lm = f.lmK >= 0 ? CM.DATA.landmarks[f.lmK] : null, r = (lm ? Math.max(lm.w || 0, lm.d || 0) / 2 / CFG.CELL_M : Math.max(0.5, f.r || 0)) + 2.4;
+          cands.push({ type: 'connect', coolKey: 'fac:' + f.id, fac: f.id, title: '把「' + f.name + '」接入线网',
+            desc: f.name + '每天约 ' + U.fmtPeople(best.r.vol) + ' 人次到访，离最近的车站约 ' + U.fmtNum(nd * CFG.CELL_M / 1000, 1) + ' km。在附近设站并接入线网即可。',
+            anchors: [{ name: f.name, x: f.x, y: f.y, r: +r.toFixed(2) }, { name: s.name, x: s.x, y: s.y, r: 1.2 }], months: 36, reward: 35000 * ci });
+        }
+      } else if (best) {
+        // 目标（v2.4 平衡）：比现在高 6 个百分点，并争取达到「全市分担率 + 5 个百分点」（上限 16%）；离线网 2 km 以上的只要求高 5 个百分点
         const cs = (model.daily && model.daily.metroShare) || 0;
-        const f = best.f, target = Math.round(Math.max(best.r.share + 0.08, Math.min(0.2, cs + 0.06)) * 100) / 100, bn = Tasks.BASIS[best.basis];
+        const f = best.f, raw = best.dNet > 8 ? best.r.share + 0.05 : Math.max(best.r.share + 0.06, Math.min(0.16, cs + 0.05)), target = Math.round(raw * 100) / 100;
         const what = f.T.hub ? '接驳出行' : '到访出行';
-        cands.push({ type: 'facShare', coolKey: 'fac:' + f.id, fac: f.id, basis: best.basis, start: best.r.share, target: target, title: '地铁服务「' + f.name + '」',
-          desc: f.name + '（' + f.T.name + '）每天约有 ' + U.fmtPeople(best.r.vol) + ' 人次' + what + '（' + bn.replace(/（.*）/, '') + '），乘地铁的比例只有 ' + U.fmtPct(best.r.share, 0) + '。在附近设站并接入线网，使乘地铁的比例达到 ' + U.fmtPct(target, 0) + '。统计口径：' + bn + '。',
+        cands.push({ type: 'facShare', coolKey: 'fac:' + f.id, fac: f.id, basis: best.basis, start: best.r.share, target: target, fare0: Tasks.fareLevel(g.econ.fare), title: '地铁服务「' + f.name + '」',
+          desc: f.name + '每天约 ' + U.fmtPeople(best.r.vol) + ' 人次' + what + '，乘地铁只有 ' + U.fmtPct(best.r.share, 0) + '，目标 ' + U.fmtPct(target, 0) + '（降价月份不计）。',
           months: 30, reward: 45000 * ci });
       }
     }
     // 本城专属动态任务（D.dynTasks）：在年份窗口内各发布一次，已满足的不发布
     const self = this;
-    for (const tp of (D.dynTasks || []).concat(CM.Eras ? CM.Eras.goals() : [])) {   // v2.2：历史阶段目标同样作为本城任务，在阶段时间内发布
+    for (const tp0 of (D.dynTasks || []).concat(CM.Eras ? CM.Eras.goals() : [])) {   // v2.2：历史阶段目标同样作为本城任务，在阶段时间内发布
+      const tp = Tasks.withPlan(g, tp0);
       if (this.issued['dyn:' + tp.id] || ym < U.ymIndex(tp.from[0], tp.from[1]) || ym > U.ymIndex(tp.to[0], tp.to[1]) || !free('city:' + tp.id, tp.type)) continue;
       const c = Object.assign({ coolKey: 'city:' + tp.id, cityId: tp.id }, JSON.parse(JSON.stringify(tp)), { reward: tp.reward * ci });
       delete c.from; delete c.to; delete c.id;
@@ -766,8 +1273,9 @@
     if (!cands.length) return null;
     const c = cands[Math.floor(rng.next() * cands.length)];
     if (c.cityId) self.issued['dyn:' + c.cityId] = 1;
+    if (c.type === 'stationCrowd') cool.crowd = ym + 36;
     const t = Object.assign({ id: 'd' + (this.seq++), kind: 'dyn', status: 'active', issuedAt: [y, m], deadline: dl(c.months), streak: 0 }, c);
-    return t;
+    return Tasks.prepare(t, g);
   };
 
   Tasks.prototype.rebaseCongestion=function(g){
@@ -784,6 +1292,144 @@
     }
   };
 
-  Tasks.prototype.serialize = function () { return { active: this.active, done: this.done, failed: this.failed, issued: this.issued, nextDyn: this.nextDyn, seq: this.seq, cool: this.cool || {}, adjusted:this.adjusted||[] }; };
+  // ======================== 可选挑战与城市策略难题（v2.3） ========================
+  // 中后期不再只是「再修一条线」：系统按现状提出可选挑战（既有线路扩容、拥挤区段优化、财政压力下的网络调整、
+  // 城市扩张后老线路效率下降），各城市另有按年代出现的策略难题（如香港的高成本与跨海）。玩家自行接受或忽略；
+  // 接受后才开始计时，完成奖励更高，未完成只小幅降低满意度、不打折拨款。同时最多 2 个待选、2 个进行中
+  Tasks.OPT = { offers: 2, active: 2, life: 6, every: 6, firstAfter: 24 };
+  Tasks.THEME = { lineCrowd: '拥挤区段优化', lineCars: '既有线路扩容', fiscal: '财政压力下的网络调整', lineEff: '城市扩张后的老线路' };
+  // 城市策略难题的锚点按地名取位置（D.places），找不到地名的难题不发布
+  const placeAt = function (name) { const p = (D.places || []).find(function (q) { return q[0] === name; }); return p ? { x: p[1], y: p[2] } : null; };
+  // 预算挑战：按各锚点之间直线修地下线的粗略造价（含过水附加与 M 型车站）乘以 budgetX 作为预算，逼玩家权衡形式、走向与站数
+  Tasks.estimateLink = function (g, anchors) {
+    const y = g.clock.y, ci = g.econ.costIndex(y), city = g.city, Cst = CFG.cost;
+    let km = 0, waterKm = 0;
+    for (let i = 1; i < anchors.length; i++) {
+      const a = anchors[i - 1], b = anchors[i], d = U.dist(a.x, a.y, b.x, b.y), n = Math.max(2, Math.ceil(d * 2));
+      km += d * CFG.CELL_M / 1000;
+      for (let k = 0; k < n; k++) { const c = city.cellAt(a.x + (b.x - a.x) * (k + 0.5) / n, a.y + (b.y - a.y) * (k + 0.5) / n); if (c >= 0 && city.lu[c] === CM.LU.WATER) waterKm += d / n * CFG.CELL_M / 1000; }
+    }
+    return ci * (km * Cst.trackPerKm.underground + waterKm * Cst.riverPerKm.underground + anchors.length * Cst.station.underground.M);
+  };
+  Tasks.prototype.offerCands = function (g) {
+    const out = [], ym = g.ym(), y = g.clock.y, self = this, cool = this.cool || (this.cool = {});
+    const gm = g.econ.grantQuota(y, g.clock.m) * (CFG.economy.rewardScale || 1);   // 奖励按本城当年的基础月拨款折算（各城货币与年代一致）
+    const free = function (key) { return !(cool['opt:' + key] > ym) && !self.active.some(function (t) { return t.coolKey === 'opt:' + key; }) && !(self.offers || []).some(function (o) { return o.coolKey === 'opt:' + key; }); };
+    // 城市策略难题（D.scenarios）：在年份窗口内各提出一次
+    for (const s0 of D.scenarios || []) {
+      const s = Tasks.withPlan(g, s0);
+      if (this.issued['sc:' + s.id] || ym < U.ymIndex(s.from[0], s.from[1]) || ym > U.ymIndex(s.to[0], s.to[1])) continue;
+      if (s.challengeOnly && g.econ.mode !== 'challenge') continue;
+      const c = { type: s.type, scenario: s.id, theme: s.theme, title: s.title, desc: s.desc, tips: s.tips || [], months: s.months || 48, reward: (s.rewardMonths || 3) * gm, coolKey: 'opt:sc:' + s.id };
+      if (s.type === 'combo') {
+        c.parts = s.parts;
+        const an0 = (s.anchors || []).map(function (a) { if (!Array.isArray(a)) return a; const p = Tasks.placeOf(a[0]); return p ? { name: a[0], x: p.x, y: p.y, r: a[1] || 3 } : null; });
+        if (an0.some(function (a) { return !a; })) continue;
+        if (an0.length) c.anchors = an0;
+        if (s.parts.some(function (p) { return p.regions && p.kind === 'reach' && !g.city.regions.some(function (r, k) { return p.regions.indexOf(r.id) >= 0 && g.city.regionOpen[k]; }); })) continue;
+        Tasks.prepare(c, g);
+        if (this.evaluate(c, g).ok) continue;
+      } else if (s.type === 'budgetConnect') {
+        // 锚点：[地名, 半径]（按 D.places 定位）或带坐标的对象
+        const an = s.anchors.map(function (a) { if (!Array.isArray(a)) return a; const p = placeAt(a[0]); return p ? { name: a[0], x: p.x, y: p.y, r: a[1] || 3 } : null; });
+        if (an.some(function (a) { return !a; })) continue;
+        c.anchors = an; c.budget = Math.round(Tasks.estimateLink(g, an) * (s.budgetX || 1.2) / 1000) * 1000;
+        if (this.evaluate(Object.assign({}, c, { type: 'connect' }), g).ok) continue;
+      } else if (s.type === 'regionCov') {
+        c.regions = s.regions; c.areaName = s.areaName; c.target = s.target;
+        if (!g.city.regions.some(function (r, k) { return s.regions.indexOf(r.id) >= 0 && g.city.regionOpen[k]; })) continue;
+        if (Tasks.regionCoverage(g, s.regions) >= s.target * 0.9) continue;
+      } else if (s.type === 'xferHub') {
+        c.target = s.target; if (this.evaluate(c, g).ok) continue;
+      } else if (s.type === 'lineCrowd') {
+        const lines = s.line === 'inherited' ? Object.keys(g.net.lines).filter(function (lid) { return M_inherited(g, lid); }) : null;
+        const cr = Tasks.crowdOf(g).find(function (x) { return !lines || lines.indexOf(x.lid) >= 0; });
+        if (!cr || cr.lf < (s.minLF || 0.95)) continue;
+        Object.assign(c, { line: cr.lid, start: cr.lf, target: s.target || 1, sustain: 3, title: s.title.replace('{line}', g.net.lines[cr.lid].name) });
+      } else continue;
+      out.push(c);
+    }
+    // 通用中后期挑战（开局两年后）：只针对现有线网
+    const crowd = Tasks.crowdOf(g);
+    const top = crowd[0];
+    const crowdFree = !(cool.crowd > ym) && !self.active.some(function (t) { return t.type === 'stationCrowd' || t.type === 'lineCrowd'; }) && !(self.offers || []).some(function (o) { return o.type === 'lineCrowd'; });   // 同动态任务：明显过载才提出，全局冷却 3 年
+    if (top && top.lf > 1.2 && crowdFree && free('crowd:' + top.lid)) {
+      const L = g.net.lines[top.lid], S = g.model.net.C.stations, a = S[top.a], b = S[top.b];
+      out.push({ type: 'lineCrowd', line: top.lid, start: top.lf, target: 1, sustain: 3, coolKey: 'opt:crowd:' + top.lid, months: 24, reward: 2 * gm, theme: Tasks.THEME.lineCrowd,
+        title: '疏解「' + L.name + '」最拥挤区段', desc: L.name + ' 的「' + (a ? a.name : '') + '—' + (b ? b.name : '') + '」早高峰满载率已达 ' + U.fmtPct(top.lf, 0) + '，列车已挤不下。不修新线也可以：把它降到 100% 以下并保持 3 个月。',
+        tips: ['升级沿线最小的车站，列车就能加长编组', '在拥挤区段两端做换乘，引导乘客换到平行线路', '把支线拆成独立线路或减少共线，空出班次'] });
+    }
+    const tight = crowd.find(function (x) { return x.lf > 1 && x.cars < 8 && free('cars:' + x.lid); });
+    if (tight) {
+      const L = g.net.lines[tight.lid];
+      out.push({ type: 'lineCars', line: tight.lid, start: tight.cars, target: 8, coolKey: 'opt:cars:' + tight.lid, months: 24, reward: 1.5 * gm, theme: Tasks.THEME.lineCars,
+        title: '把「' + L.name + '」扩容到 8 节编组', desc: L.name + ' 早高峰满载率 ' + U.fmtPct(tight.lf, 0) + '，但列车只有 ' + tight.cars + ' 节——编组受沿线最小车站限制。把沿线车站都升级为大型站，让列车加长到 8 节。',
+        tips: ['在线路详情的车站列表里找出小型、中型车站', '升级车站进入草案，按差价计费', '客流不大的车站也要升级，否则整条线的编组被它卡住'] });
+    }
+    if (g.econ.mode === 'challenge' && free('fiscal')) {
+      const last = g.econ.ledger[g.econ.ledger.length - 1], rec = last && last.ops > 0 ? last.fare / last.ops : 1, km = CM.Milestones ? CM.Milestones.netInfo(g).km : 0;
+      if (rec < 0.6 && km > 15) {
+        const target = Math.min(0.9, Math.round((rec + 0.15) * 20) / 20);
+        out.push({ type: 'fiscal', target: target, sustain: 3, kmCap: Math.round(km * 1.05 * 10) / 10, coolKey: 'opt:fiscal', months: 30, reward: 3 * gm, theme: Tasks.THEME.fiscal,
+          title: '不扩张也能减亏', desc: '票款只够付 ' + U.fmtPct(rec, 0) + ' 的运营费。在线网不超过 ' + U.fmtNum(km * 1.05, 1) + ' km 的前提下，把票款覆盖率提高到 ' + U.fmtPct(target, 0) + ' 并保持 3 个月。',
+          tips: ['调整票价：小步上调起步价或每段加价，观察客流', '缩小客流很少的车站规模，节省车站运营费（缩站不退款）', '用换乘和贯通把客流引到已有线路上，而不是再修新线'] });
+      }
+    }
+    // 城市扩张后的老线路：与 2–4 年前（线路长度基本不变）相比，每公里客流下降 15% 以上
+    const stats = Tasks.lineStats(g), hist = this.lineHist || {};
+    for (const lid in hist) {
+      const s = stats.get(lid), L = g.net.lines[lid]; if (!s || !L || !free('eff:' + lid)) continue;
+      const old = hist[lid].find(function (r) { return ym - r[0] >= 24 && ym - r[0] <= 48 && Math.abs(r[2] - s.km) <= Math.max(0.5, r[2] * 0.05); });
+      if (!old || old[1] <= 0) continue;
+      const was = old[1] / Math.max(0.1, old[2]), now = s.riders / Math.max(0.1, s.km);
+      if (now >= was * 0.85) continue;
+      out.push({ type: 'lineEff', line: lid, start: now, target: Math.round(was * 0.95), coolKey: 'opt:eff:' + lid, months: 36, reward: 2 * gm, theme: Tasks.THEME.lineEff,
+        title: '让「' + L.name + '」重新跑满', desc: '城市向新区扩张后，' + L.name + ' 每公里的日客流从 ' + U.fmtPeople(was) + ' 降到 ' + U.fmtPeople(now) + ' 人次。线路还在，客流却搬走了：让它回到 ' + U.fmtPeople(was * 0.95) + ' 人次以上。',
+        tips: ['打开「城市发展」图层，看人口与岗位搬到了哪里', '把线路端点延伸到新开发的片区，或与通往新区的线路换乘', '与相邻线路贯通，减少换乘，让老线路承接新的客流'] });
+      break;
+    }
+    return out;
+  };
+  const M_inherited = function (g, lid) { for (const id in g.net.segments) { const s = g.net.segments[id]; if (s.line === lid && s.inherited) return true; } return false; };
+  // 每月：记录各线路客流（每年 1 月一次），按节奏提出可选挑战，清理过期的待选
+  Tasks.prototype.offerMonthly = function (g) {
+    const out = [], ym = g.ym(), O = Tasks.OPT;
+    if (D.noDynTasks || !g.model.trafficReady()) return out;
+    if (g.clock.m === 1) {
+      const hist = this.lineHist || (this.lineHist = {});
+      Tasks.lineStats(g).forEach(function (s, lid) { const a = hist[lid] || (hist[lid] = []); if (!a.length || a[a.length - 1][0] !== ym) a.push([ym, Math.round(s.riders), +s.km.toFixed(2)]); if (a.length > 8) a.shift(); });
+      for (const lid in hist) if (!g.net.lines[lid]) delete hist[lid];
+    }
+    this.offers = (this.offers || []).filter(function (o) { return ym <= o.expiresYM; });
+    if (!this.nextOffer) this.nextOffer = ym + O.firstAfter;
+    if (ym < this.nextOffer || this.offers.length >= O.offers || this.active.filter(function (t) { return t.kind === 'opt'; }).length >= O.active) return out;
+    const cands = this.offerCands(g); if (!cands.length) return out;
+    // 城市策略难题优先，其余按出现顺序（越靠前越紧迫）
+    const c = cands.find(function (x) { return x.scenario; }) || cands[0];
+    const o = Object.assign({ id: 'o' + (this.seq++), kind: 'offer', offeredAt: [g.clock.y, g.clock.m], expiresYM: ym + O.life }, c);
+    if (o.scenario) this.issued['sc:' + o.scenario] = 1;
+    if (o.type === 'lineCrowd') { this.cool = this.cool || {}; this.cool.crowd = ym + 36; }
+    this.offers.push(o); this.nextOffer = ym + O.every;
+    out.push({ type: 'offer', task: o });
+    return out;
+  };
+  // 接受：从现在开始计时；预算类记下当前累计建设支出
+  Tasks.prototype.accept = function (g, id) {
+    const k = (this.offers || []).findIndex(function (o) { return o.id === id; }); if (k < 0) return null;
+    const o = this.offers.splice(k, 1)[0], ym = g.ym(), dl = ym + o.months;
+    const t = Object.assign({}, o, { kind: 'opt', status: 'active', issuedAt: [g.clock.y, g.clock.m], deadline: [Math.floor(dl / 12), dl % 12 + 1], streak: 0 });
+    delete t.expiresYM;
+    if (t.type === 'budgetConnect') t.spent0 = g.econ.built || 0;
+    if (t.type === 'combo') for (const p of t.parts) { delete p.base0; delete p.fare0; delete p.spent0; delete p.y0; if (p.gain || p.drop) delete p.target; }
+    Tasks.prepare(t, g);
+    this.active.push(t);
+    return t;
+  };
+  Tasks.prototype.decline = function (g, id) {
+    const k = (this.offers || []).findIndex(function (o) { return o.id === id; }); if (k < 0) return;
+    const o = this.offers.splice(k, 1)[0]; this.cool = this.cool || {}; this.cool[o.coolKey] = g.ym() + 24;
+  };
+
+  Tasks.prototype.serialize = function () { return { active: this.active, done: this.done, failed: this.failed, issued: this.issued, nextDyn: this.nextDyn, seq: this.seq, cool: this.cool || {}, adjusted:this.adjusted||[], offers: this.offers || [], nextOffer: this.nextOffer || 0, lineHist: this.lineHist || {} }; };
   Tasks.restore = function (s) { const t = new Tasks(); Object.assign(t, s); return t; };
 })(window.CM);

@@ -19,7 +19,7 @@
         const timer=setTimeout(()=>finish(null),1500);let request;
         try{request=indexedDB.open('city-metro-web-traffic',1);}catch(e){finish(null);return;}
         request.onupgradeneeded=()=>{const db=request.result;if(!db.objectStoreNames.contains('entries'))db.createObjectStore('entries');if(!db.objectStoreNames.contains('lru')){const store=db.createObjectStore('lru',{keyPath:'key'});store.createIndex('used','used');}};
-        request.onsuccess=()=>{const db=request.result;db.onversionchange=()=>closeDb(db);finish(db);};
+        request.onsuccess=()=>{const db=request.result;db.onversionchange=db.onclose=()=>closeDb(db);finish(db);};
         request.onerror=request.onblocked=()=>finish(null);
       });
       dbPromise=promise;
@@ -38,10 +38,31 @@
         tx=db.transaction(stores,mode);
         tx.oncomplete=()=>finish();tx.onerror=tx.onabort=()=>finish(tx.error||new Error('交通缓存事务中止'));
         value=work(tx);
-      }catch(e){try{if(tx)tx.abort();}catch(abortError){/* Already closed. */}finish(e);}
+      }catch(e){try{if(tx)tx.abort();}catch(abortError){/* Already closed. */}if(e&&e.name==='InvalidStateError')closeDb(db);finish(e);}
     });
   }
   async function digest(data){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data))).map(v=>v.toString(16).padStart(2,'0')).join('');}
+  // 大块交通数据的 SHA-256 放到工作线程计算（v2.3）：在主线程上算一次接近一秒，收敛完成、载入存档时画面会卡住。
+  // 缓冲区转移过去、算完再转移回来，不复制；工作线程不可用时退回主线程
+  let hw=null,hseq=0;const hwait=new Map();
+  function failHash(){if(hw)try{hw.terminate();}catch(e){}hw=false;const waits=[...hwait.values()];hwait.clear();for(const finish of waits)finish(null);}
+  function hashWorker(){
+    if(hw!==null)return hw;
+    try{
+      const src='onmessage=async e=>{const d=e.data;let hex=null;try{const h=await crypto.subtle.digest("SHA-256",d.buf);hex=Array.from(new Uint8Array(h)).map(v=>v.toString(16).padStart(2,"0")).join("");}catch(err){}postMessage({id:d.id,hex:hex,buf:d.buf},[d.buf]);};';
+      const url=URL.createObjectURL(new Blob([src],{type:'text/javascript'}));hw=new Worker(url);URL.revokeObjectURL(url);
+      hw.onmessage=e=>{const w=hwait.get(e.data.id);if(w){hwait.delete(e.data.id);w(e.data);}};
+      hw.onerror=e=>{if(e&&e.preventDefault)e.preventDefault();failHash();};
+      hw.onmessageerror=failHash;
+    }catch(e){hw=false;}
+    return hw;
+  }
+  // 返回 { hex, buf }：buf 为转移回来的同一份数据（失败时 hex 为 null）
+  function digestBuf(buf){
+    const w=hashWorker();
+    if(!w)return digest(buf).then(hex=>({hex,buf}),()=>({hex:null,buf}));
+    return new Promise(resolve=>{const id=++hseq,timer=setTimeout(failHash,1500);hwait.set(id,m=>{clearTimeout(timer);resolve(m?{hex:m.hex,buf:m.buf}:{hex:null,buf:buf});});try{w.postMessage({id,buf},[buf]);}catch(e){hwait.delete(id);clearTimeout(timer);digest(buf).then(hex=>resolve({hex,buf}),()=>resolve({hex:null,buf}));}});
+  }
   async function keyFor(body){try{return await digest(new TextEncoder().encode(body));}catch(e){return null;}}
   const metaDigest=(meta,dataHash)=>digest(new TextEncoder().encode(JSON.stringify(meta)+':'+dataHash));
   const roadGuards=new WeakMap(),metroGuards=new WeakMap();
@@ -74,7 +95,7 @@
     if(!checksum||!snapshot){discard(snapshot);return Promise.resolve(false);}const k=key(checksum);
     const job=chain.then(async()=>{
       try{
-        const db=await open();if(!db)return false;const dataHash=await digest(snapshot.data),metaHash=await metaDigest(snapshot.meta,dataHash);
+        const db=await open();if(!db)return false;const hr=await digestBuf(snapshot.data);snapshot.data=hr.buf;if(!hr.hex||!snapshot.data.byteLength)return false;const dataHash=hr.hex,metaHash=await metaDigest(snapshot.meta,dataHash);
         await transaction(db,['entries','lru'],'readwrite',tx=>{
           tx.objectStore('entries').put({...snapshot,dataHash,metaHash},k);
           tx.objectStore('lru').put({key:k,bytes:snapshot.data.byteLength,used:Date.now()});
@@ -94,7 +115,7 @@
       const db=await open();if(!db)return null;
       const record=await transaction(db,'entries','readonly',tx=>{let value;const request=tx.objectStore('entries').get(k);request.onsuccess=()=>{value=request.result;};return()=>value;});
       if(!record||record.meta.schema!==2||record.meta.stamp!==CM.SIM_STAMP||!(record.data instanceof ArrayBuffer)||record.data.byteLength>MAX_ENTRY)return null;
-      const hash=await digest(record.data);if(hash!==record.dataHash||await metaDigest(record.meta,hash)!==record.metaHash)return null;
+      const hr=await digestBuf(record.data);record.data=hr.buf;const hash=hr.hex;if(!hash||hash!==record.dataHash||await metaDigest(record.meta,hash)!==record.metaHash)return null;
       transaction(db,['entries','lru'],'readwrite',tx=>{const request=tx.objectStore('entries').getKey(k);request.onsuccess=()=>{if(request.result!==undefined)tx.objectStore('lru').put({key:k,bytes:record.data.byteLength,used:Date.now()});};}).catch(()=>{});verified.add(record);return record;
     }catch(e){return null;}
   }
@@ -106,12 +127,12 @@
       for(const row of meta.periods){
         if(!['wd','we'].includes(row.dt)||!Number.isInteger(row.p)||row.p<0||row.p>3||seen.has(row.dt+row.p))return false;seen.add(row.dt+row.p);
         const P=m.ctxs[row.dt].per[row.p],S=row.scalars,E=S.error;m.allocStatArrays(P);
-        if(!Number.isSafeInteger(S.solveSteps)||S.solveSteps<1||!Number.isSafeInteger(S.quiet)||S.quiet<0||typeof S.stable!=='boolean'||![0,12].includes(S.reviewLimit)||!E||Object.values(E).some(v=>!Number.isFinite(v))||!S.stats||Object.values(S.stats).some(v=>!Number.isFinite(v))||S.facKey!==m.fn.key)return false;
+        if(!Number.isSafeInteger(S.solveSteps)||S.solveSteps<1||!Number.isSafeInteger(S.quiet)||S.quiet<0||typeof S.stable!=='boolean'||![0,6,12].includes(S.reviewLimit)||!E||Object.values(E).some(v=>!Number.isFinite(v))||!S.stats||Object.values(S.stats).some(v=>!Number.isFinite(v))||S.facKey!==m.fn.key)return false;
         const values={},keys=Object.keys(P).filter(k=>ArrayBuffer.isView(P[k]));if(row.arrays.length!==keys.length)return false;
         for(const a of row.arrays){const old=P[a.name];if(!keys.includes(a.name)||values[a.name]||!old||a.type!==old.constructor.name||a.length!==old.length||!Number.isInteger(a.offset)||a.offset<0||a.offset%old.BYTES_PER_ELEMENT)return false;const v=new old.constructor(record.data,a.offset,a.length);values[a.name]=v;}
         staged.push({P,S,values});
       }
-      for(const {P,S,values}of staged){for(const k of scalars)if(S[k]!==undefined)P[k]=S[k];Object.assign(P,values);P.solveSignature={net:m.net,od:m.od,year:m.year,fare:CM.Model.fareKey(m.fare),road:m.roadVer};}
+      for(const {P,S,values}of staged){for(const k of scalars)if(S[k]!==undefined)P[k]=S[k];Object.assign(P,values);P.solveSignature={net:m.net,od:m.od,year:m.year,fare:CM.Model.fareKey(m.fare),road:m.roadVer,habit:m.habitVer||0};}
       verified.delete(record);
       m.computeDaily();m.gen=null;Object.assign(m,C);m.settledAt={year:m.year,fare:CM.Model.fareKey(m.fare),city:m.city.version,road:m.city.roadVersion,net:m.net,od:m.od};g.trafficCacheHit=true;return true;
     }catch(e){return false;}

@@ -10,10 +10,10 @@
     this.tool = 'select';
     this.buildType = 'underground'; this.stationSize = 'M';
     this.lineChoice = 'new';
-    this.newLineColor = null;
+    this.newLineColor = null; this.newLineSpeed = null;
     this.curveMode = CM.Settings.get('curveMode') === 'pass' ? 'pass' : 'smooth';   // 绘线线形（v2.1）
     this.chain = null; this.bends = [];
-    this.cursor = null; this.hover = null; this.hint = null;
+    this.cursor = null; this.hover = null; this.hint = null; this.meas = { pts: [], done: false };
     this.ptr = null; this.drag = null;
     this.keys = new Set();
     this.bind();
@@ -26,14 +26,14 @@
     this.cancelDrag();
     if (this.ui.closeLinePicker) this.ui.closeLinePicker();
     this.tool = t;
-    this.chain = null; this.bends = []; this.drag = null; this.hint = null; this.hover = null; this.lineLock = false; this.snapPt = null;
+    this.chain = null; this.bends = []; this.drag = null; this.hint = null; this.hover = null; this.lineLock = false; this.snapPt = null; this.lastSeg = null; this.meas = { pts: [], done: false };
     this.ui.setTooltip(null);
     this.ui.onToolChange(t);
   };
   // 中断未完成的拖动：恢复拖动前草案，不留下阻塞保存的 liveSnap。
   Tools.prototype.cancelDrag = function () {
     const g = this.game(), active = !!this.drag || !!(g && g.draft && g.draft.liveSnap);
-    this.drag = null; this.ptr = null;
+    this.drag = null; this.ptr = null; this.boxSel = null;
     if (g && g.draft && g.draft.liveSnap) g.endLive(false);
     return active;
   };
@@ -101,12 +101,13 @@
     try { if (this.R.cv.setPointerCapture) this.R.cv.setPointerCapture(e.pointerId); } catch (err) { /* 指针已失效时忽略 */ }
     this.ptr = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, button: e.button, moved: false, shift: e.shiftKey, alt: e.altKey, t: performance.now() };
     if (e.button === 1) { this.ptr.pan = true; e.preventDefault(); return; }
+    if (e.button === 0 && e.shiftKey && this.tool === 'demolish' && !g.jumping) { this.ptr.box = true; return; }   // 拆除工具：Shift + 拖动框选
     // 延长手柄：进入绘线，拖到目标位置松开即连线（只点击则从该端点开始逐站绘制）
     const ext = e.button === 0 ? this.pickExtend(e.clientX, e.clientY) : null;
     if (ext) { this.ui.startDraw(ext.station, ext.line, false); this.ptr.extend = true; return; }
-    if (e.button === 0 && this.tool === 'edit' && !g.jumping) {
+    if (e.button === 0 && (this.tool === 'edit' || this.tool === 'line') && !g.jumping && !e.shiftKey) {
       const h = this.pickHandle(e.clientX, e.clientY);
-      if (h) { this.drag = h; this.drag.changed = false; g.beginLive(); this.ptr.handle = true; }
+      if (h && (this.tool === 'edit' || h.kind === 'bend' || h.kind === 'mid')) { this.drag = h; this.drag.changed = false; g.beginLive(); this.ptr.handle = true; }
     }
   };
   Tools.prototype.onMove = function (e) {
@@ -117,6 +118,7 @@
       const dx = e.clientX - this.ptr.x, dy = e.clientY - this.ptr.y;
       if (!this.ptr.moved && Math.hypot(e.clientX - this.ptr.sx, e.clientY - this.ptr.sy) > (e.pointerType === 'touch' ? 10 : 4)) this.ptr.moved = true;
       if (this.drag) { this.dragTo(e.clientX, e.clientY, e.shiftKey); }
+      else if (this.ptr.box) { if (this.ptr.moved) { this.boxSel = this.boxHits(this.ptr.sx, this.ptr.sy, e.clientX, e.clientY); this.hover = null; this.ui.setTooltip(null); this.ptr.x = e.clientX; this.ptr.y = e.clientY; return; } }
       else if (this.ptr.extend) { /* 拖动延长手柄：只更新绘线预览 */ }
       else if (this.ptr.moved || this.ptr.pan) { if (CM.Follow && CM.Follow.active()) CM.Follow.stop(); R.panBy(dx, dy); this.ptr.pan = true; }
       this.ptr.x = e.clientX; this.ptr.y = e.clientY;
@@ -128,8 +130,12 @@
   Tools.prototype.onUp = function (e) {
     const g = this.game(); const p = this.ptr; this.ptr = null;
     if (!g || !p) return;
-    if (this.drag) { const ch = this.drag.changed; this.drag = null; this.snapPt = null; g.endLive(ch); if (ch) sfx('place'); return; }
+    if (this.drag) {
+      const ch = this.drag.changed && p.moved; this.drag = null; this.snapPt = null; g.endLive(ch); if (ch) sfx('place');
+      if (ch || this.tool !== 'line') return;   // 绘线工具里只是点了一下控制点（没拖动）：照常当作绘线点击
+    }
     if (p.extend) { if (p.moved && this.tool === 'line' && this.chain) this.onClick(e.clientX, e.clientY, false); return; }
+    if (p.box && p.moved) { const b = this.boxSel; this.boxSel = null; if (b && (b.stations.length || b.segs.length)) this.ui.addMulti(b.stations, b.segs); return; }
     if (p.pan && p.moved) return;
     if (p.orbit && p.moved) return;   // 拖动旋转结束，不当作点击
     if (p.button === 2) { this.onRight(e); return; }
@@ -139,7 +145,9 @@
   };
 
   // ---------------- 悬停与提示 ----------------
-  Tools.prototype.world = function (sx, sy) { return this.R.unproject(sx, sy); };
+  // h：投影到该高度的水平面（v2.3）；建站与绘线按所选建设方式的高度，2D / 2.5D 下落点都在光标正下方
+  Tools.prototype.world = function (sx, sy, h) { return this.R.unproject(sx, sy, h); };
+  Tools.prototype.buildH = function () { return this.tool === 'line' || this.tool === 'station' ? this.R.trackH(this.buildType) : 0; };
   // 经纬网格吸附：建站、绘线（含 Shift 转弯点）与修改工具拖动时，新落点取最近的网格交叉点；点击已有车站、在轨道上插站不吸附
   Tools.prototype.snapAt = function (w) {
     if (!CM.Grid || (this.tool !== 'station' && this.tool !== 'line' && this.tool !== 'edit')) return null;
@@ -152,9 +160,9 @@
     if (!sp) return null;
     if (!mod) {
       // 直接按当前（草案）网络判断，不依赖上一帧的车站屏幕位置缓存
-      const R = this.R, q = R.P(sp.x, sp.y, 0), net = this.net();
+      const R = this.R, q = R.P(sp.x, sp.y, this.buildH()), net = this.net();
       let best = null, bd = 10;
-      for (const id in net.stations) { const s = net.stations[id], p = R.P(s.x, s.y, 0), d = Math.hypot(p.x - q.x, p.y - q.y); if (d < bd) { bd = d; best = id; } }
+      for (const id in net.stations) { const s = net.stations[id], p = R.P(s.x, s.y, R.trackH(s.type)), d = Math.hypot(p.x - q.x, p.y - q.y); if (d < bd) { bd = d; best = id; } }
       if (!best) best = R.pickStation(q.x, q.y);
       if (best) return { st: best };
     }
@@ -183,7 +191,7 @@
   Tools.prototype.stationOpts = function (w) { const o = { size: this.stationSize, type: this.buildType }; if (w.portal) o.portal = w.portal; return o; };
   Tools.prototype.updateHover = function (sx, sy, mod) {
     const g = this.game(), R = this.R;
-    let w = this.world(sx, sy);
+    let w = this.world(sx, sy, this.buildH());
     this.cursor = { sx: sx, sy: sy, x: w.x, y: w.y, mod: mod }; this.cursorOut = false;
     this.snapPt = null;
     const pp = !mod && !R.pickStation(sx, sy) ? this.portalPick(sx, sy) : null;
@@ -196,7 +204,7 @@
       const tip = pp.sid ? { title: this.tool === 'line' ? (this.chain ? '连接到「' + sname + '」' : '从「' + sname + '」开始') : '接驳口车站「' + sname + '」', lines: ['在地图边缘接通' + nm] }
         : { title: '在地图边缘接通「' + nm + '」', lines: [CM.Fac.extText(pp.f) + '，点击在接驳口' + (this.tool === 'line' && this.chain ? '建站并连线' : '建站'), '接驳口车站直接服务' + nm + '的全部接驳出行，不受区域开放限制', lk && !lk.portal ? '（附近的「' + lk.st.name + '」已在步行范围内接通）' : null].filter(Boolean) };
       this.hint = tip; this.ui.setTooltip(tip, sx, sy);
-      R.cv.style.cursor = 'pointer';
+      R.cv.style.cursor = 'var(--cur-pointer)';
       return;
     }
     this.portalHover = null;
@@ -206,7 +214,7 @@
       this.hover = null;
       this.hint = { title: '延长 ' + net0.lines[ext.line].name, lines: ['拖到目标位置松开：新建车站并连线', '点击：从「' + net0.stations[ext.station].name + '」开始逐站绘制'] };
       this.ui.setTooltip(this.hint, sx, sy);
-      R.cv.style.cursor = 'grab';
+      R.cv.style.cursor = 'var(--cur-grab)';
       return;
     }
     // 修改工具：站台方向手柄的说明
@@ -215,7 +223,7 @@
       const L = this.net().lines[ph.line];
       this.hover = null;
       this.hint = { title: '旋转' + (L ? ' ' + L.name + ' ' : '') + '站台方向', lines: ['拖动旋转（按 5° 吸附，按住 Shift 自由旋转）', ph.set ? '双击恢复自动方向' : '当前为自动方向：随相邻轨道取顺直方向', '确认建设前都可以调整，进入草案'] };
-      this.ui.setTooltip(this.hint, sx, sy); R.cv.style.cursor = 'grab';
+      this.ui.setTooltip(this.hint, sx, sy); R.cv.style.cursor = 'var(--cur-grab)';
       return;
     }
     let st = R.pickStation(sx, sy);
@@ -229,7 +237,10 @@
     let tip = null;
     const net = this.net();
     if (this.tool === 'select' || this.tool === 'edit' || this.tool === 'demolish') {
-      if (st && net.stations[st]) {
+      // 选择工具下列车优先于它压着的轨道（与点击一致；v2.4：以前悬停列车只显示轨道，看不到车上人数）
+      const train = this.tool === 'select' && !st && CM.Follow ? CM.Follow.pick(sx, sy) : null;
+      if (train) tip = CM.Follow.describe(train);
+      else if (st && net.stations[st]) {
         const s = net.stations[st];
         tip = { title: s.name, lines: [CFG.metro.sizeName[s.size] + ' · ' + (s.lv ? M.levelsText(M.stationLevels(net, st)) + '（天地换乘）' : CFG.metro.typeName[s.type] + '车站')] };
         if (this.tool === 'select') tip.lines.push('双击可直接改站名');
@@ -239,8 +250,6 @@
         tip = { title: (ln && ln.name ? ln.name + ' · ' : '') + net.stations[sg.a].name + '—' + net.stations[sg.b].name, lines: [CFG.metro.typeName[sg.type] + '轨道'] };
         if (this.tool === 'demolish') this.demolishTip(tip, { kind: 'seg', id: seg });
         if (this.tool === 'edit') tip.lines.push('点击选中后可拖动控制点调整线形');
-      } else if (this.tool === 'select' && CM.Follow && CM.Follow.pick(sx, sy)) {
-        tip = CM.Follow.describe(CM.Follow.pick(sx, sy));
       } else if (this.tool === 'select' && R.tEase < 0.5) {
         const L = R.pickLink(w.x, w.y, 0.22);
         if (L && L.name) {
@@ -254,11 +263,15 @@
       else if (!st) { const chk = M.checkSite(g.city, w.x, w.y, this.buildType); tip = chk.ok ? null : (this.lockTip(w, true) || { title: '不能在此建站', lines: [chk.msg], bad: true }); }
     } else if (this.tool === 'line') {
       tip = this.linePreviewTip(w, st, seg, mod);
+    } else if (this.tool === 'measure') {
+      if (st && net.stations[st]) { this.cursor.x = net.stations[st].x; this.cursor.y = net.stations[st].y; }   // 靠近车站时吸附
+      tip = this.measureTip();
     }
+    if (this.tool === 'select' && !st) { const pin = R.pickTaskPin(sx, sy); if (pin) tip = { title: pin.title, lines: [pin.name, '点击查看任务'].filter(Boolean) }; }
     if (!tip && !st && !seg && this.tool === 'select') tip = this.lockTip(w);
     this.hint = tip;
     this.ui.setTooltip(tip, sx, sy);
-    R.cv.style.cursor = this.ptr && this.ptr.pan ? 'grabbing' : (st || seg ? 'pointer' : (this.tool === 'select' ? 'default' : 'crosshair'));
+    R.cv.style.cursor = 'var(--cur-' + (this.ptr && this.ptr.pan ? 'grabbing' : (st || seg ? 'pointer' : (this.tool === 'select' ? 'default' : 'crosshair'))) + ')';   // 游戏配色的指针（v2.4，见 style.css 的 --cur-*）
   };
   // 悬停在未开放区域（v2.2）：区域名称、预计开放（或尚待连通）的年份、这部分的面积、人口提前开放的门槛与区域说明；
   // building 为建站工具（说明开放前不能建设）
@@ -272,13 +285,87 @@
     lines.push(building ? '开放前不能建站或铺设轨道，可推进时间等待开放' : (yr ? '开放后可以建站与铺设轨道' : '该区域不开放建设'));
     return { title: '🔒 ' + rg.name, lines: lines, bad: !!building };
   };
+  // ---------------- 测距 ----------------
+  // 依次点击量距离：总长、步行与乘车时间、按约 1 km 站距的车站数和建设费（按所选建设方式粗略估算，实际以草案为准）
+  Tools.prototype.clearMeasure = function () { this.meas = { pts: [], done: false }; this.ui.renderToolOpts(); };
+  Tools.prototype.measureInfo = function (pts) {
+    const g = this.game(), city = g.city, y = g.clock.y, kmh = this.newLineSpeed || 80;
+    let len = 0, water = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i], d = U.dist(a[0], a[1], b[0], b[1]), n = Math.max(1, Math.ceil(d / 0.5));
+      len += d;
+      for (let k = 0; k < n; k++) { const t = (k + 0.5) / n; if (city.waterDistAt(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t) < 0) water += d / n; }
+    }
+    const lenM = len * CFG.CELL_M, waterM = water * CFG.CELL_M, stations = lenM >= CFG.metro.minSpacingM ? Math.max(2, Math.round(lenM / 1000) + 1) : 0;
+    const cost = stations ? M.trackCost({ lenM: lenM, waterM: waterM, hillM: 0, protM: 0 }, this.buildType, y) + stations * M.stationCost(this.buildType, this.stationSize, y) : 0;
+    return { lenM: lenM, waterM: waterM, stations: stations, cost: cost, kmh: kmh, walk: lenM / CFG.walk.mPerMin, ride: lenM / 1000 / kmh * 60 * 1.1 + Math.max(0, stations - 2) * (CFG.metro.dwell || 30) / 60 };
+  };
+  Tools.prototype.measureTip = function () {
+    const m = this.meas, cur = this.cursor, pts = m.done || !cur ? m.pts : m.pts.concat([[cur.x, cur.y]]);
+    if (pts.length < 2) return { title: '点击放置测距起点', lines: ['靠近车站时自动吸附到车站'] };
+    const I = this.measureInfo(pts), lines = ['步行约 ' + U.fmtNum(I.walk, 0) + ' 分钟'];
+    if (I.stations) lines.push('地铁约 ' + U.fmtNum(I.ride, 1) + ' 分钟（' + I.kmh + ' km/h，含停站）', '按约 1 km 站距可设 ' + I.stations + ' 座车站', CFG.metro.typeName[this.buildType] + '建设费约 ' + U.fmtMoney(I.cost) + (I.waterM > 50 ? '（含跨水 ' + U.fmtKm(I.waterM) + '）' : ''));
+    return { title: '总长 ' + U.fmtKm(I.lenM), lines: lines };
+  };
+  Tools.prototype.drawMeasure = function (ctx, R) {
+    const m = this.meas, cur = this.cursor, pts = m.done || !cur || this.cursorOut ? m.pts : m.pts.concat([[cur.x, cur.y]]);
+    if (!pts.length) return;
+    const q = pts.map(function (p) { return R.P(p[0], p[1], 0); }), fixed = m.pts.length;
+    ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const path = function (from, to) { ctx.beginPath(); for (let i = from; i <= to; i++) { if (i > from) ctx.lineTo(q[i].x, q[i].y); else ctx.moveTo(q[i].x, q[i].y); } ctx.stroke(); };
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 5.5; path(0, q.length - 1);
+    ctx.strokeStyle = '#1e73d8'; ctx.lineWidth = 2.6; path(0, fixed - 1);
+    if (fixed && q.length > fixed) { ctx.setLineDash([7, 5]); path(fixed - 1, q.length - 1); ctx.setLineDash([]); }
+    let sum = 0;
+    for (let i = 0; i < q.length; i++) {
+      if (i) sum += U.dist(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]);
+      ctx.fillStyle = '#fff'; ctx.strokeStyle = '#1e73d8'; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.arc(q[i].x, q[i].y, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      if (i) tag(ctx, q[i].x, q[i].y - 18, U.fmtKm(sum * CFG.CELL_M), 'rgba(30,115,216,0.94)');
+    }
+    ctx.restore();
+  };
+  // 框选结果：框内的车站；两端都在框内的轨道，以及穿过框而两端都在框外的轨道（一端在框内的轨道随车站按拆站规则处理）
+  Tools.prototype.boxHits = function (ax, ay, bx, by) {
+    const R = this.R, net = this.net(), x0 = Math.min(ax, bx), x1 = Math.max(ax, bx), y0 = Math.min(ay, by), y1 = Math.max(ay, by);
+    const stations = [], segs = [], inBox = new Set();
+    const crosses = function (arr) {
+      for (let i = 0; i + 3 < arr.length; i += 2) {
+        let t0 = 0, t1 = 1, ok = true;
+        const px = arr[i], py = arr[i + 1], dx = arr[i + 2] - px, dy = arr[i + 3] - py;
+        for (const c of [[-dx, px - x0], [dx, x1 - px], [-dy, py - y0], [dy, y1 - py]]) {
+          if (c[0] === 0) { if (c[1] < 0) ok = false; continue; }
+          const r = c[1] / c[0];
+          if (c[0] < 0) t0 = Math.max(t0, r); else t1 = Math.min(t1, r);
+        }
+        if (ok && t0 <= t1) return true;
+      }
+      return false;
+    };
+    for (const id in net.stations) {
+      const s = net.stations[id], q = R.P(s.x, s.y, R.trackH(s.type));
+      if (q.x >= x0 && q.x <= x1 && q.y >= y0 && q.y <= y1) { stations.push(id); inBox.add(id); }
+    }
+    for (const id in net.segments) {
+      const sg = net.segments[id], a = inBox.has(sg.a), b = inBox.has(sg.b), arr = R.segPx && R.segPx.get(id);
+      if (a && b) segs.push(id);
+      else if (!a && !b && arr && crosses(arr)) segs.push(id);
+    }
+    return { x0: x0, y0: y0, x1: x1, y1: y1, stations: stations, segs: segs };
+  };
   // 拆除预览说明：实际网络变化（地图上同步高亮）
   Tools.prototype.demolishTip = function (tip, t) {
+    const mu = this.ui.multi;
+    if (mu) {
+      const on = (t.kind === 'station' ? mu.stations : mu.segs).has(t.id), n = mu.stations.size + mu.segs.size;
+      tip.lines.push(on ? '点击：拆除已选的 ' + n + ' 项' : '点击：取消多选', on ? 'Ctrl+点击：移出多选' : 'Ctrl+点击：加入多选');
+      tip.bad = on;
+      return;
+    }
     const imp = this.ui.demolishImpact(t);
     tip.title = '拆除 ' + tip.title;
     if (imp && imp.lines.length) { for (const l of imp.lines.slice(0, 6)) tip.lines.push('· ' + l); if (imp.lines.length > 6) tip.lines.push('· 另有 ' + (imp.lines.length - 6) + ' 项变化'); }
     else tip.lines.push('· 不影响其他线路与车站');
-    tip.lines.push('点击：拆除（进入草案，可撤销；确认前不生效）');
+    tip.lines.push('点击：拆除（进入草案，可撤销；确认前不生效）', 'Ctrl+点击多选 · Shift+拖动框选');
     tip.bad = true;
   };
   // 选中线路时，在线路端点显示延长手柄（选择 / 修改工具）
@@ -294,7 +381,7 @@
       const s = net.stations[sid], e = tp.adj.get(sid)[0];
       const p = M.adjCtrl(net, e.seg, sid);
       let dx = s.x - p[0], dy = s.y - p[1]; const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
-      const q = R.P(s.x, s.y, 0), q2 = R.P(s.x + dx, s.y + dy, 0);
+      const sh = R.trackH(s.type), q = R.P(s.x, s.y, sh), q2 = R.P(s.x + dx, s.y + dy, sh);
       let ux = q2.x - q.x, uy = q2.y - q.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
       out.push({ kind: 'extend', station: sid, line: lid, color: AX.line(line), ox: q.x, oy: q.y, sx: q.x + ux * 28, sy: q.y + uy * 28 });
     }
@@ -337,6 +424,34 @@
     const cols = CM.DATA.lineColorsNice, color = this.newLineColor || cols[(n - 1) % cols.length];
     return raw ? color : AX.line({ num: n, color: color });
   };
+  // 当前绘制线路允许的最小转弯半径（米）：延长既有线路按该线的运行速度，新线路按选定的运行速度
+  Tools.prototype.drawMinRadius = function () {
+    const L = this.chain && this.net().lines[this.lineChoice];
+    return L ? M.minRadius(L) : M.minRadius({ speed: this.newLineSpeed });
+  };
+  // 放下车站前预览站名（v2.5 玩家反馈）：与放下时的取名规则相同（M.addStation、M.splitSegment）；按位置与线网版本缓存
+  Tools.prototype.previewName = function (x, y) {
+    const g = this.game(), net = this.net(), hv = this.hover, seg = hv && hv.kind === 'seg' ? net.segments[hv.id] : null;
+    const key = [x.toFixed(3), y.toFixed(3), seg ? seg.id : '', this.portalHover || '', g.draft ? g.draft.ver : g.netVersion, g.rev].join('|');
+    if (this._pvName && this._pvName.key === key) return this._pvName.name;
+    let name = '';
+    const f = this.portalHover && CM.Fac ? CM.Fac.byId(this.portalHover) : null;
+    if (f) {
+      const used = new Set(Object.values(net.stations).map(function (s) { return s.name; }));
+      name = CM.Fac.shortName(f); if (used.has(name)) name += '接驳';
+    } else {
+      let px = x, py = y;
+      if (seg) { const pts = M.segGeom(net, seg, g.city).pts; U.distToPoly(x, y, pts); const i = U._i, t = U._t; if (pts[i + 1]) { px = pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t; py = pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t; } }
+      name = M.suggestName(net, px, py, g.city);
+    }
+    this._pvName = { key: key, name: name };
+    return name;
+  };
+  Tools.prototype.drawNameTag = function (ctx, R, x, y, h, bad) {
+    const name = this.previewName(x, y); if (!name) return;
+    const q = R.P(x, y, h), w = tag(ctx, q.x, q.y + 22, name, bad ? 'rgba(214,48,49,0.92)' : 'rgba(31,42,58,0.88)');
+    this.tagRect = { x0: q.x - w / 2 - 4, y0: q.y + 7, x1: q.x + w / 2 + 4, y1: q.y + 37 };   // 悬停提示避开这块（UI.placeTip）
+  };
   Tools.prototype.linePreviewTip = function (w, st, seg, mod) {
     const g = this.game(), net = this.net();
     if (!this.chain) {
@@ -351,6 +466,7 @@
       if (!chk.ok) return { title: '不能在此建站', lines: [chk.msg], bad: true };
       const c0 = g.city.cellAt(w.x, w.y), first = ['点击线路端点车站则延长该线路'];
       if (c0 >= 0 && g.city.regions[g.city.region[c0]].scenic) first.push(this.envNote(0, M.envStationFee(this.buildType, this.stationSize, g.clock.y)));
+      { const hf = M.heritageStationFee(g.city, w.x, w.y, this.buildType, this.stationSize, g.clock.y); if (hf > 0) first.push((g.city.heritage[g.city.cellAt(w.x, w.y)] === 2 ? '古建保护范围：车站加收保护费约 ' : '历史城区：车站加收保护费约 ') + U.fmtMoney(hf)); }
       return { title: '点击放置第一座车站（新线路）', lines: first };
     }
     const A = net.stations[this.chain];
@@ -365,19 +481,21 @@
     const endC = g.city.cellAt(end[0], end[1]);
     const envT = pv.host ? 0 : M.envTrackFee(geo, this.buildType, g.clock.y);
     const envS = newSt && !mod && !seg && endC >= 0 && g.city.regions[g.city.region[endC]].scenic ? M.envStationFee(this.buildType, this.stationSize, g.clock.y) : 0;
-    cost += envT + envS;
+    const herS = newSt && !mod && !seg ? M.heritageStationFee(g.city, end[0], end[1], this.buildType, this.stationSize, g.clock.y) : 0;
+    cost += envT + envS + herS;
     const lines = pv.host ? ['沿用 ' + (net.lines[pv.host.line] ? net.lines[pv.host.line].name : '') + ' 的既有轨道（共线运营），不另收建设费', '需要单独建轨道时，先 Shift+点击加一个转弯点']
       : ['长度 ' + U.fmtKm(geo.lenM) + (geo.waterM > 1 ? '，' + (this.buildType === 'underground' ? '越江隧道 ' : '跨江桥梁 ') + U.fmtKm(geo.waterM) : '') + ' · 约 ' + U.fmtMoney(cost)];
     let bad = false;
     if (mod) lines.unshift('松开 Shift 点击 = 连接；当前为添加转弯点');
     const ty = pv.host ? pv.host.type : this.buildType;
     if (geo.hillM > 1 && ty !== 'underground') { lines.push('经过山地风景区：仅可地下穿越'); bad = true; }
+    if (!pv.host && (geo.herM > 1 || geo.guardM > 1)) { if (ty !== 'underground') { lines.push((geo.herHit && geo.herHit[3] === 2 ? '经过「' : '经过历史城区「') + (geo.herHit ? geo.herHit[2] : '') + '」：只能走地下'); bad = true; } else lines.push((geo.herHit && geo.herHit[3] === 2 ? '穿过「' : '穿过历史城区「') + (geo.herHit ? geo.herHit[2] : '') + '」' + U.fmtKm((geo.herM || 0) + (geo.guardM || 0)) + '：隧道要避开古建基础，造价已提高'); }
     if (envT + envS > 0) lines.push(this.envNote(envT ? geo.hillM : 0, envT + envS, envS > 0));
     if (geo.protM > 1 && ty !== 'underground') { lines.push('穿越受保护建筑：' + geo.protNames.join('、')); bad = true; }
     const toPortal = CM.Fac.isPortalStation(A) || (st && CM.Fac.isPortalStation(net.stations[st]));   // 接驳口区段可穿过尚未开放的区域
     const lockedHit = geo.locked.filter(function (l) { return !toPortal || l.open == null; });
     if (lockedHit.length) { lines.push('经过未开放区域：' + lockedHit[0].name); bad = true; }
-    if (!mod && isFinite(geo.minRadiusM) && geo.minRadiusM < CFG.metro.minRadiusM) { lines.push('弯道过急：半径约 ' + Math.round(geo.minRadiusM) + ' m（最小 ' + CFG.metro.minRadiusM + ' m），可 Shift+点击加转弯点'); bad = true; }
+    const minRdraw = this.drawMinRadius(); if (!mod && isFinite(geo.minRadiusM) && geo.minRadiusM < minRdraw) { lines.push('弯道过急：半径约 ' + Math.round(geo.minRadiusM) + ' m（最小 ' + minRdraw + ' m），可 Shift+点击加转弯点'); bad = true; }
     if (!mod && pv.turn > CFG.metro.maxTurnAtStationDeg) { lines.push('在「' + A.name + '」处转向约 ' + Math.round(pv.turn) + '°（最大 ' + CFG.metro.maxTurnAtStationDeg + '°）'); bad = true; }
     if (newSt && !mod && !st && !seg) { const chk = M.checkSite(g.city, w.x, w.y, this.buildType); if (!chk.ok) { lines.push(chk.msg); bad = true; } }
     return { title: st ? '连接到「' + net.stations[st].name + '」' : (seg ? '连接并在该轨道上新建换乘站' : (mod ? '添加转弯点' : '新建车站并连接')), lines: lines, bad: bad };
@@ -428,7 +546,7 @@
   Tools.prototype.onClick = function (sx, sy, mod, multiKey) {
     const g = this.game(), R = this.R;
     if (g.jumping) return;
-    let w = this.world(sx, sy);
+    let w = this.world(sx, sy, this.buildH());
     let st = R.pickStation(sx, sy);
     let seg = st ? null : R.pickSegment(sx, sy);
     // 地图外设施的接驳口：吸附到接驳口（已有接驳口车站时连接该站）
@@ -440,9 +558,17 @@
     }
     const ui = this.ui;
     // 多选：Ctrl / Shift + 点击车站或轨道（选择、修改工具）
-    if (multiKey && (st || seg) && (this.tool === 'select' || this.tool === 'edit')) { ui.toggleMulti(st ? 'station' : 'seg', st || seg); this.updateHover(sx, sy, mod); return; }
+    if (multiKey && (st || seg) && (this.tool === 'select' || this.tool === 'edit' || this.tool === 'demolish')) { ui.toggleMulti(st ? 'station' : 'seg', st || seg); this.updateHover(sx, sy, mod); return; }
     switch (this.tool) {
+      case 'measure': {
+        const m = this.meas, s = st && this.net().stations[st];
+        if (m.done) { m.pts = []; m.done = false; }
+        m.pts.push(s ? [s.x, s.y] : [w.x, w.y]);
+        sfx('soft'); ui.renderToolOpts();
+        break;
+      }
       case 'select': {
+        if (!st && R.pickTaskPin(sx, sy)) { ui.taskTab = 'active'; ui.openPage('tasks', 'active', { root: true }); break; }
         // 设施图层中优先选中设施圆点；其余情况下道路优先，其次是重要设施的场地（v1.9），再次是片区
         const facLayer = this.ui.layer === 'fac' || this.ui.layer === 'gap';
         const fid0 = !st && !seg && facLayer ? R.pickFacility(sx, sy, w.x, w.y) : null;
@@ -474,7 +600,7 @@
         let id = null;
         g.edit((net) => { id = M.addStation(net, w.x, w.y, this.stationOpts(w), g.city); });
         sfx('place');
-        this.R.addFx('ripple', w.x, w.y);
+        this.R.addFx('ripple', w.x, w.y, { type: this.buildType });
         ui.select({ kind: 'station', id: id });
         break;
       }
@@ -487,6 +613,9 @@
       }
       case 'demolish': {
         const net = this.net();
+        // 已有多选：点击已选对象拆除全部，点击别处只取消多选，不会误拆
+        if (ui.multi) { if (multiKey) break; if ((st && ui.multi.stations.has(st)) || (seg && ui.multi.segs.has(seg))) ui.demolishMulti(); else ui.clearMulti(); break; }
+        if (multiKey) break;
         if (st) {
           const s = net.stations[st];
           this.R.addFx('dust', s.x, s.y);
@@ -534,7 +663,7 @@
       let id = null;
       g.edit(function (net) { id = M.addStation(net, w.x, w.y, opts, g.city); });
       sfx('place');
-      this.R.addFx('ripple', w.x, w.y);
+      this.R.addFx('ripple', w.x, w.y, { type: this.buildType });
       this.chain = id; this.bends = []; this.lineChoice = 'new';
       ui.renderToolOpts();
       return;
@@ -551,7 +680,7 @@
     const r = g.edit(function (net) {
       let lid = self.lineChoice;
       const created = lid === 'new' || !net.lines[lid];
-      if (created) { lid = M.newLine(net); if (self.newLineColor) net.lines[lid].color = self.newLineColor; }
+      if (created) { lid = M.newLine(net); if (self.newLineColor) net.lines[lid].color = self.newLineColor; if (self.newLineSpeed && self.newLineSpeed !== 80) net.lines[lid].speed = self.newLineSpeed; }
       let to = st;
       if (!to && seg) { const sp = M.splitSegment(net, seg, w.x, w.y, opts, g.city); to = sp.station; }
       if (!to) to = M.addStation(net, w.x, w.y, opts, g.city);
@@ -577,8 +706,9 @@
     sfx('lay');
     {
       const net0 = this.net(), sg0 = M.findSeg(net0, r.lid, from, r.to), ln0 = net0.lines[r.lid];
-      if (sg0 && ln0) this.R.addFx('trace', 0, 0, { pts: M.segGeom(net0, sg0, g.city).pts, color: AX.line(ln0), dur: 0.7 });
-      const ts = net0.stations[r.to]; if (ts && !st) this.R.addFx('ripple', ts.x, ts.y, { color: ln0 ? AX.line(ln0) : null });
+      if (sg0 && ln0) this.R.addFx('trace', 0, 0, { pts: M.segGeom(net0, sg0, g.city).pts, color: AX.line(ln0), dur: 0.7, type: sg0.type });
+      this.lastSeg = sg0 ? sg0.id : null;   // 刚画好的这一段：绘线工具里显示控制点，可直接拖动调弯
+      const ts = net0.stations[r.to]; if (ts && !st) this.R.addFx('ripple', ts.x, ts.y, { color: ln0 ? AX.line(ln0) : null, type: ts.type });
     }
     this.lineChoice = r.lid; target = r.to;
     this.chain = target; this.bends = [];
@@ -598,6 +728,8 @@
   };
   Tools.prototype.onRight = function (e) {
     if (this.tool === 'line') this.endChain();
+    else if (this.tool === 'demolish') { if (this.ui.multi) this.ui.clearMulti(); }
+    else if (this.tool === 'measure') { const m = this.meas; if (m.pts.length >= 2 && !m.done) m.done = true; else this.clearMeasure(); this.updateHover(e.clientX, e.clientY, false); }
     // 选择工具：右键车站或线路弹出快捷操作菜单（v2.1 第二轮）
     else if (this.tool === 'select' && e && CM.Quick) CM.Quick.context(e.clientX, e.clientY);
   };
@@ -623,29 +755,32 @@
   Tools.prototype.handles = function () {
     const g = this.game(), sel = this.ui.selection, R = this.R;
     const out = [];
-    if (!g || this.tool !== 'edit' || !sel) return out;
+    // 绘线工具（v2.3）：刚画好的那一段也显示控制点，直接拖动调弯，不必切换到修改工具
+    const lineMode = !!g && this.tool === 'line' && !!this.lastSeg;
+    if (!g || (this.tool !== 'edit' && !lineMode) || (!sel && !lineMode)) return out;
     const net = this.net();
     const addSeg = function (sid) {
       const s = net.segments[sid]; if (!s) return;
-      const ctrl = M.userControl(net, s);
-      for (let k = 0; k < (s.pts || []).length; k++) { const p = R.P(s.pts[k][0], s.pts[k][1], 0); out.push({ kind: 'bend', seg: sid, k: k, sx: p.x, sy: p.y }); }
+      const ctrl = M.userControl(net, s), hh = R.trackH(s.type);   // 控制点画在线路本身的高度上（高架线在 3D 中位于桥面）
+      for (let k = 0; k < (s.pts || []).length; k++) { const p = R.P(s.pts[k][0], s.pts[k][1], hh); out.push({ kind: 'bend', seg: sid, k: k, sx: p.x, sy: p.y, h: hh }); }
       for (let k = 0; k + 1 < ctrl.length; k++) {
         const mx = (ctrl[k][0] + ctrl[k + 1][0]) / 2, my = (ctrl[k][1] + ctrl[k + 1][1]) / 2;
-        const p = R.P(mx, my, 0); out.push({ kind: 'mid', seg: sid, k: k, sx: p.x, sy: p.y });
+        const p = R.P(mx, my, hh); out.push({ kind: 'mid', seg: sid, k: k, sx: p.x, sy: p.y, h: hh });
       }
     };
+    if (lineMode) { if (net.segments[this.lastSeg]) addSeg(this.lastSeg); return out; }
     if (sel.kind === 'seg') addSeg(sel.id);
     if (sel.kind === 'station' && net.stations[sel.id]) {
-      const s = net.stations[sel.id], p = R.P(s.x, s.y, 0);
-      out.push({ kind: 'station', id: sel.id, sx: p.x, sy: p.y });
+      const s = net.stations[sel.id], sh = R.trackH(s.type), p = R.P(s.x, s.y, sh);
+      out.push({ kind: 'station', id: sel.id, sx: p.x, sy: p.y, h: sh });
       for (const id in net.segments) { const sg = net.segments[id]; if (sg.a === sel.id || sg.b === sel.id) addSeg(id); }
       // 站台方向手柄（v2.1）：每条经过本站的线路一个，位于站台方向上，拖动旋转（5° 吸附，Shift 自由），双击恢复自动
       for (const lid of M.stationLines(net, sel.id)) {
         const a = M.platformDir(net, sel.id, lid); if (a == null) continue;
-        const q = R.P(s.x + Math.cos(a) * 0.2, s.y + Math.sin(a) * 0.2, 0);
+        const ph = R.trackH(M.platType(s, lid)), q = R.P(s.x + Math.cos(a) * 0.2, s.y + Math.sin(a) * 0.2, ph);
         let ux = q.x - p.x, uy = q.y - p.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
         const L = net.lines[lid];
-        out.push({ kind: 'plat', id: sel.id, line: lid, set: !!(s.pd && s.pd[lid] != null), color: L ? AX.line(L) : '#1e88e5', ox: p.x, oy: p.y, sx: p.x + ux * 38, sy: p.y + uy * 38 });
+        out.push({ kind: 'plat', id: sel.id, line: lid, set: !!(s.pd && s.pd[lid] != null), color: L ? AX.line(L) : '#1e88e5', ox: p.x, oy: p.y, sx: p.x + ux * 38, sy: p.y + uy * 38, h: ph });
       }
     }
     return out;
@@ -653,12 +788,12 @@
   Tools.prototype.pickHandle = function (sx, sy) {
     let best = null, bd = 9;
     for (const h of this.handles()) { const d = Math.hypot(h.sx - sx, h.sy - sy); if (d < bd) { bd = d; best = h; } }
-    if (!best) { const st = this.R.pickStation(sx, sy); if (st && this.ui.selection && this.ui.selection.kind === 'station' && this.ui.selection.id === st) best = { kind: 'station', id: st }; }
+    if (!best) { const st = this.R.pickStation(sx, sy); if (st && this.ui.selection && this.ui.selection.kind === 'station' && this.ui.selection.id === st) { const so = this.net().stations[st]; best = { kind: 'station', id: st, h: so ? this.R.trackH(so.type) : 0 }; } }
     return best ? Object.assign({}, best) : null;
   };
   Tools.prototype.dragTo = function (sx, sy, shiftKey) {
     const g = this.game(), d = this.drag;
-    let w = this.world(sx, sy);
+    let w = this.world(sx, sy, d.h || 0);
     const sp = this.snapAt(w); this.snapPt = sp;
     if (sp) w = { x: sp.x, y: sp.y };
     const shift = !!shiftKey;
@@ -703,6 +838,8 @@
       return;
     }
     if (this.ui.dropdown || this.ui.searchEl) { this.keys.clear(); this.keyMods = {}; return; }
+    // 拆除工具已有多选：Enter 或 Delete 拆除所选
+    if (this.tool === 'demolish' && this.ui.multi && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat && (e.code === 'Delete' || (/^(Numpad)?Enter$/.test(e.code) && tag !== 'BUTTON'))) { e.preventDefault(); this.ui.demolishMulti(); return; }
     // 线路选择框打开时：数字键选择对应线路，Esc 关闭（保留当前选择）
     if (this.ui.linePicker && !e.ctrlKey && !e.metaKey && !e.altKey) {
       const dm = /^(?:Digit|Numpad)([1-9])$/.exec(e.code || '');
@@ -715,6 +852,7 @@
     if (!act) return;
     if (e.repeat && !/^cam\.(?:up|down|left|right|zoomIn|zoomOut)$/.test(act)) { e.preventDefault(); return; }
     const ui = this.ui, R = this.R;
+    if (document.body.classList.contains('cinema') && /^(?:tool\.|build\.|ui\.(?:search|tasks|help|stats)$)/.test(act)) ui.toggleImmersive(false);
     switch (act) {
       case 'pause': ui.togglePause(); break;
       case 'speed1': ui.setSpeed(1); break;
@@ -730,6 +868,7 @@
       case 'tool.line': this.setTool('line'); break;
       case 'tool.edit': this.setTool('edit'); break;
       case 'tool.demolish': this.setTool('demolish'); break;
+      case 'tool.measure': this.setTool(this.tool === 'measure' ? 'select' : 'measure'); break;
       case 'build.finish': if (this.tool === 'line') this.endChain(); else return; break;
       case 'build.back': if (this.tool === 'line' && this.bends.length) this.bends.pop(); else if (g.draft) ui.undo(); else return; break;
       case 'build.undo': ui.undo(); break;
@@ -752,7 +891,7 @@
       case 'ui.save': ui.quickSave(); break;
       case 'ui.theme': ui.toggleTheme(); break;
       case 'ui.sound': ui.toggleSound(); break;
-      case 'ui.hideUI': if (CM.Follow && CM.Follow.active()) CM.Follow.toggleUI(); else return; break;
+      case 'ui.hideUI': ui.toggleImmersive(); break;
       case 'cam.up': case 'cam.down': case 'cam.left': case 'cam.right': e.preventDefault(); return;
       default: return;
     }
@@ -762,6 +901,8 @@
     const ui = this.ui;
     // 快捷操作的气泡或右键菜单打开时，Esc 只关闭它们
     if (CM.Quick && CM.Quick.busy()) { CM.Quick.close(); return; }
+    if (this.tool === 'measure') { if (this.meas.pts.length) this.clearMeasure(); else this.setTool('select'); return; }
+    if (this.tool === 'demolish' && (ui.multi || this.boxSel)) { this.cancelDrag(); if (ui.multi) ui.clearMulti(); return; }
     // 依次收起：图层面板、搜索、右侧面板（指标、任务等；指标自带的图层随之恢复）、仍开着的图层——都不暂停；
     // 正在建设（非选择工具）时按原规则处理
     if (ui.layerPanelOpen()) { ui.toggleLayerPanel(false); return; }
@@ -785,7 +926,7 @@
   Tools.prototype.tick = function (dt) {
     const K = this.keys; if (!K.size || !this.game()) return;
     const focus = document.activeElement;
-    if (this.ui.blocking() || this.ui.dropdown || this.ui.searchEl || this.ui._keyCap || (focus && (/^(INPUT|TEXTAREA|SELECT)$/.test(focus.tagName) || focus.isContentEditable))) { this.keys.clear(); this.keyMods = {}; return; }
+    if (this.ui.blocking() || this.ui.opsApp || this.ui.voApp || this.ui.dropdown || this.ui.searchEl || this.ui._keyCap || (focus && (/^(INPUT|TEXTAREA|SELECT)$/.test(focus.tagName) || focus.isContentEditable))) { this.keys.clear(); this.keyMods = {}; return; }
     const sp = 600 * dt, KS = CM.Keys;
     let dx = 0, dy = 0;
     if (KS.held('cam.left', K, this.keyMods)) dx += sp;
@@ -813,9 +954,89 @@
     ctx.globalAlpha = 0.9 * a; ctx.lineWidth = 2; ctx.setLineDash([9, 7]); ctx.lineDashOffset = -(t * 28) % 16; ctx.stroke(path);
     ctx.restore();
   };
+  // 冲突的定位与调整建议（M.conflictGuide），按草案版本缓存；拖动中只做快速版（不试算）
+  Tools.prototype.guideFor = function (c) {
+    const g = this.game(), d = g && g.draft; if (!d) return null;
+    const quick = !!this.drag;
+    if (!this._gd || this._gd.ver !== d.ver || this._gd.quick !== quick) this._gd = { ver: d.ver, quick: quick, m: new Map() };
+    const k = c.type + ':' + c.ref + ':' + (c.ref2 || '');
+    if (!this._gd.m.has(k)) { let r = null; try { r = M.conflictGuide(d.net, c, g.city, quick); } catch (e) { console.error(e); } this._gd.m.set(k, r); }
+    return this._gd.m.get(k);
+  };
+  // h：线路高度（R.trackH），与线路本身的绘制一致
+  const polyPath = function (ctx, R, pts, h) { ctx.beginPath(); pts.forEach(function (p, i) { const q = R.P(p[0], p[1], h || 0); if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y); }); };
+  const tag = function (ctx, x, y, text, bg) {
+    ctx.font = CM.MAP_TYPE.place; const w = ctx.measureText(text).width + 14;   // 与地图标注同一种字（v2.4，以前是系统默认字体）
+    ctx.fillStyle = bg; ctx.beginPath(); ctx.roundRect(x - w / 2, y - 11, w, 22, 11); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, x, y + 0.5);
+    return w;
+  };
+  const arrowTo = function (ctx, R, a, b, col, h) {
+    const p = R.P(a[0], a[1], h || 0), q = R.P(b[0], b[1], h || 0), ang = Math.atan2(q.y - p.y, q.x - p.x), L = Math.hypot(q.x - p.x, q.y - p.y);
+    if (L < 4) return;
+    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 3; ctx.setLineDash([6, 4]);
+    ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(q.x - Math.cos(ang) * 8, q.y - Math.sin(ang) * 8); ctx.stroke(); ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(q.x, q.y); ctx.lineTo(q.x - Math.cos(ang - 0.45) * 13, q.y - Math.sin(ang - 0.45) * 13); ctx.lineTo(q.x - Math.cos(ang + 0.45) * 13, q.y - Math.sin(ang + 0.45) * 13); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.beginPath(); ctx.arc(q.x, q.y, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  };
+  // 转弯圆：以最急处为切点，红色虚线为当前半径、绿色虚线为最小允许半径（只画切点附近的一段弧）
+  const turnCircles = function (ctx, R, ci, h) {
+    const at = ci.at, ux = ci.c[0] - at[0], uy = ci.c[1] - at[1], ul = Math.hypot(ux, uy) || 1, a0 = Math.atan2(at[1] - ci.c[1], at[0] - ci.c[0]);
+    const arc = function (cx, cy, r, col, span) {
+      ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.setLineDash([5, 5]); ctx.beginPath();
+      for (let k = 0; k <= 32; k++) { const a = a0 + (k / 32 - 0.5) * span, q = R.P(cx + Math.cos(a) * r, cy + Math.sin(a) * r, h || 0); if (k) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y); }
+      ctx.stroke(); ctx.setLineDash([]);
+    };
+    arc(ci.c[0], ci.c[1], ci.r, 'rgba(214,48,49,0.9)', Math.min(2.4, 0.9 / Math.max(0.05, ci.r)));
+    const nc = [at[0] + ux / ul * ci.need, at[1] + uy / ul * ci.need];
+    arc(nc[0], nc[1], ci.need, 'rgba(32,160,90,0.95)', Math.min(2.4, 0.9 / Math.max(0.05, ci.need)));
+    const q = R.P(at[0], at[1], h || 0);
+    tag(ctx, q.x, q.y - 26, '半径约 ' + Math.round(ci.r * CFG.CELL_M) + ' m · 需 ≥ ' + Math.round(ci.need * CFG.CELL_M) + ' m', 'rgba(214,48,49,0.92)');
+  };
+  Tools.prototype.conflictH = function (c) { const net = this.net(), R = this.R, o = c.kind === 'seg' ? net.segments[c.ref] : net.stations[c.ref]; return o ? R.trackH(o.type) : 0; };
+  Tools.prototype.drawGuide = function (ctx, R, c, gd, full, pulse) {
+    ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const hh = this.conflictH(c);
+    for (const run of gd.stretch || []) {
+      polyPath(ctx, R, run, hh);
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = R.lineWidthPx() + 9; ctx.stroke();
+      ctx.strokeStyle = 'rgba(214,48,49,' + (0.75 + 0.25 * pulse) + ')'; ctx.lineWidth = R.lineWidthPx() + 5; ctx.stroke();
+    }
+    if (gd.rays) for (const r of gd.rays) { ctx.strokeStyle = 'rgba(232,130,30,0.95)'; ctx.lineWidth = 3; ctx.setLineDash([4, 4]); polyPath(ctx, R, r, hh); ctx.stroke(); ctx.setLineDash([]); }
+    if (full && gd.circle) turnCircles(ctx, R, gd.circle, hh);
+    if (gd.arrow) {
+      arrowTo(ctx, R, gd.arrow.from, gd.arrow.to, 'rgba(32,160,90,0.95)', hh);
+      if (full) { const q = R.P(gd.arrow.to[0], gd.arrow.to[1], hh); tag(ctx, q.x, q.y + 22, '移动约 ' + gd.arrow.m + ' m', 'rgba(32,160,90,0.95)'); }
+    }
+    ctx.restore();
+  };
+  Tools.prototype.drawLiveCurve = function (ctx, R, net) {
+    const g = this.game(), d = this.drag, C = g.draftCompiled(); if (!C) return;
+    const ids = [];
+    if (d.seg) ids.push(d.seg);
+    if (d.kind === 'station') for (const id in net.segments) { const s = net.segments[id]; if (s.a === d.id || s.b === d.id) ids.push(id); }
+    ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const id of ids) {
+      const cs = C.segs.get(id); if (!cs) continue;
+      const L = net.lines[cs.seg.line], col = L ? AX.line(L) : '#1e88e5', hh = R.trackH(cs.seg.type);
+      polyPath(ctx, R, cs.g.pts, hh);
+      ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = R.lineWidthPx() + 7; ctx.stroke();
+      ctx.strokeStyle = col; ctx.lineWidth = R.lineWidthPx() + 2; ctx.stroke();
+      const minR = M.minRadius(L), ts = M.tightStretch(cs.g, minR);
+      for (const run of ts.stretch) { polyPath(ctx, R, run, hh); ctx.strokeStyle = 'rgba(214,48,49,0.95)'; ctx.lineWidth = R.lineWidthPx() + 3; ctx.stroke(); }
+      if (isFinite(cs.g.minRadiusM) && cs.g.minRxy && cs.g.minRadiusM < M.warnRadius(L) * 1.5) {
+        const bad = cs.g.minRadiusM < minR, q = R.P(cs.g.minRxy[0], cs.g.minRxy[1], hh);
+        tag(ctx, q.x, q.y - 22, (bad ? '弯道过急 ' : '最小半径 ') + Math.round(cs.g.minRadiusM) + ' m' + (bad ? ' < ' + minR : ' ✓'), bad ? 'rgba(214,48,49,0.92)' : 'rgba(32,160,90,0.92)');
+        if (bad && ts.circle) turnCircles(ctx, R, ts.circle, hh);
+      }
+    }
+    ctx.restore();
+  };
   Tools.prototype.drawOverlay = function (ctx, R) {
+    this.tagPrev = this.tagRect; this.tagRect = null;
     const g = this.game(); if (!g) return;
     const net = this.net();
+    if (this.tool === 'measure') this.drawMeasure(ctx, R);
     const cur = this.cursor;
     this.drawLockHover(ctx, R, performance.now());
     // 网格吸附：缩放后间隔会变，按当前鼠标位置重新取交叉点，并画出淡色十字
@@ -828,21 +1049,33 @@
     if (this.tool === 'line' && this.chain && net.stations[this.chain] && cur) {
       const st = this.hover && this.hover.kind === 'station' ? net.stations[this.hover.id] : null;
       const end = st ? [st.x, st.y] : [cur.x, cur.y];
-      const geo = this.previewGeom(end, st && !cur.mod ? st.id : null).geo;
+      const pv0 = this.previewGeom(end, st && !cur.mod ? st.id : null), geo = pv0.geo, hb = R.trackH(pv0.host ? pv0.host.type : this.buildType);
       const lid = this.lineChoice;
       const col = net.lines[lid] ? AX.line(net.lines[lid]) : this.nextLineColor();
       ctx.lineJoin = 'round'; ctx.lineCap = 'round';
       ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = R.lineWidthPx() + 3;
-      ctx.beginPath(); geo.pts.forEach(function (p, i) { const q = R.P(p[0], p[1], 0); if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y); }); ctx.stroke();
+      ctx.beginPath(); geo.pts.forEach(function (p, i) { const q = R.P(p[0], p[1], hb); if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y); }); ctx.stroke();
       ctx.strokeStyle = this.hint && this.hint.bad ? AX.color('#d63031') : col; ctx.lineWidth = R.lineWidthPx(); ctx.setLineDash([8, 6]); ctx.lineDashOffset = -R.time * 20;
       ctx.stroke(); ctx.setLineDash([]); ctx.lineDashOffset = 0;
-      for (const b of this.bends) { const q = R.P(b[0], b[1], 0); ctx.fillStyle = '#fff'; ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(q.x, q.y, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
-      if (!st) { const q = R.P(end[0], end[1], 0); ctx.strokeStyle = this.hint && this.hint.bad ? AX.color('#d63031') : col; ctx.lineWidth = 2.5; ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.beginPath(); ctx.arc(q.x, q.y, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+      // 预览线形中弯道过急的部分直接标红（v2.3），与确认建设时的检查一致
+      for (const run of M.tightStretch(geo, this.drawMinRadius()).stretch) { polyPath(ctx, R, run, hb); ctx.strokeStyle = 'rgba(214,48,49,0.95)'; ctx.lineWidth = R.lineWidthPx() + 2; ctx.stroke(); }
+      for (const b of this.bends) { const q = R.P(b[0], b[1], hb); ctx.fillStyle = '#fff'; ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(q.x, q.y, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+      if (!st) { const q = R.P(end[0], end[1], hb); ctx.strokeStyle = this.hint && this.hint.bad ? AX.color('#d63031') : col; ctx.lineWidth = 2.5; ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.beginPath(); ctx.arc(q.x, q.y, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); if (!cur.mod) this.drawNameTag(ctx, R, end[0], end[1], hb, this.hint && this.hint.bad); }
     }
+    // 绘线的第一座车站：还没有起点时，光标处即将放下的车站
+    if (this.tool === 'line' && !this.chain && cur && !this.drag && !(this.hover && this.hover.kind === 'station')) {
+      const hb = R.trackH(this.buildType), q = R.P(cur.x, cur.y, hb), ok = this.portalHover || (this.hover && this.hover.kind === 'seg') ? true : M.checkSite(g.city, cur.x, cur.y, this.buildType).ok;
+      ctx.strokeStyle = ok ? this.nextLineColor() : '#d63031'; ctx.lineWidth = 2; ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.beginPath(); ctx.arc(q.x, q.y, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      this.drawNameTag(ctx, R, cur.x, cur.y, hb, !ok);
+    }
+    // 建站工具指向轨道：在轨道上插入车站
+    if (this.tool === 'station' && cur && this.hover && this.hover.kind === 'seg') this.drawNameTag(ctx, R, cur.x, cur.y, R.trackH(this.buildType), false);
     // 建站预览
     if (this.tool === 'station' && cur && !this.hover) {
-      const q = R.P(cur.x, cur.y, 0);
+      const q = R.P(cur.x, cur.y, R.trackH(this.buildType));
       const ok = this.portalHover ? true : M.checkSite(g.city, cur.x, cur.y, this.buildType).ok;
+      this.drawNameTag(ctx, R, cur.x, cur.y, R.trackH(this.buildType), !ok);
       ctx.strokeStyle = ok ? '#1e88e5' : '#d63031'; ctx.lineWidth = 2; ctx.fillStyle = 'rgba(255,255,255,0.8)';
       ctx.beginPath(); ctx.arc(q.x, q.y, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       if (!ok) { ctx.beginPath(); ctx.moveTo(q.x - 4, q.y - 4); ctx.lineTo(q.x + 4, q.y + 4); ctx.moveTo(q.x + 4, q.y - 4); ctx.lineTo(q.x - 4, q.y + 4); ctx.stroke(); }
@@ -854,32 +1087,45 @@
       ctx.stroke(); ctx.setLineDash([]);
     }
     // 拆除预览：红色 = 将拆除；绿色虚线 = 轨道直连保留；灰色 = 失去服务的车站；橙色 = 不再换乘
-    if (this.tool === 'demolish' && this.hover) {
-      const imp = this.ui.demolishImpact(this.hover);
+    const mu0 = this.ui.multi;
+    if (this.tool === 'demolish' && (this.hover || mu0)) {
+      const tg = mu0 ? { kind: 'many', stations: Array.from(mu0.stations), segs: Array.from(mu0.segs) } : this.hover;
+      const imp = this.ui.demolishImpact(tg);
       ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       if (imp) for (const id of imp.removed) if (R.segPx && R.segPx.get(id)) { ctx.strokeStyle = 'rgba(214,48,49,0.7)'; ctx.lineWidth = R.lineWidthPx() + 6; R.strokeArr(ctx, R.segPx.get(id)); }
-      if (this.hover.kind === 'station') { const s = net.stations[this.hover.id]; if (s) { const q = R.P(s.x, s.y, 0); ctx.strokeStyle = 'rgba(214,48,49,0.9)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(q.x, q.y, 12, 0, Math.PI * 2); ctx.stroke(); ctx.beginPath(); ctx.moveTo(q.x - 6, q.y - 6); ctx.lineTo(q.x + 6, q.y + 6); ctx.moveTo(q.x + 6, q.y - 6); ctx.lineTo(q.x - 6, q.y + 6); ctx.stroke(); } }
+      for (const sid of mu0 ? tg.stations : (tg.kind === 'station' ? [tg.id] : [])) { const s = net.stations[sid]; if (s) { const q = R.P(s.x, s.y, R.trackH(s.type)); ctx.strokeStyle = 'rgba(214,48,49,0.9)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(q.x, q.y, 12, 0, Math.PI * 2); ctx.stroke(); ctx.beginPath(); ctx.moveTo(q.x - 6, q.y - 6); ctx.lineTo(q.x + 6, q.y + 6); ctx.moveTo(q.x + 6, q.y - 6); ctx.lineTo(q.x - 6, q.y + 6); ctx.stroke(); } }
       if (imp) {
         for (const id of imp.added) {
           const sg = imp.after.segments[id], ln = imp.after.lines[sg.line];
           const pts = M.segGeom(imp.after, sg, g.city).pts;
-          ctx.beginPath(); pts.forEach(function (p, i) { const q = R.P(p[0], p[1], 0); if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y); });
+          const ah = R.trackH(sg.type); ctx.beginPath(); pts.forEach(function (p, i) { const q = R.P(p[0], p[1], ah); if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y); });
           ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = R.lineWidthPx() + 3; ctx.stroke();
           ctx.strokeStyle = ln ? AX.line(ln) : AX.color('#2e9d57'); ctx.lineWidth = R.lineWidthPx(); ctx.setLineDash([7, 5]); ctx.stroke(); ctx.setLineDash([]);
         }
-        const ring = function (sid, col) { const s = imp.after.stations[sid]; if (!s) return; const q = R.P(s.x, s.y, 0); ctx.strokeStyle = col; ctx.lineWidth = 2.5; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(q.x, q.y, 11, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); };
+        const ring = function (sid, col) { const s = imp.after.stations[sid]; if (!s) return; const q = R.P(s.x, s.y, R.trackH(s.type)); ctx.strokeStyle = col; ctx.lineWidth = 2.5; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(q.x, q.y, 11, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); };
         for (const sid of imp.lost) ring(sid, 'rgba(110,118,130,0.95)');
         for (const sid of imp.lostXfer) ring(sid, 'rgba(232,130,30,0.95)');
       }
     }
-    // 多选高亮
-    const mu = this.ui.multi;
+    // 框选范围：框内将选中的车站与轨道同时高亮
+    if (this.boxSel) {
+      const b = this.boxSel, n = b.stations.length + b.segs.length;
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(214,48,49,0.55)'; ctx.lineWidth = R.lineWidthPx() + 5;
+      for (const id of b.segs) if (R.segPx && R.segPx.get(id)) R.strokeArr(ctx, R.segPx.get(id));
+      ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(214,48,49,0.95)';
+      for (const sid of b.stations) { const s = net.stations[sid]; if (!s) continue; const q = R.P(s.x, s.y, R.trackH(s.type)); ctx.beginPath(); ctx.arc(q.x, q.y, 12, 0, Math.PI * 2); ctx.stroke(); }
+      ctx.fillStyle = 'rgba(214,48,49,0.1)'; ctx.fillRect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0);
+      ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]); ctx.strokeRect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0); ctx.setLineDash([]);
+      if (n) tag(ctx, (b.x0 + b.x1) / 2, Math.max(16, b.y0 - 16), '选中 ' + n + ' 项', 'rgba(214,48,49,0.92)');
+    }
+    // 多选高亮（拆除工具的多选已在上面按拆除预览标红）
+    const mu = this.tool === 'demolish' ? null : this.ui.multi;
     if (mu) {
       ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       mu.segs.forEach(function (id) { if (R.segPx && R.segPx.get(id)) { ctx.strokeStyle = 'rgba(30,136,229,0.45)'; ctx.lineWidth = R.lineWidthPx() + 9; R.strokeArr(ctx, R.segPx.get(id)); } });
       mu.stations.forEach(function (sid) {
         const s = net.stations[sid]; if (!s) return;
-        const q = R.P(s.x, s.y, 0);
+        const q = R.P(s.x, s.y, R.trackH(s.type));
         ctx.fillStyle = 'rgba(30,136,229,0.18)'; ctx.strokeStyle = '#1e88e5'; ctx.lineWidth = 2.5;
         ctx.beginPath(); ctx.arc(q.x, q.y, 13, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       });
@@ -892,8 +1138,8 @@
       ctx.strokeStyle = hd.color; ctx.lineWidth = 2.5; ctx.stroke();
       ctx.beginPath(); ctx.moveTo(hd.sx - 4.5, hd.sy); ctx.lineTo(hd.sx + 4.5, hd.sy); ctx.moveTo(hd.sx, hd.sy - 4.5); ctx.lineTo(hd.sx, hd.sy + 4.5); ctx.lineWidth = 2.2; ctx.stroke();
     }
-    // 修改工具控制点
-    if (this.tool === 'edit') {
+    // 修改工具控制点（绘线工具中为刚画好的那一段）
+    if (this.tool === 'edit' || this.tool === 'line') {
       for (const h of this.handles()) {
         if (h.kind === 'plat') {
           // 站台方向手柄：虚线连到车站，圆形手柄内画旋转箭头；已手动设定的方向为实心
@@ -913,6 +1159,8 @@
         ctx.fill(); ctx.stroke();
       }
     }
+    // 拖动控制点或车站时：实时画出松手后的最终线形（与建设检查同一套几何），弯道过急的部分标红，并在最急处标出半径
+    if (this.drag && g.draft && this.drag.kind !== 'plat') this.drawLiveCurve(ctx, R, net);
     // 冲突：高亮涉及的轨道/车站，并在准确位置放置编号图钉（与面板列表编号一致）
     if (g.draft) {
       const ev = g.draftEval();
@@ -921,20 +1169,22 @@
         const pulse = 0.5 + 0.5 * Math.sin(R.time * 5);
         ctx.lineCap = 'round'; ctx.lineJoin = 'round';
         for (const c of ev.conflicts) {
-          const on = hov === c.n;
+          const on = hov === c.n, gd = this.guideFor(c);
           if (c.kind === 'seg' && R.segPx && R.segPx.get(c.ref)) {
-            ctx.strokeStyle = 'rgba(214,48,49,' + (on ? 0.55 : 0.28 + 0.12 * pulse) + ')';
+            ctx.strokeStyle = 'rgba(214,48,49,' + (gd && gd.stretch && gd.stretch.length ? (on ? 0.25 : 0.14) : (on ? 0.55 : 0.28 + 0.12 * pulse)) + ')';
             ctx.lineWidth = R.lineWidthPx() + (on ? 12 : 8);
             R.strokeArr(ctx, R.segPx.get(c.ref));
           }
+          // 具体出问题的那一段（v2.3）：加粗、闪动的红色；建议的移动方向与距离；弯道的当前 / 所需转弯圆
+          if (gd) this.drawGuide(ctx, R, c, gd, on || ev.conflicts.length <= 2, pulse);
           if (c.kind === 'station' && net.stations[c.ref]) {
-            const s = net.stations[c.ref], q = R.P(s.x, s.y, 0);
+            const s = net.stations[c.ref], q = R.P(s.x, s.y, R.trackH(s.type));
             ctx.strokeStyle = 'rgba(214,48,49,0.85)'; ctx.lineWidth = on ? 4 : 2.5;
             ctx.beginPath(); ctx.arc(q.x, q.y, 11 + pulse * 3, 0, Math.PI * 2); ctx.stroke();
           }
         }
         for (const c of ev.conflicts) {
-          const q = R.P(c.x, c.y, 0), on = hov === c.n;
+          const q = R.P(c.x, c.y, this.conflictH(c)), on = hov === c.n;
           const s = on ? 1.25 : 1, r = 10 * s;
           const tipY = q.y, cy = tipY - 16 * s;
           ctx.save();
@@ -943,7 +1193,7 @@
           ctx.beginPath(); ctx.moveTo(q.x, tipY); ctx.lineTo(q.x - r * 0.62, cy + r * 0.5); ctx.arc(q.x, cy, r, Math.PI * 0.82, Math.PI * 0.18, false); ctx.closePath(); ctx.fill();
           ctx.restore();
           ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(q.x, cy, r, 0, Math.PI * 2); ctx.stroke();
-          ctx.fillStyle = '#fff'; ctx.font = 'bold ' + Math.round(11 * s) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillStyle = '#fff'; ctx.font = '700 ' + Math.round(11 * s) + 'px ' + CM.MAP_TYPE.font; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           ctx.fillText(String(c.n), q.x, cy + 0.5);
           ctx.fillStyle = 'rgba(224,49,49,' + (0.25 + 0.25 * pulse) + ')'; ctx.beginPath(); ctx.ellipse(q.x, tipY, 6 + pulse * 4, 3 + pulse * 2, 0, 0, Math.PI * 2); ctx.fill();
         }

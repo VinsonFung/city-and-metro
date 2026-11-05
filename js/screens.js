@@ -22,38 +22,61 @@
   };
   const eraOf = function (mp) { return Math.floor(mp.cfg.START.y / 10) * 10; };
   const eraName = function (e) { return e + ' 年代'; };
-  // Touch keeps native horizontal scrolling; mouse dragging also works on chips.
-  function dragFilterRow(el) {
-    let drag = null, skipClick = false;
-    el.addEventListener('pointerdown', function (e) {
-      skipClick = false;
-      if (e.pointerType === 'touch' || e.button !== 0 || el.scrollWidth <= el.clientWidth + 1) return;
-      drag = { id: e.pointerId, x: e.clientX, left: el.scrollLeft, active: false };
-    });
-    el.addEventListener('pointermove', function (e) {
-      if (!drag || e.pointerId !== drag.id) return;
-      const dx = e.clientX - drag.x;
-      if (!drag.active && Math.abs(dx) < 6) return;
-      if (!drag.active) { drag.active = true; el.classList.add('dragging'); el.setPointerCapture(e.pointerId); }
-      e.preventDefault(); el.scrollLeft = drag.left - dx;
-    });
-    const end = function (e) {
-      if (e.type === 'lostpointercapture' && e.target !== el) return;
-      if (!drag || e.pointerId !== drag.id) return;
-      skipClick = e.type === 'pointerup' && drag.active;
-      const id = drag.id; drag = null; el.classList.remove('dragging');
-      if (el.hasPointerCapture(id)) el.releasePointerCapture(id);
+  // 鼠标/笔横拖筛选，触屏保留原生惯性滚动；捕获原按钮以保留普通点击。
+  function scrollFilters(chips) {
+    let drag = null, suppressClick = false;
+    const edges = function () {
+      const max = Math.max(0, chips.scrollWidth - chips.clientWidth);
+      chips.classList.toggle('can-drag', max > 1);
+      chips.classList.toggle('has-before', chips.scrollLeft > 1);
+      chips.classList.toggle('has-after', chips.scrollLeft < max - 1);
     };
-    el.addEventListener('pointerup', end);
-    el.addEventListener('pointercancel', end);
-    el.addEventListener('lostpointercapture', end);
-    el.addEventListener('pointerleave', function (e) { if (drag && !drag.active) end(e); });
-    el.addEventListener('click', function (e) {
-      if (skipClick && e.detail !== 0) { e.preventDefault(); e.stopImmediatePropagation(); }
-      skipClick = false;
+    const finish = function (e) {
+      if (!drag || drag.id !== e.pointerId) return;
+      const owner = drag.owner; drag = null;
+      chips.classList.remove('dragging');
+      if (e.type === 'pointercancel') suppressClick = false;
+      if (owner.hasPointerCapture(e.pointerId)) owner.releasePointerCapture(e.pointerId);
+    };
+    chips.addEventListener('pointerdown', function (e) {
+      if (!e.isPrimary || e.button !== 0) return;
+      suppressClick = false;
+      if (e.pointerType === 'touch' || chips.scrollWidth <= chips.clientWidth + 1) return;
+      const owner = e.target.closest('.fchip') || chips;
+      drag = { id: e.pointerId, x: e.clientX, y: e.clientY, left: chips.scrollLeft,
+        scale: chips.getBoundingClientRect().width / (chips.offsetWidth || 1), owner: owner, moved: false };
+      owner.setPointerCapture(e.pointerId);
+    });
+    chips.addEventListener('pointermove', function (e) {
+      if (!drag || drag.id !== e.pointerId) return;
+      if (!(e.buttons & 1)) { finish(e); return; }
+      const dx = e.clientX - drag.x;
+      if (!drag.moved) {
+        if (Math.abs(dx) < 6 || Math.abs(dx) < Math.abs(e.clientY - drag.y)) return;
+        drag.moved = true; suppressClick = true; chips.classList.add('dragging');
+      }
+      e.preventDefault();
+      chips.scrollLeft = drag.left - dx / (drag.scale || 1);
+      edges();
+    });
+    for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) chips.addEventListener(name, finish);
+    chips.addEventListener('click', function (e) {
+      const block = suppressClick && e.detail !== 0; suppressClick = false;
+      if (block) { e.preventDefault(); e.stopImmediatePropagation(); }
     }, true);
-    return el;
+    chips.addEventListener('dragstart', function (e) { e.preventDefault(); });
+    chips.addEventListener('scroll', edges, { passive: true });
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(function () {
+        if (!chips.isConnected) { observer.disconnect(); return; }
+        edges();
+      });
+      observer.observe(chips);
+      for (const button of chips.children) observer.observe(button);
+    }
+    requestAnimationFrame(edges);
   }
+
 
   // ======================== 开始界面 ========================
   // 标题装饰：线路、车站与城市剪影
@@ -62,7 +85,8 @@
     '<g fill="currentColor"><rect x="228" y="12" width="7" height="12" rx="1"/><rect x="237" y="6" width="8" height="18" rx="1"/><rect x="247" y="0" width="8" height="24" rx="1"/><rect x="257" y="8" width="7" height="16" rx="1"/><rect x="266" y="3" width="8" height="21" rx="1"/><rect x="276" y="13" width="7" height="11" rx="1"/></g>' +
     '<circle cx="308" cy="22" r="4.5" style="fill:var(--bg)" stroke="currentColor" stroke-width="2.4"/><circle cx="348" cy="22" r="4.5" style="fill:var(--bg)" stroke="currentColor" stroke-width="2.4"/></svg>';
 
-  UI.prototype.showStart = function (tr) {
+  // calm：从游戏回到主菜单时整体淡入（v2.3），标题与按钮不逐个重新弹出
+  UI.prototype.showStart = function (tr, calm) {
     const self = this;
     const latest = CM.Save.latest();
     const storageOk = CM.Save.available();
@@ -94,7 +118,7 @@
       social('bilibili', '游戏官方 B站', 'https://b23.tv/H18TUXD'),
       social('xiaohongshu', '游戏官方小红书', 'https://xhslink.cn/o/5eRdolGBwyK'),
       social('douyin', '游戏官方抖音', 'https://v.douyin.com/XdxVSS5NHK8/'), this.startTheme);
-    this.openScreen(h('div', { class: 'start-root' }, wrap, corner), null, 'start', tr);
+    this.openScreen(h('div', { class: 'start-root' }, wrap, corner), null, 'start' + (calm ? ' calm' : ''), tr || null);
     this.renderThemeBtns();
   };
 
@@ -115,7 +139,7 @@
     if (!F.q) clear.classList.add('gone');
     search.addEventListener('input', function () { F.q = search.value.trim(); clear.classList.toggle('gone', !F.q); drawList(); });
     const chipRow = function (label, icon, key, opts) {
-      const chips = dragFilterRow(h('div', { class: 'fchips', role: 'group', 'aria-label': label + '筛选，可左右拖动查看更多选项' }));
+      const chips = h('div', { class: 'fchips', role: 'group', 'aria-label': label + '筛选，可左右拖动查看更多选项' });
       for (const o of opts) {
         chips.appendChild(h('button', { class: 'fchip' + (F[key] === o[0] ? ' on' : ''), 'data-silent': '1', 'data-v': o[0], onclick: function () {
           if (F[key] === o[0]) return;
@@ -124,6 +148,7 @@
           drawList();
         } }, o[1]));
       }
+      scrollFilters(chips);
       return h('div', { class: 'ms2-frow' }, h('span', { class: 'ms2-fl' }, ic(icon, 14), label), chips);
     };
     const filters = h('div', { class: 'ms2-filters' },
@@ -145,7 +170,7 @@
     all.forEach(function (id, k) {
       const mp = CM.MAPS[id], n = CM.Save.list(id).length;
       const it = h('button', { class: 'ms2-item', role: 'option', 'data-id': id, style: { animationDelay: (0.03 * Math.min(k, 8)) + 's' }, onclick: function () { pick(id); }, ondblclick: function () { pick(id); goPrimary(); } },
-        h('span', { class: 'ms2-thumb' }, h('img', { alt: '', src: CM.mapThumb(id, theme) || '' }), mp.tutorial ? h('span', { class: 'ms2-flag' }, '教程') : null),
+        h('span', { class: 'ms2-thumb' }, CM.thumbInto(h('img', { alt: '' }), id, theme), mp.tutorial ? h('span', { class: 'ms2-flag' }, '教程') : null),
         h('span', { class: 'ms2-it' },
           h('span', { class: 'ms2-name' }, h('b', null, mp.tutorial ? (mp.data.city || mp.name) : mp.name), h('em', null, String(mp.cfg.START.y))),
           h('small', null, mp.tagline || mp.sub),
@@ -209,7 +234,7 @@
       const mc = mp.cfg.macro && mp.cfg.macro !== 'auto' ? mp.cfg.macro : null;
       if (mc && mc.gdp0) { const mo = mp.cfg.money, v = mc.gdp0; fl.push(['开局 GDP', '约 ' + (v >= 1e8 ? (v / 1e8).toFixed(2) + ' 万' + mo.yi : U.fmtMoney(v, 0, mo))]); }
       poster = h('div', { class: 'ms2-poster' },
-        h('img', { alt: '', src: CM.mapThumb(sel, theme) || '' }),
+        CM.thumbInto(h('img', { alt: '' }), sel, theme),
         h('div', { class: 'ms2-ptx' },
           h('div', { class: 'msel-kicker' }, h('span', null, mp.region || ''), h('i'), h('span', null, y0 + ' 年起'), h('i'), h('span', null, mp.kind === 'fictional' || mp.tutorial ? '虚构城市' : '真实地理')),
           h('h2', null, mp.title || mp.name),
@@ -235,7 +260,7 @@
       });
       // 开始方式：经营挑战（主按钮）、自由建造（展开选项）、继续、读取存档
       const acts = h('div', { class: 'ms2-acts' });
-      if (mp.tutorial) acts.appendChild(modeBtn('free', 'play', 'b-teal', '开始教程', '从头开始 12 个引导任务（不限资金）', true));
+      if (mp.tutorial) acts.appendChild(modeBtn('free', 'play', 'b-teal', '开始教程', '主线 13 步、约 12 分钟：规划、管理与经营（不限资金）', true));
       else {
         const ch = modeBtn('challenge', 'trophy', 'b-gold', '经营挑战', '初始资金 ' + U.fmtMoney(mp.cfg.economy.startFunds, undefined, mp.cfg.money), true);
         ch.dataset.tip = '新游戏 · 拨款随城市经济变化'; acts.appendChild(ch);
@@ -303,15 +328,15 @@
     let open = 0, regs = 0; for (let k = 0; k < city.regions.length; k++) { if (city.regions[k].scenic) continue; regs++; if (city.regionOpen[k]) open++; }
     // 自由建造自定义起始年份：标题用起始年份，开局交通格局（描述地图原始开局年份）换成当时所处发展阶段的背景
     const y0 = g.startYear || CFG.START.y, late = y0 > CFG.START.y, era = late && CM.Eras ? CM.Eras.current(y0) : null;
-    const hero = h('div', { class: 'brief-hero' }, h('img', { alt: '', src: CM.mapThumb(mp.id, theme) || '' }),
+    const hero = h('div', { class: 'brief-hero' }, CM.thumbInto(h('img', { alt: '' }), mp.id, theme),
       h('div', { class: 'brief-hero-tx' }, h('div', { class: 'msel-kicker' }, h('span', null, '开局简报'), h('i'), h('span', null, y0 + ' 年 1 月')), h('h2', null, (D.city || mp.name) + ' · ' + y0), h('div', { class: 'msel-tagline' }, mp.tagline || '')));
     const parts = [hero];
     // 东京等：开局接管既有地铁
     if (B.inherit && g.mapInit && g.mapInit.metro) {
-      const n = CM.Milestones ? CM.Milestones.netInfo(g) : null, L = Object.values(g.net.lines)[0];
+      const n = CM.Milestones ? CM.Milestones.netInfo(g) : null, lines = Object.values(g.net.lines), L = lines[0];
       parts.push(h('div', { class: 'brief-inherit', style: { '--lc': L ? CM.Accessibility.line(L) : 'var(--accent)' } },
         h('span', { class: 'bi-line' }), h('span', { class: 'badge' }, ic('train')),
-        h('div', { class: 'grow' }, h('b', null, '你接管了' + (L ? L.name : '既有地铁')), h('small', null, g.mapInit.metro)),
+        h('div', { class: 'grow' }, h('b', null, '你接管了' + (lines.length ? lines.map(l => l.name).join('与') : '既有地铁')), h('small', null, g.mapInit.metro)),
         h('div', { class: 'bi-stats' },
           h('div', null, h('b', null, String(Object.keys(g.net.stations).length)), h('span', null, '座车站')),
           n ? h('div', null, h('b', null, U.fmtNum(n.km, 1)), h('span', null, '公里')) : null,
@@ -352,27 +377,32 @@
     this.openScreen(card, done, 'brief-screen');
   };
 
-  // ======================== 经济知识：经营挑战的财政与债券（教程与操作说明中可回看；只说明，不实际发行） ========================
+  // ======================== 经济知识：经营挑战的财政与债券（v2.3 改为图文分页；教程与操作说明中可回看；只说明，不实际发行） ========================
+  // 每页一张手绘简图（sketch.js）+ 两三句短话，← → 翻页
+  UI.econSlides = function () {
+    return [
+      { sketch: 'moneyIn', title: '钱从哪里来', lines: ['政府拨款：每月初发一次，开局时是最大的一笔。', '票款：每天按乘客数和票价结算。', '车站商业与政府合同：后面两页细说；任务奖励在完成时一次发放。'] },
+      { sketch: 'grant', title: '拨款怎么算', lines: ['拨款 = 基础额度 × 财力 × 满意度 × 任务 × 履约信誉。', '乘客越满意、任务完成得越好，拨款越多；任务没按期完成会打折一段时间（历史任务 12 个月，动态任务 6 个月）。'], note: '满意度系数 = 0.6 + 0.8 × 满意度 ÷ 100；几项任务同时打折时，任务系数最低 ×0.7；政府合同开放后才计履约信誉（×0.95–1.05）。' },
+      { sketch: 'moneyOut', title: '钱花在哪里', lines: ['建设与拆迁：确认建设时一次付清；新线随线配车的费用也算在里面。', '运营：列车和车站每天都要花钱，线越长、站越多越贵。', '客流少的线也要付运营费，所以先修人多的地方。'] },
+      { sketch: 'fleetCost', title: '列车也是一笔账', lines: ['列车按车型整列购买，买车计入建设支出；不用的列车可以调到别的线，或按残值出售。', '运营费按车厢公里算：投入的列车越多、编组越长越贵，新车型更省，超过设计寿命 ×1.25。', '运行速度越高运营费越贵，所以不是每条线都要跑得快。'] },
+      { sketch: 'fare', title: '票价的取舍', lines: ['票价高，每位乘客付得多，但坐地铁的人会变少，满意度也会下降。', '默认按里程计费：长途多付，短途便宜。', '缺钱时小步上调，调完看看客流变化。'] },
+      { sketch: 'tod', title: '车站商业（TOD）', lines: ['接入运营的车站可以逐级开发：广告与便利店、站内商业街、站城一体。', '收入随客流和经济周期涨落；开发后每年有运营与维护成本，客流太少会亏损。', '大客流的换乘站回本最快，也会吸引周边的人口与岗位。'], note: '车站详情和地铁芯都能开发，每一级都标出收入、成本与回本年数；财政页列出亏损的车站。' },
+      { sketch: 'contract', title: '政府合同（PPP）', lines: ['开局满 3 年、线网超过 12 km，并到了本城开放合同的年份后，政府开始招标：新线、铁路＋物业和扩容改造。', '可以投标、放弃或自己建：中标先交保证金，自己出资建设，按期完工收补助并退保证金。', '运营期按服务水平收可用性付费，客流差额双方分担；违约会扣钱、打折拨款、降低信誉。'], note: '三档报价越便宜越容易中标，风险也越大；履约信誉影响中标率和每月拨款。在任务页的「合同」分页投标。' },
+      { sketch: 'econ', title: '城市经济', lines: ['真实城市模拟 GDP、经济周期和历史上的经济危机，每年 1 月结算。', '上一年财政好，今年拨款的财力系数就高（×0.70–1.30）；衰退时车站商业收入也会下降。', '好的地铁能小幅提高生产率，但抵消不了外部危机。'] },
+      { sketch: 'bonds', title: '债券融资', lines: ['地方债利率低、额度大；城投债利率高、额度小。', '借来的钱进入「建设专项资金」，只能修地铁和买车，不能付运营费或利息。', '期限 3 年或 6 年，利率发行时锁定，每年付息、到期还本。'] },
+      { sketch: 'overdue', title: '还不上会怎样', lines: ['利息和本金从一般资金付，不够的部分记为逾期。', '逾期每月加收费用并暂停城投债；满 6 个月暂停全部发债。', '一般资金有余额时会自动还清；失败只看长期负余额、负债下限与满意度。'] },
+      { sketch: 'howto', title: '怎么操作', lines: ['点顶栏「资金」打开「财政与经济」：票价在「财政」页，发债在「融资」页。', '列车、车站规模和商业开发都在右下角的「地铁芯」；投标在任务页的「合同」分页。', '统计窗口（' + (CM.Keys.hint('ui.stats') || '未绑定') + '）的「经济」页有历年图表。'], note: '青湾教程是自由建造（资金不限），这里只做说明，不会实际发行债券。' },
+    ];
+  };
+  // 操作说明里的入口：页标题一览 + 打开图文分页
   UI.prototype.econGuide = function () {
-    const sec = function (icon, badge, title, items) {
-      return h('div', { class: 'eg-sec' }, h('div', { class: 'eg-h' }, h('span', { class: 'badge ' + badge }, ic(icon)), h('b', null, title)), h('ul', null, items.map(function (t) { return h('li', null, t); })));
-    };
+    const self = this;
     return h('div', { class: 'eg' },
-      sec('coin', 'b-green', '钱从哪里来', ['政府拨款：每月初发放一次，= 基础额度 × 财力系数 × 满意度系数 × 任务修正。', '票款：每天按乘客数与票价结算。', '任务奖励：完成历史与动态任务时发放。']),
-      sec('trend', 'b-violet', '城市经济怎样影响拨款', ['真实城市会模拟地图范围的 GDP、经济周期和历史经济事件（如石油危机、亚洲金融危机、全球金融危机），每年 1 月结算上一年。', 'GDP 不等于财政收入：地方财政收入约为 GDP 的一定比例，其中只有一部分安排给地铁。上一年财政收入高于预期，当年拨款的财力系数就高于 1，反之低于 1（限定在 ×0.70–1.30）。', '好的地铁能缩短通勤、缓解拥堵、提高可达性，从而小幅提高生产率；但建了地铁不一定增长，也抵消不了外部危机。']),
-      sec('hammer', 'b-orange', '钱花在哪里', ['建设与拆迁：确认建设时一次支付。', '运营成本：列车运行与车站，每天结算。线路越长、车站越多，成本越高。']),
-      sec('wallet', 'b-violet', '债券融资', ['地方债利率较低、额度较大；城投债利率较高、额度较小。', '新发行的利率随年代的市场利率、经济环境和本市财政状况浮动：财政稳健时更低，负债偏高、财力不足或有逾期时更高。', '期限 3 年或 6 年，利率在发行时锁定，之后按合同付息，不受报价变化影响；每年付一次利息，到期一次还本。', '借来的钱不算收入：进入「建设专项资金」，只能用于地铁建设及改扩建，不能拿来付运营成本或利息。', '每年能发行的额度与总债务都有上限，随城市、年代与财力变化。']),
-      sec('warn', 'b-red', '还不上会怎样', ['利息与本金从一般资金支付；资金不足的部分记为逾期。', '逾期每月收取额外费用，并暂停城投债；逾期满 6 个月暂停全部发债。', '不会因为一次逾期就失败，一般资金有余额时会自动还清。挑战失败只看长期负余额、负债下限与满意度。']),
-      sec('cursor', 'b-blue', '怎么操作', ['点顶栏的「资金」打开「财政与经济」面板：概览、经济、财政、融资四个分页。', '在「融资」页查看利率报价与构成，点「发行债券」选择种类、期限与金额，确认前会显示每年利息与到期日。', '「经济」页列出 GDP、增长来源、交通对经济的影响与正在发生的经济事件；统计窗口（G）的「经济」页有历年图表。']),
-      h('div', { class: 'note' }, '青湾教程使用自由建造（资金不限），不模拟城市经济，这里只做说明，不会实际发行债券。可以在「菜单 → 操作说明」中随时回看。'));
+      h('div', { class: 'eg-toc' }, UI.econSlides().map(function (s, i) { return h('span', null, (i + 1) + '. ' + s.title); })),
+      h('button', { class: 'btn sm primary', onclick: function () { self.showEconGuide(); } }, ic('book', 14), '打开图文说明（' + UI.econSlides().length + ' 页）'));
   };
   UI.prototype.showEconGuide = function (onClose) {
-    const self = this, close = function () { self.closeScreen(); if (onClose) onClose(); };
-    const card = h('div', { class: 'card eg-card' },
-      h('div', { class: 'card-head' }, h('span', { class: 'badge b-gold' }, ic('coin')), h('div', { class: 'grow' }, h('h2', null, '经营挑战的财政'), h('div', { class: 'tiny muted' }, '经济小知识 · 可随时回看')), h('button', { class: 'iconbtn', 'data-tip': '关闭', 'data-key': 'Esc', onclick: close }, ic('close'))),
-      this.econGuide(),
-      h('div', { class: 'modal-actions' }, h('button', { class: 'btn primary', onclick: close }, '知道了')));
-    this.openScreen(card, close);
+    this.showSlides('经营挑战的财政', UI.econSlides(), { sub: '经济小知识 · 可随时回看', icon: 'coin', onClose: onClose });
   };
 
   // ======================== 更新公告 ========================

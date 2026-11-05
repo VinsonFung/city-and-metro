@@ -26,9 +26,10 @@
     for (const C of compiled) if (C) for (const r of C.routes) {
       const line = C.net.lines[r.lineId]; if (!line) continue;
       r.color = line.color; r.label = line.name;
+      if (r.svc) { const sv = (line.svcs || []).find(function (x) { return x.id === r.svc; }); if (sv) r.label = M.svcLabel(line, sv); continue; }
       if (r.branch) {
         const leaf = r.stIds[r.stIds.length - 1], name = line.branchNames && line.branchNames[leaf], st = C.net.stations[leaf];
-        r.label = name ? line.name + ' ' + name : line.name + '（往' + (st ? st.name : '') + '）';
+        r.label = name ? line.name + ' ' + name : (r.main ? line.name : line.name + '（往' + (st ? st.name : '') + '）');
       }
     }
     g.touch();
@@ -37,12 +38,12 @@
   UI.prototype.setLineLook = function (lid, patch) {
     const g = this.g(); if (!g || this._replacingPage || this._replacingToolOpts) return;
     patchDisplay(g, 'lines', lid, patch);
-    const R = this.R; R.labelImage = null; R.metroOrder = null;
+    const R = this.R; R.labelImage = null; R.metroOrder = null; R._smC = null;
     if (CM.NetMap) CM.NetMap.refresh(true);
     if (CM.Stats && CM.Stats.isOpen()) CM.Stats.redraw();
     this.markUnsaved(); this.scheduleAutosave();
     this.renderToolOpts && this.renderToolOpts();
-    if (patch.name || patch.branchNames) this.rerenderPage();
+    if (patch.name || patch.branchNames) this.rerenderPage(); else if (this.opsApp) this.opsApp.refresh();
   };
   // 车站更名（v2.1 玩家反馈）：与线路名称、颜色一样立即生效、不收费、不进入建设草案；同时写入正式网络与草案
   UI.prototype.setStationName = function (id, name) {
@@ -102,6 +103,10 @@
       x = dlt(B.car, Dr.car, 0, '', false); g1.appendChild(this.stat('非地铁出行（人次/日）', U.fmtPeople(Dr.car), (Dr.car<=B.car?'减少 ':'增加 ')+U.fmtPeople(Math.abs(B.car-Dr.car))+' 人次', x[1]));
       x = dlt(B.fare, Dr.fare, 0, '', true); g1.appendChild(this.stat('票务收入（日）', U.fmtMoney(Dr.fare / 10000), U.fmtSigned(U.cur(Dr.fare - B.fare) / 10000, 1, ' ' + CFG.money.wan), x[1]));
       wrap.appendChild(g1);
+      // 预测解读（v2.3）：与建成后的建设效果报告同一套归因
+      if (res.stations) wrap.appendChild(this.sec('pr-why', '预计会怎样，为什么', '', function () {
+        return CM.Impact.view(self, res, { pred: true, noKpi: true, ops: CM.Impact.opsInputs(g, g.compiled, g.draftCompiled()) });
+      }, true, 'help'));
       // 工作日与周末对比（v1.9）
       if (res.wk && res.we) {
         const arrow = function (a, b, fmt, up) { const d = b - a, cls = Math.abs(d) < 1e-9 ? 'muted' : ((d > 0) === up ? 'good' : 'bad'); return h('td', null, fmt(a) + ' → ', h('b', { class: cls }, fmt(b))); };
@@ -163,19 +168,138 @@
     return box;
   };
 
+  // 指标详情（拥堵、分担率）里的最近一次建设效果：结论一句话 + 完整报告入口（v2.3）
   UI.prototype.trafficImpactBlock=function(){
     const g=this.g(),r=g.impactReport;if(!r)return h('div');
     if(r.status!=='done')return h('div',{class:'callout info'},'正在评估本次建设的交通效果，完成后可在这里查看。');
-    const self=this,body=h('div'),a=r.base,b=r.draft,car=a.car-b.car,commute=a.commute-b.commute;
-    body.appendChild(this.kv([['日均非地铁出行变化',(car>=0?'减少 ':'增加 ')+U.fmtPeople(Math.abs(car))+' 人次'],['平均通勤变化',(commute>=0?'缩短 ':'增加 ')+U.fmtNum(Math.abs(commute),1)+' 分钟'],['全日拥堵指数',a.cong.toFixed(3)+' → '+b.cong.toFixed(3)]]));
+    const self=this,A=CM.Impact.analyze(r,g),body=h('div');
+    if(A)body.appendChild(h('p',{class:'imp-verdict'},A.verdict));
+    body.appendChild(h('div',{class:'row',style:{flexWrap:'wrap',gap:'6px'}},
+      h('button',{class:'btn sm primary',onclick:()=>self.openPage('impact')},ic('report',14),'建设效果报告'),
+      h('button',{class:'btn sm ghost',onclick:()=>{self.R.layerOpt.cong='am';self.setLayer('cong');}},ic('lyCong',14),'查看工作日早高峰')));
+    return this.sec('traffic-impact','最近一次建设的效果',r.at[0]+'年'+r.at[1]+'月',()=>body,true);
+  };
+  // ======================== 页面：建设效果报告（v2.3） ========================
+  // 关键数字（分担率、通勤、客运量、运营盈亏）→ 为什么 → 可以尝试 → 沿线车站客流 → 道路变化 → 对照口径
+  UI.prototype.page_impact=function(){
+    const g=this.g(),r=g.impactReport,self=this,el=h('div');
+    if(!r){el.appendChild(h('div',{class:'tk-empty'},ic('report',26),h('b',null,'还没有建设效果报告'),h('span',null,'确认建设后，系统会以相同的人口、岗位、道路和票价，对比保留与撤回这次建设的网络，生成报告。')));return{title:'建设效果报告',el};}
+    if(r.status!=='done'){el.appendChild(h('div',{class:'callout info'},h('span',{class:'spinner',style:{width:'14px',height:'14px',borderWidth:'2px'}}),'正在评估本次建设的交通效果（不影响游戏进行），完成后自动显示。'));return{title:'建设效果报告',el};}
+    el.appendChild(h('div',{class:'tiny muted',style:{margin:'0 0 6px'}},r.at[0]+'年'+r.at[1]+'月建成'+(r.summary?' · '+r.summary:'')+(r.cost>0?' · 费用 '+U.fmtMoney(r.cost):'')));
+    if(r.lines&&r.lines.length)el.appendChild(h('div',{class:'row',style:{flexWrap:'wrap',gap:'4px',marginBottom:'6px'}},r.lines.map(l=>h('span',{class:'tag clickable',style:{background:AX.line(l)+'22',color:AX.line(l)},onclick:()=>{if(g.net.lines[l.id])self.openPage('line',l.id);}},'● '+l.name+' · 日上车 '+U.fmtPeople(l.after)+' 人次'))));
+    el.appendChild(CM.Impact.view(this,r,{open:true}));
     const roads=[...(r.roads||[]),...(r.roadsWorse||[])];
-    for(const road of roads)body.appendChild(h('div',{class:'chg small'},h('span',null,road.name),h('b',{class:road.delta<0?'good':'bad'},road.vc0.toFixed(2)+' → '+road.vc1.toFixed(2))));
-    if(!roads.length)body.appendChild(h('div',{class:'note'},'主要道路改善暂不明显，可检查线路是否连接住宅与就业目的地，以及步行接驳、换乘和票价。'));
-    body.appendChild(h('div',{class:'note'},'以评估时相同人口、岗位、道路和票价，对比保留与撤回本次建设的网络。道路数值为工作日早高峰行驶时间与自由流时间之比；客运量不等于减少同量汽车。'+(r.stable?'':'部分结果尚未完全稳定，数值为近似估计。')));
-    body.appendChild(h('button',{class:'btn sm ghost',onclick:()=>{self.R.layerOpt.cong='am';self.setLayer('cong');}},ic('lyCong',14),'查看工作日早高峰'));
-    return this.sec('traffic-impact','最近一次建设的交通效果',r.at[0]+'年'+r.at[1]+'月',()=>body,true);
+    el.appendChild(this.sec('imp-roads','道路变化（工作日早高峰拥堵指数）',roads.length?roads.length+' 条':'变化不明显',function(){
+      const b=h('div');
+      for(const road of roads)b.appendChild(h('div',{class:'chg small'},h('span',null,road.name),h('b',{class:road.delta<0?'good':'bad'},road.vc0.toFixed(2)+' → '+road.vc1.toFixed(2))));
+      if(!roads.length)b.appendChild(h('div',{class:'note'},'主要道路拥堵指数变化不明显。'));
+      b.appendChild(h('button',{class:'btn sm ghost',style:{marginTop:'6px'},onclick:()=>{self.R.layerOpt.cong='am';self.setLayer('cong');}},ic('lyCong',14),'查看工作日早高峰'));
+      return b;
+    },false,'road'));
+    el.appendChild(this.sec('imp-cond','对照口径','',()=>h('div',{class:'note'},'以评估时相同的人口、岗位、道路和票价，对比保留与撤回本次建设的网络；日均为周平均（5 个工作日 + 2 个周末日），拥堵为工作日早高峰。运营盈亏只计本次建设带来的票款与运营成本变化（列车车公里与车站），不含建设费、拨款与债务。客运量增加不等于减少同量汽车。'+(r.stable?'':'部分结果尚未完全稳定，数值为近似估计。')),false,'info'));
+    return{title:'建设效果报告',el};
   };
 
+  // ======================== 车站商业开发（TOD，v2.3） ========================
+  // 只选择是否开发与投入等级：一次投入，之后按本站客流逐日取得广告与租金收入（换乘站有枢纽溢价）；只能升级，不退还。
+  // 车站详情页与地图快捷操作（quick.js）共用同一组控件；after 为操作完成后的刷新
+  UI.prototype.todInfo = function (id) {
+    const g = this.g(), T = CM.TOD, s = g.net.stations[id], C = g.model.net ? g.model.net.C : null, k = C ? C.sIndex.get(id) : undefined;
+    if (!s || k === undefined || !C.serviced[k]) return null;
+    const sd = g.model.stDaily, flow = sd && k < sd.inn.length ? sd.inn[k] + sd.out[k] + sd.xfer[k] : 0, hub = !!(C.stationLines[k] && C.stationLines[k].size >= 2);
+    // month：每月收入（含经济周期）；cost：每月运营与维护成本；net：净收益（v2.5）
+    const month = function (l) { return T.stationDaily(l, flow, hub, g.clock.y, g) * 30.4; }, cost = function (l) { return T.stationCost(l, g.clock.y, s.size, hub) * 30.4; };
+    return { s: s, lv: s.tod || 0, flow: flow, hub: hub, month: month, cost: cost, net: function (l) { return month(l) - cost(l); } };
+  };
+  UI.prototype.todBody = function (id, after) {
+    const g = this.g(), self = this, T = CM.TOD, I = this.todInfo(id), free = g.econ.isFree();
+    if (!I) return h('div', { class: 'note' }, '车站接入运营线路后才能开发商业空间。');
+    const s = I.s, lv = I.lv, b = h('div'), lines = M.stationLines(g.net, id).map(function (l) { return g.net.lines[l]; }).filter(Boolean);
+    // 预览：左边是现在，右边是开发后；鼠标移到某一级上时右边换成那一级
+    const nextBox = h('div', { class: 'st-artbox' }), nextCap = h('figcaption');
+    const showLv = function (l) { nextBox.innerHTML = self.stationArt(s, lines, { tod: l }); nextCap.textContent = CM.I18n ? CM.I18n.text('开发后 · ' + T.LEVELS[l].name) : '开发后 · ' + T.LEVELS[l].name; };
+    const topLv = T.LEVELS.length - 1;
+    if (lv < topLv) showLv(lv + 1);
+    b.appendChild(h('div', { class: 'st-arts' }, h('figure', null, h('div', { class: 'st-artbox', html: self.stationArt(s, lines) }), h('figcaption', null, '现在 · ' + T.LEVELS[lv].name)), lv < topLv ? h('figure', null, nextBox, nextCap) : null));
+    b.appendChild(h('div', { class: 'note' }, '车站客流越大，广告与商铺租金越多' + (I.hub ? '；换乘站人流集中，收入 ×' + T.HUB : '') + '。日客流约 ' + U.fmtPeople(I.flow) + ' 人次。开发后每年有运营与维护成本，客流太少会亏损；商业街与站城一体的收入随经济周期涨落。'));
+    const list = h('div', { class: 'tod-levels' });
+    T.LEVELS.forEach(function (L, l) {
+      if (!l) return;
+      // 回本按净收益（收入 − 运营与维护成本）；升级的净收益增量对应升级投入
+      const cost = Math.max(0, T.cost(l, g.clock.y, s.size, I.hub) - T.cost(lv, g.clock.y, s.size, I.hub)), inc = I.month(l), net = I.net(l), gain = net - (lv ? I.net(lv) : 0), pay = gain > 0 ? cost / (gain * 12) : Infinity, on = l <= lv;
+      list.appendChild(h('div', { class: 'tod-lv' + (on ? ' on' : ''), onpointerenter: function () { if (l > lv) showLv(l); }, onpointerleave: function () { if (lv < topLv) showLv(lv + 1); } },
+        h('div', { class: 'grow' }, h('b', null, l + ' · ' + L.name), h('small', null, L.desc),
+          h('small', null, '每月收入约 ' + U.fmtMoney(inc) + '，成本约 ' + U.fmtMoney(I.cost(l))),
+          h('small', { class: net < 0 ? 'bad' : '' }, net < 0 ? '按目前客流每月亏损约 ' + U.fmtMoney(-net) : '每月净收益约 ' + U.fmtMoney(net) + (on ? '' : ' · 投入 ' + U.fmtMoney(cost) + (isFinite(pay) ? ' · 约 ' + U.fmtNum(pay, pay < 10 ? 1 : 0) + ' 年回本' : ' · 难以回本')))),
+        on ? h('span', { class: 'tag good' }, l === lv ? '经营中' : '已含') : h('button', { class: 'btn sm' + (l === lv + 1 ? ' primary' : ''), disabled: l !== lv + 1 ? true : null, onclick: function () {
+          if (!free && !g.econ.canAffordBuild(cost)) { self.toast('资金不足：需要 ' + U.fmtMoney(cost), 'bad'); return; }
+          g.econ.spendBuild({ construction: cost }, '车站商业开发：' + s.name + ' → ' + L.name, { y: g.clock.y, m: g.clock.m, d: g.clock.d }, true);
+          patchDisplay(g, 'stations', id, { tod: l });
+          self.R._smC = null;
+          g.logEvent({ tag: '经营', title: '车站商业开发：' + s.name, desc: L.name + (cost > 0 ? '，投入 ' + U.fmtMoney(cost) : '') + '，预计每月收入约 ' + U.fmtMoney(inc) + '、净收益约 ' + U.fmtMoney(net) });
+          if (CM.Sound) CM.Sound.play('develop');
+          self.toast(s.name + ' 开始' + L.name + '：每月净收益约 ' + U.fmtMoney(net), net < 0 ? 'warn' : 'good');
+          self.markUnsaved(); self.scheduleAutosave(); if (after) after();
+        } }, '开发')));
+    });
+    b.appendChild(list);
+    // 地铁带动发展（v2.3）：开发等级同时提高车站对周边新增人口与岗位的吸引
+    b.appendChild(h('div', { class: 'note' }, ic('trend', 13), ' 开发等级越高，车站对周边约 1 km 新增人口与岗位的吸引越强，几年后这里会更繁华；城市发展图层 →「地铁带动」可以查看。'));
+    if (free) b.appendChild(h('div', { class: 'note' }, '自由建造：资金不限，收入只作参考。'));
+    return b;
+  };
+  UI.prototype.todBlock = function (id) {
+    const self = this, T = CM.TOD, I = this.todInfo(id), lv = I ? I.lv : 0;
+    const net = lv ? I.net(lv) : 0;
+    return this.sec('st-tod', '商业开发（TOD）', lv ? T.LEVELS[lv].name + ' · 每月净' + (net < 0 ? '亏 ' : '收 ') + U.fmtMoney(Math.abs(net)) : '未开发', function () { return self.todBody(id, function () { self.rerenderPage(); }); }, !!lv, 'bag');
+  };
+  // ======================== 车站文化与装修（v2.3，纯视觉） ========================
+  // 建筑风格、主题色、公共艺术与标识风格只改变车站模型的外观，不影响客流与经营；「翻新」让随年代的外观更新到当前年代
+  UI.DECOR = {
+    style: [['auto', '随年代'], ['heritage', '复古'], ['modern', '现代简约'], ['tech', '科技未来'], ['garden', '园林'], ['industrial', '工业风']],
+    art: [['none', '无'], ['sculpture', '雕塑'], ['mural', '壁画'], ['light', '光影装置'], ['memory', '城市记忆墙']],
+    sign: [['std', '标准'], ['enamel', '复古珐琅'], ['neon', '霓虹'], ['minimal', '极简']],
+  };
+  UI.decorName = function (key, v) { const o = UI.DECOR[key].find(function (x) { return x[0] === v; }); return o ? o[1] : v; };
+  UI.prototype.decorBody = function (id, after) {
+    const g = this.g(), self = this, net = g.draft ? g.draft.net : g.net, s = net.stations[id]; if (!s) return h('div');
+    const dc = Object.assign({ style: 'auto', color: null, art: 'none', sign: 'std' }, s.decor || {});
+    const rg = g.city.regionAt(s.x, s.y), plan = rg && rg.plan;
+    const rec = plan === 'oldmix' ? 'heritage' : (plan === 'cbd' || plan === 'newtown' ? 'modern' : (plan === 'campus' ? 'garden' : (plan === 'ind' || plan === 'resind' ? 'industrial' : null)));
+    const set = function (patch) {
+      const nd = Object.assign({}, dc, patch);
+      if (CM.Sound) CM.Sound.play('decor');
+      patchDisplay(g, 'stations', id, { decor: nd });
+      self.R._smC = null; self.markUnsaved(); self.scheduleAutosave(); if (after) after();
+    };
+    // 预览：鼠标移到选项上时先看效果，点击才应用
+    const lines = M.stationLines(net, id).map(function (l) { return net.lines[l]; }).filter(Boolean), artBox = h('div', { class: 'st-artbox', html: self.stationArt(s, lines) });
+    const peek = function (patch) { artBox.innerHTML = self.stationArt(s, lines, patch); };
+    const seg = function (key, opts) {
+      const box = h('div', { class: 'seg-ctl sm dec-seg' });
+      for (const o of opts) box.appendChild(h('button', { class: dc[key] === o[0] ? 'on' : '', 'data-silent': '1', onpointerenter: function () { peek({ [key]: o[0] }); }, onpointerleave: function () { peek(); }, onclick: function () { set({ [key]: o[0] }); } }, o[1], key === 'style' && o[0] === rec ? h('i', { class: 'dec-rec' }, CM.I18n && CM.I18n.get() === 'en' ? '★' : '荐') : null));
+      return box;
+    };
+    const b = h('div', { class: 'dec' });
+    b.appendChild(h('div', { class: 'st-arts one' }, h('figure', null, artBox)));
+    b.appendChild(h('div', { class: 'note' }, '只改变车站外观，不收费、不影响客流。' + (rec ? '本站所在片区建议「' + UI.decorName('style', rec) + '」。' : '')));
+    b.appendChild(h('div', { class: 'field' }, h('label', null, '建筑风格'), seg('style', UI.DECOR.style)));
+    const sw = h('div', { class: 'dec-colors' }, h('button', { class: 'dec-sw line' + (!dc.color ? ' on' : ''), 'data-tip': '线路色', onclick: function () { set({ color: null }); } }, CM.I18n && CM.I18n.get() === 'en' ? 'L' : '线'));
+    for (const c of ['#c0392b', '#d4a017', '#2e7d32', '#1565c0', '#6a1b9a', '#00838f', '#5d4037', '#37474f']) sw.appendChild(h('button', { class: 'dec-sw' + (dc.color === c ? ' on' : ''), style: { background: c }, 'aria-label': c, onclick: function () { set({ color: c }); } }));
+    Array.prototype.forEach.call(sw.children, function (el, i) { const c = i ? ['#c0392b', '#d4a017', '#2e7d32', '#1565c0', '#6a1b9a', '#00838f', '#5d4037', '#37474f'][i - 1] : null; el.addEventListener('pointerenter', function () { peek({ color: c }); }); el.addEventListener('pointerleave', function () { peek(); }); });
+    b.appendChild(h('div', { class: 'field' }, h('label', null, '主题色'), sw));
+    b.appendChild(h('div', { class: 'field' }, h('label', null, '公共艺术'), seg('art', UI.DECOR.art)));
+    b.appendChild(h('div', { class: 'field' }, h('label', null, '标识风格'), seg('sign', UI.DECOR.sign)));
+    const st = g.net.stations[id], era = CM.Agents ? CM.Agents.eraOf(Math.max((st && st.built && st.built[0]) || g.clock.y, g.clock.y - 40, (st && st.renov) || 0)) : '', now = CM.Agents ? CM.Agents.eraOf(g.clock.y) : '';
+    b.appendChild(h('div', { class: 'row', style: { gap: '6px', marginTop: '6px', flexWrap: 'wrap' } },
+      h('button', { class: 'btn sm', disabled: dc.style === 'auto' && era === now ? true : null, 'data-tip': '外观改为随年代，并按当前年代翻新', onclick: function () { patchDisplay(g, 'stations', id, { renov: g.clock.y }); set({ style: 'auto' }); self.toast(s.name + ' 已按 ' + g.clock.y + ' 年的风格翻新', 'good'); } }, ic('sparkle', 14), '翻新为当代外观'),
+      dc.style !== 'auto' || dc.color || dc.art !== 'none' || dc.sign !== 'std' ? h('button', { class: 'btn sm ghost', onclick: function () { set({ style: 'auto', color: null, art: 'none', sign: 'std' }); } }, '恢复默认') : null));
+    return b;
+  };
+  UI.prototype.decorBlock = function (id) {
+    const self = this, g = this.g(), s = (g.draft ? g.draft.net : g.net).stations[id], dc = (s && s.decor) || {};
+    return this.sec('st-decor', '车站文化与装修', !dc.style || dc.style === 'auto' ? '随年代' : UI.decorName('style', dc.style), function () { return self.decorBody(id, function () { self.rerenderPage(); }); }, false, 'palette');
+  };
   // ======================== 页面：车站 ========================
   // 控件每次都读取最新草案（草案变化后页面自动刷新）；已建状态与草案状态分别说明
   UI.prototype.page_station = function (id) {
@@ -248,6 +372,8 @@
         const pw = g.model.stDailyWk, pe = g.model.stDailyWe;
         return self.kv([['车站容量', U.fmtInt(cap) + ' 人次/小时'], ['日运营费用', U.fmtMoney(CFG.ops.stationDaily[C.stations[k].size] * oi)], ['建成时间', official.built ? official.built[0] + '年' + official.built[1] + '月' : '—'], ['高峰小时客流', pw && pe ? '工作日 ' + U.fmtInt(pw.peak[k]) + ' · 周末 ' + U.fmtInt(pe.peak[k]) + ' 人次' : U.fmtInt(sd.peak[k]) + ' 人次']]);
       }));
+      el.appendChild(this.todBlock(id));
+      el.appendChild(this.decorBlock(id));
     } else if (official && k !== undefined) {
       el.appendChild(this.callout('warn', 'warn', '该车站尚未接入运营线路，不提供服务：不计入地铁覆盖，也不产生客流和票款。把它连接到线路并确认建设后生效。'));
       el.appendChild(this.sec('st-cover', '潜在步行覆盖（接入线路后）', '', function () { return self.coverBlock(s, k, true); }));
@@ -347,11 +473,10 @@
       const rt = C.routes[r], re = mnet.rideEdge[r], n = rt.stIdx.length;
       let worst = null;
       for (const p of [0, 2]) {
-        const P = model.ctxs.wd.per[p], capH = P.freq[r] * rt.cap;   // 工作日早晚高峰
-        if (!(capH > 0)) continue;
+        const P = model.ctxs.wd.per[p], capT = model.capOf(r, mnet);   // 工作日早晚高峰；定员按车队（v2.5）
         for (let q = 0; q < re.length; q++) {
-          const leg = q >> 1, a = rt.stIdx[leg], b = rt.stIdx[(leg + 1) % n];
-          if (a !== k && b !== k) continue;
+          const leg = q >> 1, a = rt.stIdx[leg], b = rt.stIdx[(leg + 1) % n], capH = CM.Model.dirFreq(P, mnet, r, q) * capT;
+          if ((a !== k && b !== k) || !(capH > 0)) continue;
           const lf = P.load[re[q]] / capH;
           if (!worst || lf > worst.lf) worst = { lf: lf, load: P.load[re[q]], capH: capH, leg: leg, a: a, b: b, p: p, freq: P.freq[r] };
         }
@@ -412,11 +537,14 @@
     const tp = M.lineTopo(net, lid);
     const segs = M.lineSegs(net, lid);
     let len = 0; for (const s of segs) len += M.segGeom(net, s, g.city).lenM;
-    el.appendChild(h('div', { class: 'row', style: { marginBottom: '8px', flexWrap: 'wrap' } }, h('span', { class: 'swatch', style: { background: AX.line(line), width: '22px', height: '8px' } }), h('span', { class: 'tag' }, M.TOPO_NAME[tp.topo]), h('span', { class: 'tag' }, U.fmtKm(len)), h('span', { class: 'tag' }, tp.stations.length + ' 站'), !g.net.lines[lid] ? h('span', { class: 'tag info' }, '草案中') : null, h('span', { class: 'grow' }), this.favBtn('lines', lid)));
+    el.appendChild(h('div', { class: 'row', style: { marginBottom: '8px', flexWrap: 'wrap' } }, h('span', { class: 'swatch', style: { background: AX.line(line), width: '22px', height: '8px' } }), h('span', { class: 'tag' }, M.TOPO_NAME[tp.topo]), h('span', { class: 'tag', 'data-tip': '运行速度：最小转弯半径 ' + M.minRadius(line) + ' m' }, M.lineKmh(line) + ' km/h'), h('span', { class: 'tag' }, U.fmtKm(len)), h('span', { class: 'tag' }, tp.stations.length + ' 站'), !g.net.lines[lid] ? h('span', { class: 'tag info' }, '草案中') : null, h('span', { class: 'grow' }), this.favBtn('lines', lid)));
     // 分页（v2.1 第二轮）：「概况」看客流、运营与车站，「编辑」集中颜色、贯通与拆开、区段与拆除；名称点标题修改，颜色也可点标题前的彩色徽标
-    const tab = !g.net.lines[lid] ? 'build' : ((this._tab && this._tab.line) || 'info');
-    if (g.net.lines[lid]) el.appendChild(this.pageTabs([['info', '概况', 'chart'], ['build', '编辑', 'pencil']], tab, function (t) { self._tab = self._tab || {}; self._tab.line = t; self.renderPage(false); }));
+    let tab = !g.net.lines[lid] ? 'build' : ((this._tab && this._tab.line) || 'info');
+    if (tab === 'ops' && !(g.fleet && CM.Fleet)) tab = 'info';
+    // 列车运营（v2.5）：车队、各交路分时段投入的列车、智能调度 / 手动
+    if (g.net.lines[lid]) el.appendChild(this.pageTabs([['info', '概况', 'chart']].concat(g.fleet && CM.Fleet ? [['ops', '列车运营', 'train']] : [], [['build', '编辑', 'pencil']]), tab, function (t) { self._tab = self._tab || {}; self._tab.line = t; self.renderPage(false); }));
     if (tp.topo === 'invalid') el.appendChild(h('div', { class: 'callout bad' }, tp.reason));
+    if (tab === 'ops') { this.lineOpsTab(el, lid); return { title: line.name, el: el, highlightLine: lid, titleEdit: { value: line.name, max: 14, apply: function (v) { self.setLineLook(lid, { name: v }); } }, badgeClick: function (e) { if (CM.Quick) CM.Quick.popColor(lid, e.currentTarget); }, badgeTip: '改颜色' }; }
     if (tab === 'info') {
       // 运营
       const mnet = g.model.net;
@@ -429,9 +557,13 @@
         let bw = 0, be = 0; if (daily && g.model.stDailyWk && g.model.stDailyWe) for (const r of routes) { bw += g.model.stDailyWk.routeBoard[r[1]]; be += g.model.stDailyWe.routeBoard[r[1]]; }
         grid.append(this.stat('日客运量（上车，周平均）', daily ? U.fmtPeople(board) + ' 人次' : '计算中…', daily ? '工作日 ' + U.fmtPeople(bw) + ' · 周末 ' + U.fmtPeople(be) : ''));
         const oi = g.econ.opsIndex(g.clock.y);
-        let ckm = 0;
-        for (const r of routes) for (let p = 0; p < 4; p++) ckm += g.model.live.per[p].freq[r[1]] * 2 * r[0].lenM / 1000 * r[0].cars * (p === 3 ? 5 : g.model.pHours[p]);
-        grid.append(this.stat('日运营费用（' + (g.model.dayType === 'we' ? '周末' : '工作日') + '）', U.fmtMoney(ckm * CFG.ops.carKmCost * oi), '列车 ' + U.fmtInt(ckm) + ' 车厢公里'));
+        // 车厢公里：两个方向的频率 × 线路长度 × 编组（v2.5 按车队的平均编组与车型成本系数）
+        let ckm = 0, ckw = 0; const plan = g.model.fleetOf(mnet);
+        for (const r of routes) for (let p = 0; p < 4; p++) {
+          const P = g.model.live.per[p], fp = plan && plan[r[1]], fd = P.freqDir && P.freqDir.length === 2 * mnet.R ? P.freqDir[2 * r[1]] + P.freqDir[2 * r[1] + 1] : 2 * P.freq[r[1]];
+          const v = fd * r[0].lenM / 1000 * (fp ? fp.cars : r[0].cars) * (p === 3 ? 5 : g.model.pHours[p]); ckm += v; ckw += v * (fp ? fp.opsF : 1);
+        }
+        grid.append(this.stat('日运营费用（' + (g.model.dayType === 'we' ? '周末' : '工作日') + '）', U.fmtMoney(ckw * CFG.ops.carKmCost * oi), '列车 ' + U.fmtInt(ckm) + ' 车厢公里'));
         el.appendChild(grid);
         for (const it of routes) {
           const r = it[0], ri = it[1];
@@ -442,18 +574,18 @@
               const w = W(); const f = g.model.freqAt(ri, w);
               const re = mnet.rideEdge[ri];
               let mx = 0; for (let q = 0; q < re.length; q++) mx = Math.max(mx, g.model.edgeLoadAt(re[q], w));
-              const capH = f * r.cap;
-              // 配车：全日各时段所需列车的最大值，以及本时段的依据（站数、站距、客流）
+              const capT = g.model.capOf(ri, mnet), capH = f * capT, fp = (g.model.fleetOf(mnet) || [])[ri];
+              // 配车：全日各时段所需列车的最大值，以及本时段的依据（站数、站距、客流）；有车队时为配属列车数（v2.5）
               let fleet = 0; for (let p = 0; p < 4; p++) fleet = Math.max(fleet, Math.ceil(r.cycleSec * g.model.live.per[p].freq[ri] / 3600));
               const ns = r.stIdx.length, sp = r.lenM / 1000 / Math.max(1, r.loop ? ns : ns - 1);
-              const floor = CM.Model.serviceFloor(r, w.p0), byLoad = mx / (r.cap * CFG.metro.targetLF);
+              const floor = CM.Model.serviceFloor(r, w.p0), byLoad = mx / (capT * CFG.metro.targetLF);
               rows.innerHTML = '';
               rows.appendChild(self.kv([
                 ['当前发车', f > 0 ? U.fmtNum(f, 1) + ' 列/小时（间隔 ' + U.fmtNum(60 / f, 1) + ' 分钟）' : '停运（06:00–24:00 运营）'],
-                ['运行列车', f > 0 ? Math.ceil(r.cycleSec / (3600 / f)) + ' 列（周转 ' + Math.round(r.cycleSec / 60) + ' 分钟）' : '—'],
-                ['配属列车', fleet + ' 列（全日各时段所需的最大值）'],
+                ['运行列车', f > 0 ? Math.ceil(r.cycleSec / (3600 / f)) * (r.loop ? 2 : 1) + ' 列（周转 ' + Math.round(r.cycleSec / 60) + ' 分钟）' : '—'],
+                ['配属列车', fp ? (fp.avail[0] + (r.loop ? fp.avail[1] : 0)) + ' 列（车队，见「列车运营」）' : fleet + ' 列（全日各时段所需的最大值）'],
                 ['配车依据', ns + ' 站 · 平均站距 ' + U.fmtNum(sp, 1) + ' km → 最低 ' + U.fmtNum(floor, 1) + ' 列/时；客流需要 ' + U.fmtNum(byLoad, 1) + ' 列/时' + (byLoad > floor ? '（按客流）' : '（按服务水平）')],
-                ['列车编组', r.cars + ' 节（受沿线最小车站限制），定员 ' + U.fmtInt(r.cap) + ' 人'],
+                ['列车编组', fp && (fp.avail[0] || fp.avail[1]) ? '平均 ' + U.fmtNum(fp.cars, 1) + ' 节（最长 ' + r.cars + ' 节，受沿线最小车站限制），每列定员约 ' + U.fmtInt(capT) + ' 人' : r.cars + ' 节（受沿线最小车站限制），定员 ' + U.fmtInt(r.cap) + ' 人'],
                 ['单向运力', f > 0 ? U.fmtInt(capH) + ' 人/小时' : '—'],
                 ['最大断面客流', U.fmtInt(mx) + ' 人/小时', capH > 0 && mx > capH ? 'bad' : ''],
                 ['满载率', capH > 0 ? U.fmtPct(mx / capH, 0) : '—', capH > 0 && mx > capH ? 'bad' : ''],
@@ -466,7 +598,7 @@
             const drawChart = function () { chart.innerHTML = ''; chart.appendChild(self.loadChart(r, ri, W())); };
             drawChart(); self.live.push(function () { if (Math.random() < 0.25) drawChart(); });
             b.appendChild(chart);
-            b.appendChild(h('div', { class: 'note', style: { marginTop: '6px' } }, '列车数由系统自动调配：车站越多、站距越小的城区线基础班次越密，站距大的郊区线较疏，每条线路至少 2 列；客流超过时按最大断面客流加车（最小间隔 2 分钟）。达到上限后体现为拥挤，需要升级车站以加长编组或修建平行线路分流。'));
+            b.appendChild(h('div', { class: 'note', style: { marginTop: '6px' } }, g.fleet ? '投入的列车数决定发车频率（最小间隔 2 分钟）：在「列车运营」分页购买、调配列车或改为手动设定；满载时也可以升级车站、换长编组列车，或修平行线分流。' : '列车按客流自动调配（最小间隔 2 分钟）；满载时升级车站加长编组，或修平行线分流。'));
             return b;
           }, routes.length === 1));
         }
@@ -486,7 +618,7 @@
         const co = M.coTrackSegs(net, sg); if (!co.length) continue;
         const ids = [sg.id].concat(co.map(function (c) { return c.id; }));
         let f = 0; const P = g.model.ctxs && g.model.ctxs.wd && g.model.ctxs.wd.per[0], MC = g.model.net && g.model.net.C;
-        if (P && MC && net === g.net) MC.routes.forEach(function (r, ri) { if (r.segRefs.some(function (ref) { return ids.indexOf(ref.id) >= 0; })) f += P.freq[ri] || 0; });
+        if (P && MC && net === g.net) MC.routes.forEach(function (r, ri) { if (r.legSegs.some(function (refs) { return refs.some(function (ref) { return ids.indexOf(ref.id) >= 0; }); })) f += P.freq[ri] || 0; });
         coRows.push({ sg: sg, lines: co.map(function (c) { return net.lines[net.segments[c.id].line]; }).filter(Boolean), f: f });
       }
       if (coRows.length) el.appendChild(this.sec('ln-co', '共线运营', coRows.length + ' 个区间', function () {
@@ -503,16 +635,24 @@
       }, true));
     }
     if (tab === 'build') {
+      if (!g.net.lines[lid] && g.fleet && CM.Fleet) el.appendChild(this.lineSpeedBlock(lid));   // 草案中的新线路：运行速度在这里设定（运营中的线路在「列车运营」分页）
       // 贯通运营、支线命名与支线转为独立线路（v2.1 玩家反馈）：只改变运营组织，不改动轨道、不另收建设费
       const others = Object.keys(net.lines).filter(function (o) { return o !== lid && M.sharedStations(net, lid, o).length; });
       const mids = (tp.topo === 'path' || tp.topo === 'branch') ? tp.stations.filter(function (sid) { return tp.adj.get(sid).length >= 2; }) : [];
       if (tp.topo === 'branch' || others.length || mids.length) el.appendChild(this.sec('ln-through', '贯通、拆开与支线', tp.topo === 'branch' ? (tp.leaves.length - 1) + ' 条支线' : (others.length ? others.length + ' 条可贯通' : ''), function () {
         const b = h('div');
         if (tp.topo === 'branch') {
-          b.appendChild(h('div', { class: 'small muted', style: { margin: '2px 0 6px' } }, '各方向（从「' + net.stations[tp.root].name + '」出发）'));
+          // 起点端（主干）与主线方向（v2.3 玩家反馈：Y 字支线只能默认起点）：进入草案，确认后生效，不收费
+          b.appendChild(h('div', { class: 'small muted', style: { margin: '2px 0 6px' } }, '各方向（从「' + net.stations[tp.root].name + '」出发' + (tp.main ? '，主线往「' + net.stations[tp.main].name + '」' : '') + '）'));
+          const setDir = function (patch, msg) {
+            const r = g.edit(function (n) { const L = n.lines[lid]; if (!L) return { error: '线路不存在' }; Object.assign(L, patch); if (L.main && L.main === L.root) delete L.main; });
+            if (r.error) self.toast(r.error, 'bad'); else self.toast(msg + '，确认建设后生效（不收费）', 'info');
+          };
           for (const leaf of tp.leaves) {
-            const st = net.stations[leaf], isRoot = leaf === tp.root;
-            const row = h('div', { class: 'branch-row' }, h('span', { class: 'grow' }, (isRoot ? '起点端 · ' : '往 ') + st.name));
+            const st = net.stations[leaf], isRoot = leaf === tp.root, isMain = leaf === tp.main;
+            const row = h('div', { class: 'branch-row' }, h('span', { class: 'grow' }, (isRoot ? '起点端 · ' : (isMain ? '主线 · 往 ' : '往 ')) + st.name));
+            if (!isRoot) row.appendChild(h('button', { class: 'btn sm' + (isMain ? ' on' : ''), 'data-tip': isMain ? '这个方向是主线（显示为线路本名，线路图与列表排在最前）；再点一次取消' : '把这个方向设为主线：显示为线路本名，其他方向为支线', onclick: function () { setDir({ main: isMain ? null : leaf }, isMain ? '已取消主线方向' : '已把往「' + st.name + '」设为主线'); } }, isMain ? '主线 ✓' : '设为主线'));
+            if (!isRoot) row.appendChild(h('button', { class: 'btn sm ghost', 'data-tip': '让列车从「' + st.name + '」发车：这里到分岔站的一段成为各方向共用的主干', onclick: function () { setDir({ root: leaf, rootSet: true }, '已把「' + st.name + '」设为起点端'); } }, '设为起点端'));
             if (!isRoot) {
               const cur = (line.branchNames && line.branchNames[leaf]) || '';
               const nameIn = h('input', { type: 'text', value: cur, maxlength: 10, placeholder: '支线名称（可选）', 'aria-label': '支线名称' });
@@ -548,6 +688,24 @@
               } }, '贯通')));
           }
         }
+        // 并线运行（v2.3 玩家反馈）：从本线的端点站起，沿另一条线的既有轨道继续延伸（共线运营，免建设费）
+        const ends = (tp.leaves || []).filter(function (sid) { return M.stationLines(net, sid).some(function (o) { return o !== lid; }); });
+        if (ends.length) {
+          b.appendChild(h('div', { class: 'small muted', style: { margin: '10px 0 6px' } }, '并线运行：从本线端点沿其他线路的轨道继续开（共用轨道，不另收建设费）'));
+          for (const sid of ends) for (const o of M.stationLines(net, sid)) {
+            if (o === lid) continue;
+            const L2 = net.lines[o], tp2 = M.lineTopo(net, o), mine = new Set(tp.stations);
+            const opts = (tp2.stations || []).filter(function (x) { return !mine.has(x); });
+            if (!L2 || !opts.length) continue;
+            const sel = h('select', { 'aria-label': '并线终点站' });
+            for (const x of opts) sel.appendChild(h('option', { value: x }, net.stations[x].name));
+            b.appendChild(h('div', { class: 'branch-row' }, h('span', { class: 'swatch', style: { background: AX.line(L2) } }), h('span', { class: 'grow small' }, '从「' + net.stations[sid].name + '」沿 ' + L2.name + ' 到'), sel,
+              h('button', { class: 'btn sm', onclick: function () {
+                const r = g.edit(function (n) { return M.runAlong(n, lid, sid, o, sel.value); });
+                if (r.error) self.toast(r.error, 'bad'); else self.toast('已在草案中让 ' + line.name + ' 沿 ' + L2.name + ' 并线到「' + net.stations[sel.value].name + '」（' + r.added + ' 段共用轨道，沿途车站两线都停靠），确认建设后生效', 'info');
+              } }, ic('merge', 14), '并线')));
+          }
+        }
         // 在中间站拆开（v2.1 第二轮）：拆开后各段在该站换乘，可再贯通合并回去
         if (mids.length) {
           const sel = h('select', { 'aria-label': '拆开的车站' });
@@ -558,7 +716,7 @@
             if (r.error) self.toast(r.error, 'bad'); else self.toast('已在「' + net.stations[sel.value].name + '」拆开 ' + line.name + '，确认建设后生效', 'info');
           } }, ic('scissors', 14), '拆开')));
         }
-        b.appendChild(h('div', { class: 'note', style: { marginTop: '8px' } }, '只改运营组织，不改轨道、不收费；进入草案，确认后生效。'));
+        b.appendChild(h('div', { class: 'note', style: { marginTop: '8px' } }, '贯通、拆开、主线与起点端只改运营组织，不改轨道、不收费；并线沿用既有轨道，不另收建设费（共线区段两线合计最多 ' + CFG.metro.fMax + ' 列/时）。都进入草案，确认后生效。'));
         return b;
       }, tp.topo === 'branch'));
       // 选中区段
@@ -641,7 +799,7 @@
     const up = [], dn = [];
     let mx = 1;
     for (let k = 0; k < n; k++) { const a = g.model.edgeLoadAt(re[2 * k], W), b = g.model.edgeLoadAt(re[2 * k + 1], W); up.push(a); dn.push(b); mx = Math.max(mx, a, b); }
-    const f = g.model.freqAt(ri, W), cap = f * r.cap;
+    const f = g.model.freqAt(ri, W), cap = f * g.model.capOf(ri, mnet);
     if (cap > mx) mx = cap;
     const Wd = 300, H = 90, bw = Wd / Math.max(1, n);
     let svg = '<svg viewBox="0 0 ' + Wd + ' ' + H + '" width="100%" height="' + H + '" preserveAspectRatio="none">';
@@ -667,12 +825,20 @@
     const st = Array.from(mu.stations).filter(function (id) { return net.stations[id]; });
     const sg = Array.from(mu.segs).filter(function (id) { return net.segments[id]; });
     const el = h('div');
-    el.appendChild(h('div', { class: 'note' }, '已选 ' + st.length + ' 座车站、' + sg.length + ' 段轨道（地图上以蓝色标出）。按住 Ctrl 或 Shift 点击地图可继续添加或移除。'));
+    const razing = this.tools && this.tools.tool === 'demolish';
+    el.appendChild(h('div', { class: 'note' }, razing ? '已选 ' + st.length + ' 座车站、' + sg.length + ' 段轨道（地图上以红色标出）。Ctrl+点击增减，Shift+拖动框选更多。' : '已选 ' + st.length + ' 座车站、' + sg.length + ' 段轨道（地图上以蓝色标出）。按住 Ctrl 或 Shift 点击地图可继续添加或移除。'));
     const chips = h('div', { class: 'chips' });
     const chip = function (label, color, onRemove) { return h('span', { class: 'chip' }, color ? h('span', { class: 'dot', style: { background: color } }) : null, label, h('button', { class: 'chip-x', 'data-tip': '移出多选', onclick: onRemove }, '×')); };
     for (const id of st) chips.appendChild(chip(net.stations[id].name, null, function () { self.toggleMulti('station', id); }));
     for (const id of sg) { const s = net.segments[id], L = net.lines[s.line]; chips.appendChild(chip((L ? L.name + ' ' : '') + net.stations[s.a].name + '—' + net.stations[s.b].name, L ? AX.line(L) : null, function () { self.toggleMulti('seg', id); })); }
     el.appendChild(chips);
+    const delBtn = h('button', { class: 'btn sm danger', 'data-tip': '进入草案，可一次撤销', onclick: function () { self.demolishMulti(); } }, ic('bulldozer', 14), '拆除所选（' + (st.length + sg.length) + ' 项）');
+    if (razing) {
+      const imp = this.demolishImpact({ kind: 'many', stations: st, segs: sg }), box = h('div', { class: 'batch-pv' }, h('b', null, '拆除后的变化'));
+      for (const l of imp && imp.lines.length ? imp.lines : ['不影响其他线路与车站']) box.appendChild(h('div', { class: 'small', style: { padding: '2px 0' } }, '· ' + l));
+      el.append(box, h('div', { class: 'row', style: { marginTop: '10px' } }, h('button', { class: 'btn sm ghost', onclick: function () { self.clearMulti(); } }, '清空多选'), h('span', { class: 'grow' }), delBtn));
+      return { title: '批量拆除', el: el };
+    }
     // 混合属性
     const count = function (arr, key, names) { const m = {}; for (const x of arr) m[x[key]] = (m[x[key]] || 0) + 1; return Object.keys(m).map(function (k) { return names[k] + ' ' + m[k]; }).join(' · '); };
     if (st.length) el.appendChild(h('div', { class: 'small', style: { marginTop: '8px' } }, '车站规模：' + count(st.map(function (id) { return net.stations[id]; }), 'size', mc.sizeName)));
@@ -708,7 +874,7 @@
         }))));
     }
     el.appendChild(pv);
-    el.appendChild(h('div', { class: 'row', style: { marginTop: '10px' } }, h('button', { class: 'btn sm ghost', onclick: function () { self.clearMulti(); } }, '清空多选')));
+    el.appendChild(h('div', { class: 'row', style: { marginTop: '10px' } }, h('button', { class: 'btn sm ghost', onclick: function () { self.clearMulti(); } }, '清空多选'), h('span', { class: 'grow' }), delBtn));
     return { title: '批量修改', el: el };
   };
 
@@ -734,11 +900,20 @@
     };
     upd(); this.live.push(upd);
     el.appendChild(this.kv([['单向通行能力', U.fmtInt(model.cap(2 * L.id)) + ' 辆/小时'], ['自由流速度', CFG.road.speed[L.cls] + ' km/h']]));
+    // 拥堵变化（v2.3）：工作日早高峰拥堵比（两方向较大者）与对比基准相比
+    const Pw = model.resultsFor('wd').per[0], nowR = Math.max(Pw.arcTime[2 * L.id] / road.arcT0[2 * L.id], Pw.arcTime[2 * L.id + 1] / road.arcT0[2 * L.id + 1]), rows = [['工作日早高峰拥堵比', nowR.toFixed(2)]];
+    for (const k of ['build', 'year']) {
+      const ref = g.congRefFor ? g.congRefFor(k) : null; if (!ref) continue;
+      const q0 = ref.q[2 * L.id], q1 = ref.q[2 * L.id + 1]; if (q0 === 255 || q1 === 255) continue;
+      const r0 = 1 + Math.max(q0, q1) / 100, dv = nowR - r0;
+      rows.push([(k === 'build' ? '建设以来' : '一年来') + '（' + Math.floor(ref.ym / 12) + '年' + (ref.ym % 12 + 1) + '月起）', h('span', { style: { color: dv <= -0.03 ? 'var(--good)' : (dv >= 0.03 ? 'var(--bad)' : 'var(--muted)') } }, r0.toFixed(2) + ' → ' + nowR.toFixed(2) + '（' + (dv < 0 ? '−' : '+') + Math.abs(dv).toFixed(2) + '）')]);
+    }
+    el.appendChild(this.kv(rows));
     el.appendChild(h('div', { class: 'small muted', style: { margin: '10px 0 2px' } }, '全天饱和度变化（' + (model.dayType === 'we' ? '今天为周末' : '今天为工作日') + '，两方向较大者）'));
     const vals = [];
     for (let hr = 0; hr < 24; hr++) { const W = model.weights(hr * 60 + 30); vals.push(Math.max(model.arcVolAt(2 * L.id, W), model.arcVolAt(2 * L.id + 1, W)) / model.cap(2 * L.id)); }
     el.appendChild(this.spark(vals, { color: '#e8642c', ref: 1, labels: ['0 时', '12 时', '24 时'] }));
-    el.appendChild(h('div', { class: 'note', style: { marginTop: '8px' } }, '饱和度 = 小时流量 ÷ 通行能力。道路由系统建设与发展；地铁可吸引汽车出行转移，从而改变道路流量。'));
+    el.appendChild(h('div', { class: 'note', style: { marginTop: '8px' } }, '饱和度 = 小时流量 ÷ 通行能力；拥堵比 = 行驶时间 ÷ 自由流时间。道路由系统建设与发展；地铁吸引汽车出行转移，车站开通后约 4 年里周边居民逐步少开车，沿线道路会慢慢缓解（拥堵图层 →「拥堵变化」）。'));
     return { title: name, el: el };
   };
   UI.prototype.page_zone = function (z) {
@@ -752,6 +927,7 @@
       ['地铁覆盖（步行 15 分钟）', acc ? U.fmtPct(acc.zCov[z]) : '0%'],
       ['工作日早高峰出发地铁占比', P.zTrips[z] > 0 ? U.fmtPct(P.zMetro[z] / P.zTrips[z]) : '—'],
       ['工作日早高峰道路拥堵指数', g.zoneCong(z, 'wd').toFixed(2)],
+      ['住在这里的人平均通勤', (function () { const R0 = model.resultsFor('wd').per[0]; return R0.zCW && R0.zCW[z] > 0 ? U.fmtNum(R0.zCT[z] / R0.zCW[z], 1) + ' 分钟' : '—'; })()],
     ]));
     // 普通设施（按片区汇总）吸引的出行：分目的，工作日与周末（模拟结果）
     if (model.facData('wd') && model.facData('we')) {
@@ -835,9 +1011,9 @@
       upd(); this.live.push(upd);
       // 出行目的
       el.appendChild(this.sec('f-purp', '出行目的（' + (hub ? '去往车站 / 机场' : '到达') + '，人次/日）', '工作日 · 周末', function () {
-        const a = model.facStats(id, 'wd'), b = model.facStats(id, 'we'), t = h('table', { class: 'tbl' }, h('tr', null, h('th', null, '目的'), h('th', null, '工作日'), h('th', null, '周末')));
-        if (a && b) for (const q of TR.keys) { if (a.purp[q] < 1 && b.purp[q] < 1) continue; t.appendChild(h('tr', null, h('td', null, h('span', { class: 'dot', style: { background: AX.category(TR.keys.indexOf(q), TR.color[q]), marginRight: '6px' } }), TR.name[q]), h('td', null, U.fmtPeople(a.purp[q])), h('td', null, U.fmtPeople(b.purp[q])))); }
-        return h('div', null, t, h('div', { class: 'note', style: { marginTop: '6px' } }, hub ? '接驳出行：旅客往返车站或机场的市内出行（汽车 + 地铁），到达与离开各计一次；铁路与航班本身不在模拟范围内，旅客量为外部给定的估算，不会因修地铁而凭空增加。' : (CM.DATA.bg ? "包含道路、背景交通与地铁出行。修通地铁后，商圈、景点等设施的到访可能适度增加（有上限），通勤、上学、就医不会因此增加。" : '只含汽车与地铁出行（步行到访不计）。修通地铁后，商圈、景点等设施的到访可能适度增加（有上限），通勤、上学、就医不会因此增加。')));
+        const a = model.facStats(id, 'wd'), b = model.facStats(id, 'we'), t = h('table', { class: 'tbl' }, h('tr', null, h('th', null, '目的'), h('th', null, '工作日'), h('th', null, '周末'), h('th', null, '乘地铁')));
+        if (a && b) for (const q of TR.keys) { if (a.purp[q] < 1 && b.purp[q] < 1) continue; const sum = a.purp[q] + b.purp[q], metro = a.purpM[q] + b.purpM[q]; t.appendChild(h('tr', null, h('td', null, h('span', { class: 'dot', style: { background: AX.category(TR.keys.indexOf(q), TR.color[q]), marginRight: '6px' } }), TR.name[q]), h('td', null, U.fmtPeople(a.purp[q])), h('td', null, U.fmtPeople(b.purp[q])), h('td', null, U.fmtPct(sum > 0 ? metro / sum : 0, 0)))); }
+        return h('div', null, t, h('div', { class: 'note', style: { marginTop: '6px' } }, hub ? '旅客往返车站或机场的市内出行；修地铁不会增加旅客量。' : '只含汽车与地铁出行；通地铁后购物、休闲到访会适度增加。'));
       }, true));
       // 附近地铁站与接驳
       el.appendChild(this.sec('f-acc', '附近地铁站与接驳', '', function () {
@@ -1058,6 +1234,7 @@
       Math.abs(v.decayHW - 1) > 0.03 ? chips('通勤距离', [v.decayHW > 1 ? '偏长（郊区化）' : '偏短（职住较近）'], 'corr') : null,
       v.bg ? chips('背景交通', [v.bg.name + ' · 约占非地铁出行 ' + U.fmtPct(v.bg.share, 0)], 'bgt') : null);
     if (trend.childNodes.length) el.append(h('div', { class: 'era-h' }, h('b', null, '本阶段的发展倾向')), trend);
+    const mix = UI.modeMix(g); if (mix) el.append(h('div', { class: 'era-h' }, h('b', null, '地铁以外的出行结构')), mix);
     if (v.fx.length) {
       el.appendChild(h('div', { class: 'era-h' }, h('b', null, '生效中的事件影响')));
       for (const x of v.fx) el.appendChild(h('div', { class: 'era-fx' }, CM.icon('sparkle', 15), h('div', null, h('b', null, x.title), h('small', null, x.note))));
@@ -1168,8 +1345,13 @@
         h('div', { class: 'fm-h' }, h('b', null, '本月收支'), h('span', { class: 'tiny muted' }, g.clock.y + '年' + g.clock.m + '月 · 已结算 ' + c.days + ' 天')),
         free ? null : row('bank', '政府拨款', '+' + U.fmtMoney(c.grant), 'in'),
         row('ticket', '票款', '+' + U.fmtMoney(c.fare), 'in'),
+        c.commerce > 0.05 ? row('bag', '车站商业（广告与租金）', '+' + U.fmtMoney(c.commerce), 'in') : null,
+        free || !c.ppp ? null : row('briefcase', '政府合同（补助、付费与退还保证金）', '+' + U.fmtMoney(c.ppp), 'in'),
         free || !c.reward ? null : row('gift', '任务奖励', '+' + U.fmtMoney(c.reward), 'in'),
+        free || !c.fleetSale ? null : row('train', '出售列车（残值）', '+' + U.fmtMoney(c.fleetSale), 'in'),
         row('train', '运营成本', '−' + U.fmtMoney(c.ops), 'out'),
+        c.todCost > 0.05 ? row('bag', '车站商业成本', '−' + U.fmtMoney(c.todCost), 'out') : null,
+        free || !c.pppOut ? null : row('briefcase', '合同支出（保证金、分成、违约）', '−' + U.fmtMoney(c.pppOut), 'out'),
         (function () { let b = 0; for (const k of CM.Economy.BUILD_KINDS) b += c[k] || 0; return b > 0.5 ? row('hammer', '建设支出', '−' + U.fmtMoney(b), 'out') : null; })(),
         free || !((c.interest || 0) + (c.principal || 0) + (c.penalty || 0)) ? null : row('wallet', '偿债', '−' + U.fmtMoney((c.interest || 0) + (c.principal || 0) + (c.penalty || 0)), 'debt'),
         h('button', { class: 'linkbtn', onclick: function () { goFin(self, 'fisc'); } }, '收支明细与资金流水', CM.icon('chev', 14))].filter(Boolean));
@@ -1185,7 +1367,36 @@
         h('div', { class: 'fg-h' }, CM.icon('bank', 16), h('b', null, '下月拨款预计'), h('span', { class: 'grow' }), h('b', { class: 'num' }, U.fmtMoney(E.grantFor(ny, nm))), CM.icon('chev', 14)),
         this.grantChain(ny, nm, true)));
     }
+    // 后期经营提示（v2.3 平衡）：运营费用随物价上涨而票价长期不变时，票款覆盖率会越来越低
+    if (!free) {
+      const L12 = E.ledger.slice(-12), ops = L12.reduce(function (a, r) { return a + (r.ops || 0); }, 0), inc = L12.reduce(function (a, r) { return a + (r.fare || 0) + (r.commerce || 0) - (r.todCost || 0); }, 0);
+      if (L12.length >= 6 && ops > 0 && inc / ops < 0.35 && g.compiled.stations.length >= 20)
+        el.appendChild(this.callout('warn', 'coin', '近一年票款与车站商业收入只覆盖运营费用的 ' + U.fmtPct(inc / ops, 0) + '：运营费用随物价上涨，票价却没有调整。可以在下方适度提高票价（居民收入提高后，可承受的票价也随之提高），或开发高客流车站的商业空间。'));
+    }
     el.appendChild(this.sec('fi-fare', '票价', UI.fareText(E.fare), function () { return self.fareEditor(); }, true, 'ticket'));
+    // 车站商业（TOD，v2.3）：已开发车站的月收入，以及客流最高、还能开发或升级的车站——点按钮直接打开商业开发气泡
+    const C = g.model.net ? g.model.net.C : null, sd = g.model.stDaily;
+    if (CM.TOD && C && sd && !g.model.dailyStale) {
+      const T = CM.TOD, rows = [];
+      C.stations.forEach(function (s, k) {
+        const st = g.net.stations[s.id]; if (!st || !C.serviced[k] || k >= sd.inn.length) return;
+        const flow = sd.inn[k] + sd.out[k] + sd.xfer[k], hub = C.stationLines[k].size >= 2, lv = st.tod || 0;
+        rows.push({ id: s.id, name: st.name, lv: lv, flow: flow, hub: hub, month: (T.stationDaily(lv, flow, hub, g.clock.y, g) - T.stationCost(lv, g.clock.y, st.size, hub)) * 30.4 });
+      });
+      rows.sort(function (a, b) { return b.flow - a.flow; });
+      const dev = rows.filter(function (r) { return r.lv; }), sum = dev.reduce(function (a, r) { return a + r.month; }, 0), loss = dev.filter(function (r) { return r.month < 0; });
+      el.appendChild(this.sec('fi-tod', '车站商业（TOD）', dev.length ? dev.length + ' 站 · 每月净' + (sum < 0 ? '亏 ' : '收 ') + U.fmtMoney(Math.abs(sum)) : '尚未开发', function () {
+        const b = h('div');
+        b.appendChild(h('div', { class: 'note' }, '高客流车站可以开发商业，换乘枢纽收益最高；开发后每年有运营与维护成本，客流太少会亏损。'));
+        for (const r of loss.slice(0, 4)) b.appendChild(h('div', { class: 'tod-row' },
+          h('span', { class: 'grow' }, h('b', null, r.name), h('small', { class: 'bad' }, T.LEVELS[r.lv].name + ' · 每月净亏约 ' + U.fmtMoney(-r.month) + ' · 日客流 ' + U.fmtPeople(r.flow) + ' 人次')),
+          h('button', { class: 'btn sm ghost', onclick: function (e) { CM.Quick.popTod(r.id, e.currentTarget); } }, '查看')));
+        for (const r of rows.filter(function (x) { return x.lv < 3; }).slice(0, 6)) b.appendChild(h('div', { class: 'tod-row' },
+          h('span', { class: 'grow' }, h('b', null, r.name), h('small', null, '日客流 ' + U.fmtPeople(r.flow) + ' 人次' + (r.hub ? ' · 换乘站' : '') + (r.lv ? ' · ' + T.LEVELS[r.lv].name : ''))),
+          h('button', { class: 'btn sm' + (r.lv ? '' : ' primary'), onclick: function (e) { CM.Quick.popTod(r.id, e.currentTarget); } }, r.lv ? '升级' : '开发')));
+        return b;
+      }, false, 'bag'));
+    }
   };
   // 经济摘要卡：最近一年的 GDP 与增速、经济环境、交通对经济的影响
   UI.prototype.econCard = function (mv, onOpen) {
@@ -1208,7 +1419,7 @@
     const box = h('div', { class: 'gchain' + (compact ? ' compact' : '') });
     const step = function (label, v, cls) { box.appendChild(h('div', { class: 'gc-step ' + (cls || '') }, h('small', null, label), h('b', { class: 'num' }, v))); };
     step('基础额度', U.fmtMoney(E.grantQuota(y, m)));
-    for (const f of E.grantFactors(y, m)) step(f.kind === 'fisc' ? '财力' : (f.kind === 'sat' ? '满意度' : '任务'), '×' + f.f.toFixed(2), f.f >= 1.005 ? 'up' : (f.f <= 0.995 ? 'down' : ''));
+    for (const f of E.grantFactors(y, m)) step(f.kind === 'fisc' ? '财力' : (f.kind === 'sat' ? '满意度' : (f.kind === 'corp' ? '信誉' : '任务')), '×' + f.f.toFixed(2), f.f >= 1.005 ? 'up' : (f.f <= 0.995 ? 'down' : ''));
     return box;
   };
 
@@ -1333,7 +1544,7 @@
         b.appendChild(self.grantChain(ny, nm, false));
         b.appendChild(h('div', { class: 'chg small', style: { marginTop: '6px' } }, h('b', null, '下月（' + ny + '年' + nm + '月）拨款'), h('b', { class: 'num' }, U.fmtMoney(E.grantFor(ny, nm)))));
         for (const f of E.grantFactors(ny, nm)) if (f.kind === 'task') b.appendChild(h('div', { class: 'tiny muted' }, '· ' + f.label + ' ×' + f.f.toFixed(2)));
-        b.appendChild(h('div', { class: 'note', style: { marginTop: '6px' } }, '基础额度按城市与年代设定，进入模拟增长期后随城市预期财政收入增长；财力系数来自城市经济（上一年地方财政收入）；满意度系数 ×0.6–1.4；任务未完成时在 ' + CFG.economy.failGrantMonths + ' 个月内 ×' + CFG.economy.failGrantFactor + '（多项叠加最低按 ×0.6）。拨款每月初发放一次，不会重复发放或补发。'));
+        b.appendChild(h('div', { class: 'note', style: { marginTop: '6px' } }, '基础额度按城市与年代设定，进入模拟增长期后随城市预期财政收入增长；财力系数来自城市经济（上一年地方财政收入）；满意度系数 ×0.6–1.4；历史任务未完成时在 ' + CFG.economy.failGrantMonths + ' 个月内 ×' + CFG.economy.failGrantFactor + '，动态任务 ' + CFG.economy.failDynMonths + ' 个月内 ×' + CFG.economy.failDynGrantFactor + '（多项叠加最低按 ×' + CFG.economy.grantModFloor + '）。拨款每月初发放一次，不会重复发放或补发。'));
         return b;
       }, true, 'bank'));
     }
@@ -1381,7 +1592,7 @@
   // ---------- 财政：月度账本（科目分开：财政收入、融资到账、建设支出、运营成本、利息、本金偿还、逾期费用） ----------
   const BK = CM.Economy.BUILD_KINDS;
   const buildOf = function (r) { let s = 0; for (const k of BK) s += r[k] || 0; return s; };
-  const incomeOf = function (r) { return (r.grant || 0) + (r.fare || 0) + (r.reward || 0); };
+  const incomeOf = function (r) { return (r.grant || 0) + (r.fare || 0) + (r.reward || 0) + (r.commerce || 0) + (r.ppp || 0) + (r.fleetSale || 0); };
   const serviceOf = function (r) { return (r.interest || 0) + (r.principal || 0) + (r.penalty || 0); };
   UI.prototype.ledgerBlock = function () {
     const g = this.g(), E = g.econ, c = E.cur, free = E.isFree(), oi = E.opsIndex(g.clock.y), M = function (v) { return U.fmtMoney(v || 0); };
@@ -1389,10 +1600,11 @@
     const box = h('div');
     const group = function (title, rows, cls) { box.appendChild(h('div', { class: 'fl-g ' + (cls || '') }, h('div', { class: 'fl-h' }, title), this.kv(rows))); }.bind(this);
     if (!free) box.appendChild(this.kv([['期初一般资金', M(c.start)], ['期初建设专项资金', M(c.capexStart)]]));
-    group('财政收入', [['政府拨款', '+ ' + M(c.grant)], ['票款', '+ ' + M(c.fare)], ['任务奖励', '+ ' + M(c.reward)]], 'in');
+    group('财政收入', [['政府拨款', '+ ' + M(c.grant)], ['票款', '+ ' + M(c.fare)], ['车站商业（广告与租金）', '+ ' + M(c.commerce)], c.ppp || g.corp ? ['政府合同（补助、付费与退还保证金）', '+ ' + M(c.ppp)] : null, ['任务奖励', '+ ' + M(c.reward)], c.fleetSale ? ['出售列车（残值）', '+ ' + M(c.fleetSale)] : null], 'in');
     if (!free) group('融资到账（不计入收入）', [['债券募集 → 建设专项资金', '+ ' + M(c.bond)]], 'fin');
     group('建设支出', [['建设与拆迁', '− ' + M(buildOf(c))], !free ? ['其中由专项资金支付', M(c.capexUse)] : null], 'out');
-    group('运营成本', [['列车运行与车站', '− ' + M(c.ops)]], 'out');
+    group('运营成本', [['列车运行与车站', '− ' + M(c.ops)], c.todCost ? ['车站商业运营与维护', '− ' + M(c.todCost)] : null], 'out');
+    if (!free && (c.pppOut || g.corp)) group('合同支出', [['保证金、地价、超额分成与违约金', '− ' + M(c.pppOut)]], 'out');
     if (!free) group('偿债', [['利息', '− ' + M(c.interest)], ['本金偿还', '− ' + M(c.principal)], ['逾期费用', '− ' + M(c.penalty)]], 'debt');
     box.appendChild(h('div', { class: 'note', style: { marginTop: '6px' } }, '每日运营成本约 ' + U.fmtMoney(((g.model.daily && g.model.daily.carKm) || 0) * CFG.ops.carKmCost * oi + st) + '（列车运行 + ' + g.compiled.stations.length + ' 座车站），票款与运营成本逐日结算；利息与本金在每月初拨款之后支付。'));
     if (E.ledger.length) {
@@ -1518,7 +1730,45 @@
   };
   // 票价：按里程计费或统一票价（v2.1 第二轮），金额以内部货币保存、按当期显示货币格式化
   // 票价：参数为内部金额（开局货币），按当期显示货币格式化
-  UI.fmtFare = function (v) { v = +U.cur(v).toFixed(4); return CFG.money.sym + (v % 1 ? (v * 10 % 1 ? (v * 100 % 1 ? v.toFixed(3) : v.toFixed(2)) : v.toFixed(1)) : String(v)) + '/次'; };
+  // 出行结构（v2.6，DATA.bg.modes）：地铁以外的出行里，电车、市郊铁路、步行、公交与小汽车的比重随年代变化（估算）；地铁的比重是玩家自己的成绩，不画进来
+  UI.modeMix = function (g) {
+    const B = CM.DATA.bg; if (!B || !B.modes) return null;
+    const t = g.year(), y0 = CFG.START.y, y1 = 2030, W = 320, H = 96;
+    const at = function (y) {
+      const out = B.modes.map(function (m) { return { id: m.id, name: m.name, color: m.color, v: U.interp(m.share, y) }; });
+      const road = Math.max(0, 1 - out.reduce(function (s, m) { return s + m.v; }, 0)), bus = road * U.interp(B.busShare, y);
+      out.push({ id: 'bus', name: '公共汽车', color: '#c8102e', v: bus }, { id: 'car', name: '小汽车与货车', color: '#8a93a0', v: road - bus });
+      return out;
+    };
+    const years = []; for (let y = y0; y <= y1; y += 2) years.push(y);
+    const X = function (y) { return (y - y0) / (y1 - y0) * W; };
+    const series = years.map(at), n = series[0].length;
+    let paths = '';
+    const base = years.map(function () { return 0; });
+    for (let k = 0; k < n; k++) {
+      const top = years.map(function (_, i) { return base[i] + series[i][k].v; });
+      let d = 'M' + X(years[0]).toFixed(1) + ' ' + (H - top[0] * H).toFixed(1);
+      for (let i = 1; i < years.length; i++) d += 'L' + X(years[i]).toFixed(1) + ' ' + (H - top[i] * H).toFixed(1);
+      for (let i = years.length - 1; i >= 0; i--) d += 'L' + X(years[i]).toFixed(1) + ' ' + (H - base[i] * H).toFixed(1);
+      paths += '<path d="' + d + 'Z" fill="' + series[0][k].color + '" opacity="0.82"/>';
+      for (let i = 0; i < years.length; i++) base[i] = top[i];
+    }
+    const cx = X(U.clamp(t, y0, y1));
+    const svg = '<svg viewBox="0 -2 ' + W + ' ' + (H + 16) + '" class="era-mix" role="img">' + paths +
+      '<line x1="' + cx.toFixed(1) + '" x2="' + cx.toFixed(1) + '" y1="0" y2="' + H + '" stroke="#17202c" stroke-width="1.4"/>' +
+      [1914, 1945, 1981, 2020].map(function (y) { return '<text x="' + X(y).toFixed(1) + '" y="' + (H + 11) + '" text-anchor="middle" font-size="9" fill="currentColor" opacity=".6">' + y + '</text>'; }).join('') + '</svg>';
+    const now = at(t), keep = CM.Eras.bg(t);
+    return h('div', { class: 'era-mixbox' }, h('div', { html: svg }),
+      h('div', { class: 'era-chips' }, now.map(function (m) { return h('span', { class: 'chip' }, h('i', { class: 'era-mixdot', style: { background: m.color } }), m.name + ' ' + U.fmtPct(m.v, 0)); })),
+      keep && keep.keep ? h('div', { class: 'note muted tiny' }, '竖线是现在。新地铁的乘客不全来自小汽车：这个年代的路面空出来后，约 ' + U.fmtPct(keep.keep, 0) + ' 又会被公交、货车和新增的小汽车占满，所以修了地铁，路上不一定就变空。') : null);
+  };
+  // 英镑十进制之前（伦敦，1971 年前）：1 英镑 = 240 便士 = 20 先令，票价精确到半便士
+  const fmtPence = function (v) {
+    const d = Math.round(v * 480) / 2, en = CM.I18n && CM.I18n.get() === 'en', P = en ? 'd' : ' 便士', S = en ? 's' : ' 先令';
+    if (d < 12) return d + P;
+    const s = Math.floor(d / 12), r = d - s * 12; return s + S + (r ? ' ' + r + P : '');
+  };
+  UI.fmtFare = function (v) { if (CFG.money.pence) return fmtPence(v) + '/次'; v = +U.cur(v).toFixed(4); return CFG.money.sym + (v % 1 ? (v * 10 % 1 ? (v * 100 % 1 ? v.toFixed(3) : v.toFixed(2)) : v.toFixed(1)) : String(v)) + '/次'; };
   // 票价文字：统一票价「¥2/次」；按里程「¥2 起 · 按里程」（简短）或完整规则
   UI.fareText = function (f, long) {
     if (!f || f.mode !== 'dist') return (long ? '全网统一票价 ' : '') + UI.fmtFare(f ? f.flat : 0);
@@ -1618,8 +1868,22 @@
   // 分页：进行中 / 已完成 / 未完成。进行中的任务按剩余时间排序；每张卡片：类型图标、进度环、目标与当前值、
   // 连接任务的站点清单、连续月数、期限条（越临近越醒目）、奖励与未完成后果、定位入口
   const TASK_TYPE = {
+    combo: ['layers', '综合目标'],
     connect: ['route', '连通线路'], coverage: ['target', '地铁覆盖'], zoneCong: ['car', '缓解拥堵'], zoneCov: ['map', '片区覆盖'],
     stationCrowd: ['people', '车站拥挤'], ridership: ['train', '客流增长'], recovery: ['coin', '运营收支'], facShare: ['pin', '设施接驳'],
+    budgetConnect: ['wallet', '预算内连通'], lineCrowd: ['people', '拥挤区段'], lineCars: ['train', '线路扩容'], fiscal: ['bank', '财政调整'], lineEff: ['trend', '老线路效率'], regionCov: ['map', '片区覆盖'], xferHub: ['network', '换乘网络'],
+  };
+  // 复合任务的分项目标：每项一行，写明属于哪方面、是否达成与当前进度
+  UI.prototype.taskParts = function (t, ev) {
+    const box = h('div', { class: 'tk-parts' });
+    for (const p of ev.parts || []) {
+      const row = h('div', { class: 'tk-part ' + p.kind + (p.ok ? ' ok' : '') + (p.dead ? ' dead' : '') },
+        CM.icon(p.ok ? 'check' : (p.dead ? 'close' : 'target'), 14),
+        h('div', { class: 'grow' }, h('div', { class: 'tk-pt' }, h('span', { class: 'tk-pk' }, CM.Tasks.PART_KIND[p.kind] || ''), p.core ? h('span', { class: 'tk-core' }, '主体') : null), h('div', { class: 'tk-px' }, p.text),
+          !p.ok && !p.dead && p.value > 0 ? h('div', { class: 'tk-pb' }, h('i', { style: { width: Math.round(p.value * 100) + '%' } })) : null));
+      box.appendChild(row);
+    }
+    return box;
   };
   UI.prototype.taskRing = function (v, cls) {
     const p = U.clamp(v || 0, 0, 1), C = 2 * Math.PI * 17;
@@ -1628,15 +1892,23 @@
   UI.prototype.page_tasks = function (id) {
     const g = this.g(), T = g.tasks, self = this, ch = g.econ.mode === 'challenge', E = CFG.economy;
     const ym = g.ym();
-    const tab = id || this.taskTab || 'active';
+    const corp = !!(CM.Corp && CM.Corp.enabled(g));   // 政府合同（v2.5）：经营挑战的真实城市
+    let tab = id || this.taskTab || 'active';
+    if (tab === 'ppp' && !corp) tab = 'active';
     this.taskTab = tab;
     const el = h('div', { class: 'tk-page' });
-    el.appendChild(this.pageTabs([['active', '进行中 ' + T.active.length, 'flag'], ['done', '已完成 ' + T.done.length, 'check'], ['failed', '未完成 ' + T.failed.length, 'error']], tab, function (t) {
+    const tabs = [['active', '进行中 ' + T.active.length, 'flag'], ['done', '已完成 ' + T.done.length, 'check'], ['failed', '未完成 ' + T.failed.length, 'error']];
+    if (corp) tabs.push(['ppp', '合同' + (g.corp ? ' ' + (g.corp.tenders.length + g.corp.contracts.length) : ''), 'briefcase']);
+    el.appendChild(this.pageTabs(tabs, tab, function (t) {
       self.taskTab = t; const top = self.stack[self.stack.length - 1]; if (top && top.kind === 'tasks') top.id = t; self.renderPage(false); self.rBody.scrollTop = 0;
     }));
     const body = h('div', { class: 'page-enter' });
     el.appendChild(body);
-    const kindTag = function (t) { return t.kind === 'hist' ? h('span', { class: 'tag hist' }, '历史参考') : (t.cityId ? h('span', { class: 'tag est' }, '本城动态') : h('span', { class: 'tag info' }, '动态任务')); };
+    const kindTag = function (t) { return t.kind === 'hist' ? h('span', { class: 'tag hist' }, '历史参考') : (t.kind === 'opt' || t.kind === 'offer' ? h('span', { class: 'tag opt' }, t.scenario ? '城市难题' : '可选挑战') : (t.cityId ? h('span', { class: 'tag est' }, '本城动态') : h('span', { class: 'tag info' }, '动态任务'))); };
+    // 可选挑战的主题与思路（v2.3）
+    const themeRow = function (t) { return t.theme ? h('div', { class: 'tk-theme' }, CM.icon(t.scenario ? 'flag' : 'sparkle', 13), h('b', null, t.theme)) : null; };
+    const tipsBox = function (t) { return t.tips && t.tips.length ? h('ul', { class: 'tk-tips' }, t.tips.map(function (s) { return h('li', null, s); })) : null; };
+    const lineBtn = function (t) { const L = t.line && g.net.lines[t.line]; return L ? h('button', { class: 'btn sm ghost', onclick: function () { self.openPage('line', t.line); } }, CM.icon('route', 14), L.name) : null; };
     const typeOf = function (t) { return TASK_TYPE[t.type] || ['flag', '任务']; };
     const metricText = function (t, s) { return D.bg && t.type === 'zoneCong' && t.metric === 'carShare' ? String(s || '').replace(/汽车出行/g, '非地铁出行') : s; };
     const card = function (t) {
@@ -1647,18 +1919,26 @@
       const ty = typeOf(t);
       const c = h('div', { class: 'tk-card ' + urg + (ev.ok ? ' ok' : '') });
       c.appendChild(h('div', { class: 'tk-top' },
-        h('span', { class: 'badge ' + (t.kind === 'hist' ? 'b-orange' : 'b-violet') }, CM.icon(ty[0])),
-        h('div', { class: 'grow' }, h('div', { class: 'tk-meta' }, kindTag(t), h('span', { class: 'tiny muted' }, ty[1])), h('b', { class: 'tk-title' }, t.title)),
+        h('span', { class: 'badge ' + (t.kind === 'hist' ? 'b-orange' : (t.kind === 'opt' ? 'b-teal' : 'b-violet')) }, CM.icon(ty[0])),
+        h('div', { class: 'grow' }, h('div', { class: 'tk-meta' }, kindTag(t), h('span', { class: 'tiny muted' }, ty[1])), h('b', { class: 'tk-title' }, metricText(t, t.title))),
         this.taskRing(ev.value, ev.ok ? 'ok' : '')));
-      c.appendChild(h('div', { class: 'tk-desc' }, t.desc));
+      const th = themeRow(t); if (th) c.appendChild(th);
+      c.appendChild(h('div', { class: 'tk-desc' }, metricText(t, t.desc)));
+      const tb = tipsBox(t); if (tb) c.appendChild(tb);
       // 目标与当前值；连接任务列出每个站点区域是否已有车站
-      if (t.type === 'connect' && t.anchors) {
+      const combo = t.type === 'combo';
+      if ((t.type === 'connect' || t.type === 'budgetConnect' || combo) && t.anchors) {
         const C0 = g.compiled, hit = t.anchors.map(function (a) { return C0.stations.some(function (s, i) { return C0.serviced[i] && U.dist(s.x, s.y, a.x, a.y) <= a.r; }); });
         c.appendChild(h('div', { class: 'tk-anchors' }, t.anchors.map(function (a, i) {
           return h('button', { class: 'tk-anchor' + (hit[i] ? ' on' : ''), 'data-tip': '在地图上定位「' + a.name + '」（半径约 ' + Math.round(a.r * CFG.CELL_M) + ' m）', onclick: function () { self.locatePoint(a.x, a.y, a.name, a.r || 2); } }, CM.icon(hit[i] ? 'check' : 'locate', 13), a.name);
         })));
-        c.appendChild(h('div', { class: 'tk-goal' }, CM.icon('target', 14), h('span', null, ev.ok ? '已全部连通' : (hit.every(Boolean) ? '各处都有车站，但还没有连成同一网络' : '还差 ' + hit.filter(function (x) { return !x; }).length + ' 处没有运营车站'))));
-      } else c.appendChild(h('div', { class: 'tk-goal' }, CM.icon('target', 14), h('span', null, ev.text)));
+        if (!combo) c.appendChild(h('div', { class: 'tk-goal' }, CM.icon('target', 14), h('span', null, ev.ok ? '已全部连通' : (hit.every(Boolean) ? '各处都有车站，但还没有连成同一网络' : '还差 ' + hit.filter(function (x) { return !x; }).length + ' 处没有运营车站'))));
+        if (t.type === 'budgetConnect') c.appendChild(h('div', { class: 'tk-goal' }, CM.icon('wallet', 14), h('span', null, ev.text.replace(/^.*· /, ''))));
+      } else if (!combo) c.appendChild(h('div', { class: 'tk-goal' }, CM.icon('target', 14), h('span', null, metricText(t, ev.text))));
+      if (combo) {
+        c.appendChild(this.taskParts(t, ev));
+        if (ch && !ev.ok && ev.parts.length > 1) c.appendChild(h('div', { class: 'tk-basis tiny muted' }, CM.icon('info', 12), ev.coreOk ? '主体已达成：到期前完成其余目标可得全额奖励，否则算部分完成（奖励 ' + U.fmtMoney(t.reward * CM.Tasks.PARTIAL) + '，不扣拨款）' : '到期时只完成主体也算部分完成（奖励 ' + U.fmtMoney(t.reward * CM.Tasks.PARTIAL) + '，不扣拨款）'));
+      }
       // 统计口径（v1.9）：工作日 / 周末 / 周平均等
       const basis = CM.Tasks.basisOf ? CM.Tasks.basisOf(t) : null;
       if (basis && basis !== 'net') c.appendChild(h('div', { class: 'tk-basis tiny muted' }, CM.icon('calMonth', 12), '统计口径：' + CM.Tasks.BASIS[basis] + (t.type === 'ridership' && t.basis === 'wd' ? '（任务发布时的口径）' : '')));
@@ -1673,31 +1953,104 @@
       c.appendChild(h('div', { class: 'tk-time' },
         h('div', { class: 'tk-tbar' }, h('i', { style: { width: (used * 100).toFixed(1) + '%' } })),
         h('div', { class: 'tk-tl' }, CM.icon('hourglass', 13), h('b', null, left > 0 ? '剩 ' + left + ' 个月' : '本月到期'), h('span', { class: 'muted' }, '截止 ' + t.deadline[0] + '年' + t.deadline[1] + '月 · 每月初评估'))));
-      // 奖励与后果
-      if (ch) c.appendChild(h('div', { class: 'tk-stakes' },
+      // 奖励与后果（可选挑战未完成只扣满意度）
+      if (ch && t.kind === 'opt') c.appendChild(h('div', { class: 'tk-stakes' },
         h('span', { class: 'tk-chip good' }, CM.icon('gift', 13), '奖励 ' + U.fmtMoney(t.reward)), h('span', { class: 'tk-chip good' }, CM.icon('smile', 13), '满意度 +4（6 个月）'),
-        h('span', { class: 'tk-chip bad', 'data-tip': '到期未完成：未来 ' + E.failGrantMonths + ' 个月（含当月）拨款 ×' + E.failGrantFactor + '，满意度 ' + E.failSat }, CM.icon('warn', 13), '未完成：拨款 ×' + E.failGrantFactor + '（' + E.failGrantMonths + ' 个月）')));
+        h('span', { class: 'tk-chip bad' }, CM.icon('warn', 13), '未完成：满意度 −2（6 个月），拨款不受影响')));
+      else if (ch) c.appendChild(h('div', { class: 'tk-stakes' },
+        h('span', { class: 'tk-chip good' }, CM.icon('gift', 13), '奖励 ' + U.fmtMoney(t.reward)), h('span', { class: 'tk-chip good' }, CM.icon('smile', 13), '满意度 +4（6 个月）'),
+        (function () { const P = CM.Tasks.failPenalty(t); return h('span', { class: 'tk-chip bad', 'data-tip': '到期未完成：未来 ' + P.months + ' 个月（含当月）拨款 ×' + P.factor + '，满意度 ' + P.sat }, CM.icon('warn', 13), '未完成：拨款 ×' + P.factor + '（' + P.months + ' 个月）'); })()));
       // 定位
       const locs = [];
+      // 复合任务：每项条件对应的定位与图层入口（同类只出现一次）
+      if (combo) {
+        const seen = {}, layerBtn = function (id, icon, label, before) { if (seen[id]) return; seen[id] = 1; locs.push(h('button', { class: 'btn sm ghost', onclick: function () { if (before) before(); self.setLayer(id); } }, CM.icon(icon, 14), label)); };
+        for (const p of t.parts) {
+          if (p.fac) { const f = CM.Fac.byId(p.fac); if (f) locs.push(h('button', { class: 'btn sm ghost', onclick: function () { self.select({ kind: 'facility', id: f.id }); self.locatePoint(f.x, f.y, f.name, Math.max(0.8, f.r), 3); } }, CM.icon(f.T.icon, 14), f.name)); }
+          if (p.type === 'coverage' || p.type === 'regionCov') layerBtn('cover', 'lyCover', '查看覆盖图层');
+          if (p.type === 'regionCommute') layerBtn('commute', 'timer', '通勤时间图层');
+          if (p.type === 'regionShare' || p.type === 'share') layerBtn('mshare', 'metro', '乘地铁比例图层');
+          if (p.type === 'todNet') layerBtn('tod', 'bag', '商业开发图层');
+          if (p.type === 'regionPull') layerBtn('dev', 'trend', '城市发展图层', function () { self.R.layerOpt.devK = 'pull'; self.R.heatKey = ''; });
+          if (p.type === 'netLoad' || p.type === 'lineLoad') layerBtn('station', 'lyStation', '高峰负荷图层', function () { self.R.layerOpt.stView = 'load'; });
+        }
+      }
       if (t.zone !== undefined) locs.push(h('button', { class: 'btn sm ghost', onclick: function () { self.locateZone(t.zone); } }, CM.icon('locate', 14), '定位片区'));
       if (t.station) { const s = g.net.stations[t.station]; if (s) locs.push(h('button', { class: 'btn sm ghost', onclick: function () { self.select({ kind: 'station', id: t.station }); self.flyTo(s.x, s.y, Math.max(self.R.cam.zoom, 22)); } }, CM.icon('station', 14), s.name)); }
       if (t.fac) { const f = CM.Fac.byId(t.fac); if (f) locs.push(h('button', { class: 'btn sm ghost', onclick: function () { self.select({ kind: 'facility', id: f.id }); self.locatePoint(f.x, f.y, f.name, Math.max(0.8, f.r), 3); } }, CM.icon(f.T.icon, 14), f.name)); }
       if (t.type === 'coverage') locs.push(h('button', { class: 'btn sm ghost', onclick: function () { self.setLayer('cover'); } }, CM.icon('lyCover', 14), '查看覆盖图层'));
       if (t.type === 'zoneCong') locs.push(h('button', { class: 'btn sm ghost', onclick: function () { self.R.layerOpt.cong='am';self.setLayer('cong'); } }, CM.icon('lyCong', 14), '拥堵图层'));
+      const lb = lineBtn(t); if (lb) locs.push(lb);
+      if (t.type === 'lineCrowd' || t.type === 'lineCars') locs.push(h('button', { class: 'btn sm ghost', onclick: function () { self.R.layerOpt.stView = 'load'; self.setLayer('station'); } }, CM.icon('lyStation', 14), '高峰负荷图层'));
+      if (t.type === 'lineEff') locs.push(h('button', { class: 'btn sm ghost', onclick: function () { self.setLayer('dev'); } }, CM.icon('trend', 14), '城市发展图层'));
+      if (t.type === 'regionCov') locs.push(h('button', { class: 'btn sm ghost', onclick: function () { self.setLayer('cover'); } }, CM.icon('lyCover', 14), '查看覆盖图层'));
       // 怎么做（v2.1 玩家反馈）：按任务类型打开新手指南的对应做法
-      const how = { zoneCong: 'cong', facShare: 'fac', coverage: 'zone', zoneCov: 'zone', ridership: 'zone', stationCrowd: 'crowd', recovery: 'money', connect: 'start' }[t.type];
+      const how = { combo: 'build', zoneCong: 'cong', facShare: 'fac', coverage: 'zone', zoneCov: 'zone', ridership: 'zone', stationCrowd: 'crowd', recovery: 'money', connect: 'start', budgetConnect: 'start', lineCrowd: 'crowd', lineCars: 'crowd', fiscal: 'money', lineEff: 'zone', regionCov: 'zone', xferHub: 'build' }[t.type];
       if (how) locs.push(self.guideBtn(how));
       if (locs.length) c.appendChild(h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '4px', marginTop: '6px' } }, locs));
       return c;
     }.bind(this);
+    // 已完成 / 未完成的任务（v2.4 玩家反馈：提前完成的任务直接归入已完成，玩家还没看到任务是什么）：点击展开完整内容——
+    // 主题与思路、目标说明、站点清单（可定位）、发布到结束的时间、最终结果与奖惩；本月或上月结束的任务默认展开
+    const opened = this._tkOpen || (this._tkOpen = {});
     const closedRow = function (t) {
-      const ok = t.status === 'done', ty = typeOf(t);
-      return h('div', { class: 'tk-row ' + (ok ? 'ok' : 'fail') }, h('span', { class: 'tk-res' }, CM.icon(ok ? 'check' : 'close', 14)),
-        h('div', { class: 'grow' }, h('div', { class: 'tk-meta' }, kindTag(t), h('span', { class: 'tiny muted' }, ty[1])), h('b', null, t.title),
-          h('div', { class: 'tiny muted' }, (ok ? '完成于 ' : '到期于 ') + t.closedAt[0] + '年' + t.closedAt[1] + '月' + (ch ? (ok ? ' · 获得奖励 ' + U.fmtMoney(t.reward) : ' · 拨款 ×' + E.failGrantFactor + '（' + E.failGrantMonths + ' 个月）') : ''))));
+      const ok = t.status === 'done', ty = typeOf(t), key = t.id + ':' + t.closedAt.join('-');
+      const recent = ym - U.ymIndex(t.closedAt[0], t.closedAt[1]) <= 1;
+      const isOpen = opened[key] != null ? opened[key] : recent;
+      const detail = function () {
+        const d = h('div', { class: 'tk-detail' });
+        const th = themeRow(t); if (th) d.appendChild(th);
+        d.appendChild(h('div', { class: 'tk-desc' }, metricText(t, t.desc)));
+        const tb = tipsBox(t); if (tb) d.appendChild(tb);
+        if (t.anchors && t.anchors.length) d.appendChild(h('div', { class: 'tk-anchors' }, t.anchors.map(function (a) {
+          return h('button', { class: 'tk-anchor' + (ok ? ' on' : ''), 'data-tip': '在地图上定位「' + a.name + '」', onclick: function (e) { e.stopPropagation(); self.locatePoint(a.x, a.y, a.name, a.r || 2); } }, CM.icon(ok ? 'check' : 'locate', 13), a.name);
+        })));
+        const fin = t.progress && t.progress.text;
+        if (t.type === 'combo' && t.progress && t.progress.parts) d.appendChild(self.taskParts(t, t.progress));
+        else if (fin) d.appendChild(h('div', { class: 'tk-goal' }, CM.icon('target', 14), h('span', null, (ok ? '完成时：' : '到期时：') + metricText(t, fin))));
+        const dl = U.ymIndex(t.deadline[0], t.deadline[1]), cl = U.ymIndex(t.closedAt[0], t.closedAt[1]), early = dl - cl;
+        d.appendChild(h('div', { class: 'tk-basis tiny muted' }, CM.icon('hourglass', 12), (t.issuedAt ? '发布于 ' + t.issuedAt[0] + '年' + t.issuedAt[1] + '月 · ' : '') + '截止 ' + t.deadline[0] + '年' + t.deadline[1] + '月' + (ok ? ' · ' + (t.partial ? '部分完成' : early > 0 ? '提前 ' + early + ' 个月完成' : '按期完成') : '')));
+        if (ch) d.appendChild(h('div', { class: 'tk-stakes' }, ok ? [h('span', { class: 'tk-chip good' }, CM.icon('gift', 13), '获得奖励 ' + U.fmtMoney(t.reward)), h('span', { class: 'tk-chip good' }, CM.icon('smile', 13), t.partial ? '满意度 +2（6 个月）' : '满意度 +4（6 个月）')]
+          : (t.kind === 'opt' ? h('span', { class: 'tk-chip bad' }, CM.icon('warn', 13), '满意度 −2（6 个月），拨款不受影响') : (function () { const P = CM.Tasks.failPenalty(t); return h('span', { class: 'tk-chip bad' }, CM.icon('warn', 13), '拨款 ×' + P.factor + '（' + P.months + ' 个月），满意度 ' + P.sat); })())));
+        const lb = lineBtn(t); if (lb) d.appendChild(h('div', { class: 'row', style: { marginTop: '6px' } }, lb));
+        return d;
+      };
+      const row = h('div', { class: 'tk-row clickable ' + (ok ? 'ok' : 'fail') + (isOpen ? ' open' : ''), role: 'button', tabindex: '0', 'aria-expanded': isOpen ? 'true' : 'false' },
+        h('span', { class: 'tk-res' }, CM.icon(ok ? 'check' : 'close', 14)),
+        h('div', { class: 'grow' }, h('div', { class: 'tk-meta' }, kindTag(t), h('span', { class: 'tiny muted' }, ty[1]), t.partial ? h('span', { class: 'tag warn' }, '部分完成') : null, recent ? h('span', { class: 'tag good' }, ok ? '刚完成' : '刚结束') : null), h('b', null, metricText(t, t.title)),
+          h('div', { class: 'tiny muted' }, (ok ? (t.partial ? '到期于 ' : '完成于 ') : '到期于 ') + t.closedAt[0] + '年' + t.closedAt[1] + '月' + (ch ? (ok ? ' · 获得奖励 ' + U.fmtMoney(t.reward) : ' · 拨款 ×' + CM.Tasks.failPenalty(t).factor + '（' + CM.Tasks.failPenalty(t).months + ' 个月）') : ''))),
+        CM.icon('chev', 15, 'tk-chev'));
+      const wrap = h('div', { class: 'tk-closed' }, row);
+      if (isOpen) wrap.appendChild(detail());
+      const toggle = function () {
+        const now = !row.classList.contains('open'); opened[key] = now;
+        row.classList.toggle('open', now); row.setAttribute('aria-expanded', now ? 'true' : 'false');
+        const old = wrap.querySelector('.tk-detail'); if (old) old.remove();
+        if (now) wrap.appendChild(detail());
+      };
+      row.addEventListener('click', toggle);
+      row.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+      return wrap;
     };
+    // 待选的可选挑战（v2.3）：说明为什么、怎么想，玩家决定接受或忽略；接受后才开始计时
+    const offerCard = function (o) {
+      const ty = typeOf(o), left = o.expiresYM - ym;
+      return h('div', { class: 'tk-card tk-offer' },
+        h('div', { class: 'tk-top' }, h('span', { class: 'badge b-teal' }, CM.icon(ty[0])),
+          h('div', { class: 'grow' }, h('div', { class: 'tk-meta' }, kindTag(o), h('span', { class: 'tiny muted' }, ty[1])), h('b', { class: 'tk-title' }, o.title))),
+        themeRow(o), h('div', { class: 'tk-desc' }, o.desc), o.type === 'combo' ? self.taskParts(o, T.evaluate(o, g)) : null, tipsBox(o),
+        h('div', { class: 'tk-basis tiny muted' }, CM.icon('hourglass', 12), '接受后 ' + o.months + ' 个月内完成 · ' + (left > 0 ? left + ' 个月内可以接受' : '本月可以接受')),
+        ch ? h('div', { class: 'tk-stakes' }, h('span', { class: 'tk-chip good' }, CM.icon('gift', 13), '奖励 ' + U.fmtMoney(o.reward)), h('span', { class: 'tk-chip' }, CM.icon('warn', 13), '未完成：满意度 −2，拨款不受影响')) : null,
+        h('div', { class: 'row', style: { gap: '6px', marginTop: '8px', flexWrap: 'wrap' } },
+          h('button', { class: 'btn sm primary', onclick: function () { const t = T.accept(g, o.id); if (t) { g.logEvent({ tag: '任务', title: '接受挑战：' + t.title, desc: t.desc }); g.touch(); self.markUnsaved(); self.toast('已接受挑战：' + t.title + '，期限 ' + t.deadline[0] + '年' + t.deadline[1] + '月', 'good'); self.rerenderPage(); } } }, CM.icon('check', 14), '接受挑战'),
+          lineBtn(o),
+          h('button', { class: 'btn sm ghost', onclick: function () { T.decline(g, o.id); g.touch(); self.markUnsaved(); self.rerenderPage(); } }, '不感兴趣')));
+    };
+    if (tab === 'ppp') { this.corpTab(body); return { title: '任务', el: el }; }
     if (tab === 'active') {
       if (!ch) body.appendChild(this.callout('info', 'info', '自由建造模式：任务仅供参考，没有奖励，未完成也不会有后果。'));
+      const offers = (T.offers || []).filter(function (o) { return ym <= o.expiresYM; });
+      if (offers.length) { body.appendChild(h('div', { class: 'fl-h tk-sech' }, CM.icon('sparkle', 14), '可选挑战 · ' + offers.length)); for (const o of offers) body.appendChild(offerCard(o)); if (T.active.length) body.appendChild(h('div', { class: 'fl-h tk-sech' }, CM.icon('flag', 14), '进行中')); }
       const list = T.active.slice().sort(function (a, b) { return U.ymIndex(a.deadline[0], a.deadline[1]) - U.ymIndex(b.deadline[0], b.deadline[1]); });
       if (!list.length) body.appendChild(h('div', { class: 'tk-empty' }, CM.icon('flag', 26), h('b', null, '暂无进行中的任务'), h('span', null, (D.histTasks && D.histTasks.length ? '历史参考任务按年份发布；' : '') + (D.noDynTasks ? '本地图不生成动态任务。' : '动态任务根据拥堵、覆盖、车站拥挤与客流情况，开局一年后约每 6 个月生成。'))));
       for (const t of list) body.appendChild(card(t));
@@ -1709,8 +2062,8 @@
       if (!arr.length) body.appendChild(h('div', { class: 'tk-empty' }, CM.icon(tab === 'done' ? 'trophy' : 'flag', 26), h('b', null, tab === 'done' ? '还没有完成的任务' : '没有未完成的任务'), h('span', null, tab === 'done' ? '完成任务可获得奖励拨款与满意度。' : '到期未达成的任务会列在这里。')));
       for (const t of arr) body.appendChild(closedRow(t));
     }
-    if (T.adjusted && T.adjusted.length) body.appendChild(this.sec('tk-adjusted', '已调整的旧目标', T.adjusted.length + ' 项', function () { return h('div', { class: 'note' }, '以下旧目标不具备地铁可改善条件，已撤销且不扣除拨款、不降低满意度：' + T.adjusted.map(t => t.title).join('；')); }, false));
-    body.appendChild(this.sec('tk-rule', '任务说明', '', function () { return h('div', { class: 'note' }, (D.taskNote || '历史参考任务参考本城的发展需求，但不要求按真实线路走向建设，只需满足目标描述。') + '动态任务根据当前拥堵、覆盖、车站拥挤与客流情况生成。进度每月初评估；交通目标接近奖惩门槛时复核，仍有波动时保留进度并顺延到期评估；单个任务失败不会直接结束游戏。'); }, false, 'info'));
+    if(T.adjusted&&T.adjusted.length)body.appendChild(this.sec('tk-adjusted','已撤销的目标',T.adjusted.length+' 项',()=>h('div',{class:'note'},'以下目标因设施停用或不具备地铁可改善条件，已撤销且不扣除拨款、不降低满意度：'+T.adjusted.map(t=>t.title).join('；')),false));
+    body.appendChild(this.sec('tk-rule', '任务说明', '', function () { return h('div', { class: 'note' }, (D.taskNote || '历史任务不要求按真实线路走向建设。') + '可选挑战接受后才计时，未完成只小幅降低满意度。进度每月初评估。'); }, false, 'info'));
     return { title: '任务', el: el };
   };
 
@@ -1797,7 +2150,8 @@
       '换乘：绘线时点击已有车站。',
       '天地换乘：高架线接入地下站会自动加站台层。',
       '贯通、拆开：右键线路，选「贯通、拆开与支线」。',
-      '共线：连接已有轨道的两站、不加转弯点，就免费沿用。',
+      'Y 字支线：在同一处可设「主线」方向和「起点端」（主干从哪头发车）。',
+      '共线：连接已有轨道的两站、不加转弯点，就免费沿用；端点站在另一条线上时，可一键「并线」沿它的轨道继续开。',
       '平滑曲线：工具条「线形」选「平滑」，Shift+点击放控制柄。',
       '改名、改色：右键车站或线路，或点详情标题。'],
       actions: [] },

@@ -394,18 +394,50 @@
     let rows = E.ledger.map(function (r) { return { lab: r.y + '年' + r.m + '月', x: (r.y % 100 < 10 ? '0' : '') + r.y % 100 + '.' + r.m, r: r }; });
     if (E.ledger.length > 36) {
       const by = new Map();
-      for (const r of E.ledger) { let a = by.get(r.y); if (!a) { a = { y: r.y, grant: 0, fare: 0, reward: 0, construction: 0, demolition: 0, upgrade: 0, relocation: 0, ops: 0, bond: 0, interest: 0, principal: 0, penalty: 0 }; by.set(r.y, a); } for (const k in a) if (k !== 'y') a[k] += r[k] || 0; }
+      for (const r of E.ledger) { let a = by.get(r.y); if (!a) { a = { y: r.y, grant: 0, fare: 0, reward: 0, construction: 0, demolition: 0, upgrade: 0, relocation: 0, ops: 0, bond: 0, interest: 0, principal: 0, penalty: 0, ppp: 0, pppOut: 0, todCost: 0, fleetSale: 0 }; by.set(r.y, a); } for (const k in a) if (k !== 'y') a[k] += r[k] || 0; }
       rows = Array.from(by.values()).map(function (a) { return { lab: a.y + '年', x: String(a.y), r: a }; });
+      // 车站商业按年合计（上面的科目表没有它）
+      const cy = new Map(); for (const r of E.ledger) cy.set(r.y, (cy.get(r.y) || 0) + (r.commerce || 0));
+      for (const o of rows) o.r.commerce = cy.get(o.r.y) || 0;
     }
-    const inc = function (r) { return (r.grant || 0) + (r.fare || 0) + (r.reward || 0); };
-    const exp = function (r) { return (r.construction || 0) + (r.demolition || 0) + (r.upgrade || 0) + (r.relocation || 0) + (r.ops || 0); };
+    const inc = function (r) { return (r.grant || 0) + (r.fare || 0) + (r.reward || 0) + (r.commerce || 0) + (r.ppp || 0) + (r.fleetSale || 0); };
+    const exp = function (r) { return (r.construction || 0) + (r.demolition || 0) + (r.upgrade || 0) + (r.relocation || 0) + (r.ops || 0) + (r.todCost || 0) + (r.pppOut || 0); };
     const svc = function (r) { return (r.interest || 0) + (r.principal || 0) + (r.penalty || 0); };
     const anyDebt = E.ledger.some(function (r) { return r.bond || svc(r); }) || E.bonds.length;
     const cg = h('div', { class: 'chart-grid' });
     cg.append(
       ts(H, '资金与债务', '一般资金为负时需尽快扭亏（长期负余额会导致挑战失败）；建设专项资金只能用于建设', [{ name: '一般资金', color: P[3], vals: pick(H, 'funds').map(cv) }].concat(anyDebt ? [{ name: '建设专项资金', color: P[2], vals: pick(H, 'capex').map(cv) }, { name: '债务余额', color: P[6], vals: pick(H, 'debt').map(cv) }] : []), { fmt: fm, axisFmt: axisYi, area: !anyDebt, icon: 'coin', refs: [{ v: 0, label: '' }] }),
-      lineChart({ title: '收入与支出', sub: (E.ledger.length > 36 ? '按年' : '按月') + '合计：财政收入 = 拨款 + 票款 + 奖励（借款不计入）；支出 = 建设 + 运营' + (anyDebt ? '；偿债 = 利息 + 本金 + 逾期费用' : ''), icon: 'wallet', labels: rows, xs: rows.map(function (o) { return o.x; }), tips: rows.map(function (o) { return o.lab; }), series: [{ name: '财政收入', color: P[2], vals: rows.map(function (o) { return cv(inc(o.r)); }) }, { name: '建设与运营支出', color: P[1], vals: rows.map(function (o) { return cv(exp(o.r)); }) }].concat(anyDebt ? [{ name: '偿债', color: P[6], vals: rows.map(function (o) { return cv(svc(o.r)); }) }] : []), fmt: fm, axisFmt: axisYi, empty: '尚无完整月份的记录。' }));
+      lineChart({ title: '收入与支出', sub: (E.ledger.length > 36 ? '按年' : '按月') + '合计：财政收入 = 拨款 + 票款 + 车站商业 + 政府合同 + 奖励（借款不计入）；支出 = 建设 + 运营（含车站商业成本）+ 合同支出' + (anyDebt ? '；偿债 = 利息 + 本金 + 逾期费用' : ''), icon: 'wallet', labels: rows, xs: rows.map(function (o) { return o.x; }), tips: rows.map(function (o) { return o.lab; }), series: [{ name: '财政收入', color: P[2], vals: rows.map(function (o) { return cv(inc(o.r)); }) }, { name: '建设与运营支出', color: P[1], vals: rows.map(function (o) { return cv(exp(o.r)); }) }].concat(anyDebt ? [{ name: '偿债', color: P[6], vals: rows.map(function (o) { return cv(svc(o.r)); }) }] : []), fmt: fm, axisFmt: axisYi, empty: '尚无完整月份的记录。' }));
     el.appendChild(cg);
+    // 车站商业（TOD，v2.3）：开发情况、营运收入构成、票款与商业收入的走势、收入最高的车站
+    if (CM.TOD) {
+      const T = CM.TOD, mn = g.model.net, sd = g.model.dailyStale ? null : g.model.stDaily, C = mn ? mn.C : null, dev = [];
+      if (C && sd) C.stations.forEach(function (s, k) {
+        const st = g.net.stations[s.id]; if (!st || !st.tod || k >= sd.inn.length) return;
+        const flow = sd.inn[k] + sd.out[k] + sd.xfer[k], hub = C.stationLines[k].size >= 2;
+        dev.push({ name: st.name, lv: st.tod, flow: flow, hub: hub, month: (T.stationDaily(st.tod, flow, hub, g.clock.y, g) - T.stationCost(st.tod, g.clock.y, st.size, hub)) * 30.4 });
+      });
+      dev.sort(function (a, b) { return b.month - a.month; });
+      const L12 = E.ledger.slice(-12), sum = function (k) { return L12.reduce(function (a, r) { return a + (r[k] || 0); }, 0); };
+      const com = sum('commerce') - sum('todCost'), fare = sum('fare'), ops = sum('ops'), monthly = dev.reduce(function (a, o) { return a + o.month; }, 0);
+      const lvN = [0, 0, 0, 0]; for (const o of dev) lvN[o.lv]++;
+      el.appendChild(h('div', { class: 'fs-h' }, CM.icon('bag', 16), h('b', null, '车站商业（TOD）'), h('span', { class: 'tiny muted' }, '高客流车站的广告、商铺与上盖物业收入；在车站详情或地图快捷按钮中开发')));
+      const kg = h('div', { class: 'kpi-grid' });
+      kg.append(
+        kpi({ icon: 'bag', badge: 'b-gold', label: '已开发车站', value: String(dev.length), unit: '站', vals: [], note: dev.length ? '广告 ' + lvN[1] + ' · 商业街 ' + lvN[2] + ' · 站城一体 ' + lvN[3] : '在车站详情或地图快捷按钮中开发' }),
+        kpi({ icon: 'coin', badge: monthly < 0 ? 'b-red' : 'b-green', label: '车站商业月净收益', value: fm(monthly), vals: E.ledger.slice(-12).map(function (r) { return (r.commerce || 0) - (r.todCost || 0); }), note: '收入减运营与维护成本，按当前客流估算' }),
+        kpi({ icon: 'wallet', badge: 'b-blue', label: '近一年营运收入中的商业占比', value: fare + com > 0 ? U.fmtPct(com / (fare + com), 1) : '—', vals: [], note: ops > 0 ? '（票款 + 商业）覆盖运营费用 ' + U.fmtPct((fare + com) / ops, 0) : '尚无运营费用' }));
+      el.appendChild(kg);
+      const tg = h('div', { class: 'chart-grid' });
+      tg.append(
+        lineChart({ title: '票款与车站商业收入', sub: (E.ledger.length > 36 ? '按年' : '按月') + '合计；两者合计越接近运营费用，越不依赖拨款', icon: 'bag', labels: rows, xs: rows.map(function (o) { return o.x; }), tips: rows.map(function (o) { return o.lab; }),
+          series: [{ name: '票款', color: P[0], vals: rows.map(function (o) { return cv(o.r.fare || 0); }) }, { name: '车站商业', color: P[4] || P[3], vals: rows.map(function (o) { return cv(o.r.commerce || 0); }) }, { name: '运营费用', color: P[1], vals: rows.map(function (o) { return cv(o.r.ops || 0); }) }],
+          fmt: fm, axisFmt: axisYi, empty: '尚无完整月份的记录。' }),
+        hbarChart({ title: '商业净收益最高的车站', sub: '每月估算（按周平均客流，扣除运营与维护成本）；换乘站收入 ×' + T.HUB, icon: 'station', fmt: fm, valCol: '每月净收益',
+          items: dev.slice(0, 8).map(function (o) { return { name: o.name, v: o.month, color: ['', P[2], P[3], P[4] || P[0]][o.lv], tip: [{ name: '开发等级', v: T.LEVELS[o.lv].name }, { name: '日客流', v: U.fmtPeople(o.flow) + ' 人次' }, { name: '每月净收益', v: fm(o.month) }].concat(o.hub ? [{ name: '换乘站', v: '×' + T.HUB }] : []) }; }),
+          empty: '还没有开发商业空间的车站。高客流车站可以在车站详情或地图快捷按钮中开发。' }));
+      el.appendChild(tg);
+    }
   }
   // ---------- 城市经济：GDP、增长率（游戏结果 / 预测 / 史实参考分开）、地方财政与地铁拨款、交通与周期 ----------
   function pageEcon(g, el) {
@@ -556,11 +588,29 @@
           return h('div', null, h('span', null, '下一个 · ' + o.label), h('b', null, o.text), h('div', { class: 'ms-bar' }, h('i', { style: { width: (f * 100).toFixed(1) + '%', background: o.color } })));
         })) : null);
     };
-    const drawBook = function (dir) {
-      const sp = h('div', { class: 'spread' + (dir > 0 ? ' turn-next' : (dir < 0 ? ' turn-prev' : '')) });
-      for (let k = 0; k < per; k++) { const i = msAt + k; sp.appendChild(i < list.length ? pageEl(list[i], i) : blankEl()); }
-      book.replaceChildren(sp);
+    // 翻页（v2.3）：真实的书页翻动——旧的一页绕书脊转过去，正面是旧页、背面是新页，下面露出新的一页；
+    // 连续翻页时先把上一次翻页收尾。减少动态效果时直接换页
+    let turning = null;
+    const pagesAt = function (at) { const a = []; for (let k = 0; k < per; k++) { const i = at + k; a.push(i < list.length ? pageEl(list[i], i) : blankEl()); } return a; };
+    const drawBook = function (dir, from) {
+      if (turning) turning();
       prev.disabled = msAt <= 0; next.disabled = msAt + per >= list.length;
+      const now = pagesAt(msAt);
+      if (!dir || from == null || CM.Settings.reducedMotion()) { book.replaceChildren(h('div', { class: 'spread' }, now)); return; }
+      const old = pagesAt(from), face = function (cls, pg) { return h('div', { class: 'face ' + cls }, pg || null); };
+      const sp = h('div', { class: 'spread turning' });
+      let leaf;
+      if (per === 2) {
+        if (dir > 0) { sp.append(old[0], now[1]); leaf = h('div', { class: 'leaf next' }, face('front', old[1]), face('back', now[0])); }
+        else { sp.append(now[0], old[1]); leaf = h('div', { class: 'leaf prev' }, face('front', old[0]), face('back', now[1])); }
+      } else { sp.append(now[0]); leaf = h('div', { class: 'leaf full ' + (dir > 0 ? 'next' : 'prev') }, face('front', old[0]), face('back')); }
+      sp.appendChild(leaf);
+      book.replaceChildren(sp);
+      requestAnimationFrame(function () { requestAnimationFrame(function () { leaf.classList.add('go'); }); });
+      let timer = 0;
+      const finish = function () { clearTimeout(timer); if (turning === finish) turning = null; if (sp.isConnected) book.replaceChildren(h('div', { class: 'spread' }, pagesAt(msAt))); };
+      timer = setTimeout(finish, 780);
+      turning = finish;
     };
     // 时间轴：每个里程碑一个点（等间距），年份变化处标年份；当前一开的点高亮，点击跳到对应页
     const track = h('div', { class: 'tl-track' });
@@ -583,9 +633,9 @@
     const go2 = function (at) {
       at = U.clamp(at, 0, lastSpread());
       if (at === msAt) return;
-      const dir = at > msAt ? 1 : -1;
+      const dir = at > msAt ? 1 : -1, from = msAt;
       msAt = at; CM.Sound && CM.Sound.play('swoosh');
-      drawBook(dir); syncTl(true);
+      drawBook(dir, from); syncTl(true);
     };
     const flip = function (dir) { go2(msAt + dir * per); };
     msFlip = flip;

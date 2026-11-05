@@ -84,6 +84,12 @@
       const ids = [].concat(x.f.region);
       for (const id of ids) { if (!idx.has(id)) continue; const k = idx.get(id); if (x.f.pop) pop[k] *= Math.pow(x.f.pop, x.lv); if (x.f.jobs) jobs[k] *= Math.pow(x.f.jobs, x.lv); }
     }
+    // 提前布局的回报（v2.6）：开发开始时已经通地铁的片区，之后若干年增长更快
+    for (const f of D.foresight || []) {
+      const st = city.foresight && city.foresight[f.id]; if (!st || !st.hit || !f.grow) continue;
+      const lv = fxLevel(t, f.ym[0] + (f.ym[1] - 1) / 12, f.grow.years, 2); if (!(lv > 0)) continue;
+      for (const id of [].concat(f.grow.region)) { if (!idx.has(id)) continue; const k = idx.get(id); if (f.grow.pop) pop[k] *= Math.pow(f.grow.pop, lv); if (f.grow.jobs) jobs[k] *= Math.pow(f.grow.jobs, lv); }
+    }
     city._eraF = { key: key, pop: pop, jobs: jobs, relocJ: relocJ, relocP: relocP };
     return city._eraF;
   };
@@ -117,6 +123,54 @@
   };
   // 历史事件的满意度效果（如大型活动期间的城市自豪感、灾害），按时间计算
   Eras.satBonus = function (t) { return evFx(t, 'sat').map(function (x) { return { label: x.e.title, v: (x.f.v || 0) * x.lv }; }); };
+  // 财政与造价的事件效果（v2.6，fx.finance：战争时期拨款减少、造价提高）。按时间计算，读档与跳月结果一致；只有用到的地图才逐事件计算
+  const NO_FIN = { grant: 1, cost: 1 };
+  let finCache = null;
+  Eras.finance = function (t) {
+    if (!finCache || finCache.ev !== D.events) finCache = { ev: D.events, any: (D.events || []).some(function (e) { return e.fx && e.fx.finance; }), t: null, v: NO_FIN };
+    if (!finCache.any) return NO_FIN;
+    if (finCache.t === t) return finCache.v;
+    let grant = 1, cost = 1;
+    for (const x of evFx(t, 'finance')) { if (x.f.grant) grant *= Math.pow(x.f.grant, x.lv); if (x.f.cost) cost *= Math.pow(x.f.cost, x.lv); }
+    finCache.t = t; finCache.v = { grant: grant, cost: cost };
+    return finCache.v;
+  };
+  // 一次性的打击（v2.6，fx.strike：空袭、疏散）：事件触发的当月按比例减少所列片区的人口与岗位，只结算一次（随 firedEvents 记录）。
+  // 之后的恢复与迁移交给人口曲线与片区增长，所以战后重建是一个可见的过程
+  Eras.applyStrike = function (g, e) {
+    const s = e.fx && e.fx.strike; if (!s) return null;
+    const city = g.city, ids = new Set([].concat(s.region));
+    let dp = 0, dj = 0;
+    for (let c = 0; c < city.N; c++) {
+      if (!ids.has(city.regions[city.region[c]].id)) continue;
+      const p = city.pop[c] * (s.pop || 0), j = city.jobs[c] * (s.jobs || 0);
+      if (p > 0) { city.pop[c] -= p; dp += p; }
+      if (j > 0) { city.jobs[c] -= j; dj += j; }
+    }
+    return { pop: dp, jobs: dj };
+  };
+  // 提前布局（v2.6，D.foresight）：到某个日期检查某一带是否已经有更早建成的车站。有：发一笔开发商出资、之后增长更快；没有：只记录一句。
+  // 每项只判定一次，结果随存档保存（g.foresight）
+  Eras.foresightMonth = function (g, y, m) {
+    const L = D.foresight; if (!L) return [];
+    const done = g.foresight || (g.foresight = {}), out = [], M = CM.Metro, net = g.net;
+    for (const f of L) {
+      if (done[f.id] || U.ymIndex(y, m) < U.ymIndex(f.ym[0], f.ym[1])) continue;
+      // 旧存档或较晚开局时已经过了判定日期：只标记，不补发消息与奖励
+      if (U.ymIndex(y, m) - U.ymIndex(f.ym[0], f.ym[1]) > 1) { done[f.id] = { hit: false, st: null, y: y, m: m, late: true }; g.city.foresight = done; continue; }
+      const before = U.ymIndex(f.before, 1); let hit = null;
+      for (const id in net.stations) {
+        const s = net.stations[id]; if (U.dist(s.x, s.y, f.x, f.y) > f.r || !s.built || U.ymIndex(s.built[0], s.built[1] || 1) >= before) continue;
+        if (M.stationLines(net, id).length) { hit = s; break; }
+      }
+      done[f.id] = { hit: !!hit, st: hit ? hit.name : null, y: y, m: m };
+      let reward = 0;
+      if (hit && f.rewardMonths) { reward = g.econ.grantQuota(y, m) / Eras.finance(y + (m - 1) / 12).grant * f.rewardMonths; g.econ.income('reward', reward); g.econ.log('reward', reward, 'gen', '提前布局：' + f.title, { y: y, m: m, d: 1 }); }
+      g.city.foresight = done;
+      out.push({ f: f, hit: hit, reward: reward });
+    }
+    return out;
+  };
   // 事件效果说明（记入城市纪事，标明为模拟影响）
   const DK = { hw: '通勤出行', sc: '上学出行', sh: '购物出行', md: '就医出行', lz: '休闲出行', hub: '枢纽客流' };
   const durText = function (f, def) { return f.years != null ? '此后 ' + f.years + ' 年内' : '此后 ' + (f.months || def) + ' 个月内'; };
@@ -135,6 +189,19 @@
       if (items.length) parts.push(durText(d, 1) + '，' + items.join('、'));
     }
     if (f.sat && f.sat.v && (!only || only.has('sat'))) parts.push(durText(f.sat, 1) + '，市民满意度' + (f.sat.v > 0 ? '提高' : '下降'));
+    if (f.finance && (!only || only.has('finance'))) {
+      const items = [];
+      if (f.finance.grant && f.finance.grant !== 1) items.push('地铁拨款' + (f.finance.grant < 1 ? '减少约 ' : '增加约 ') + Math.round(Math.abs(1 - f.finance.grant) * 100) + '%');
+      if (f.finance.cost && f.finance.cost !== 1) items.push('建设造价' + (f.finance.cost > 1 ? '提高约 ' : '降低约 ') + Math.round(Math.abs(f.finance.cost - 1) * 100) + '%');
+      if (items.length) parts.push(durText(f.finance, 12) + '，' + items.join('、'));
+    }
+    if (f.car && !only) parts.push('此后开车成本提高约 ' + Math.round((f.car.k - 1) * 100) + '%');
+    if (f.strike && !only) {
+      const s = f.strike, items = [];
+      if (s.pop) items.push('人口减少约 ' + Math.round(s.pop * 100) + '%');
+      if (s.jobs) items.push('岗位减少约 ' + Math.round(s.jobs * 100) + '%');
+      if (items.length) parts.push('当月' + [].concat(s.region).map(rn).join('、') + items.join('、'));
+    }
     return parts.length ? '（模拟影响：' + parts.join('；') + '）' : '';
   };
   // 事件效果的简短标签（「历史时刻」卡片）：[{ icon, text, up, region }]
@@ -154,6 +221,17 @@
       if (downs.length) out.push({ icon: 'people', up: false, text: downs.join('、') + '出行减少 · ' + dur(d, 1) });
     }
     if (f.sat && f.sat.v) out.push({ icon: f.sat.v > 0 ? 'smile' : 'frown', up: f.sat.v > 0, text: '满意度' + (f.sat.v > 0 ? '提高' : '下降') + ' · ' + dur(f.sat, 1) });
+    if (f.finance) {
+      if (f.finance.grant && f.finance.grant !== 1) out.push({ icon: 'coin', up: f.finance.grant > 1, text: '地铁拨款' + (f.finance.grant < 1 ? '减少约 ' : '增加约 ') + Math.round(Math.abs(1 - f.finance.grant) * 100) + '% · ' + dur(f.finance, 12) });
+      if (f.finance.cost && f.finance.cost !== 1) out.push({ icon: 'coin', up: f.finance.cost < 1, text: '建设造价' + (f.finance.cost > 1 ? '提高约 ' : '降低约 ') + Math.round(Math.abs(f.finance.cost - 1) * 100) + '% · ' + dur(f.finance, 12) });
+    }
+    if (f.car) out.push({ icon: 'car', up: true, text: '开车成本提高约 ' + Math.round((f.car.k - 1) * 100) + '%' });
+    if (f.strike) {
+      const s = f.strike, ids = [].concat(s.region), items = [];
+      if (s.pop) items.push('人口减少约 ' + Math.round(s.pop * 100) + '%');
+      if (s.jobs) items.push('岗位减少约 ' + Math.round(s.jobs * 100) + '%');
+      if (items.length) out.push({ icon: 'people', up: false, region: ids[0], text: ids.map(rn).join('、') + ' ' + items.join('、') });
+    }
     return out;
   };
   Eras.macroFx = function (id) { const e = macroEvents().find(function (x) { return x.id === id; }); return e ? e.fx : null; };
@@ -164,7 +242,7 @@
   Eras.bg = function (t) {
     const B = D.bg; if (!B) return null;
     const share = U.interp(B.share, t); if (!(share > 0)) return null;
-    return { share: U.clamp(share, 0, 0.95), speed: U.interp(B.speed, t), wait: U.interp(B.wait, t), fare: B.fare ? U.interp(B.fare, t) : 0, name: B.name || '背景交通' };
+    return { share: U.clamp(share, 0, 0.95), speed: U.interp(B.speed, t), wait: U.interp(B.wait, t), fare: B.fare ? U.interp(B.fare, t) : 0, name: B.name || '背景交通', keep: B.roadKeep ? U.interp(B.roadKeep, t) : 0 };
   };
 
   // 阶段目标：转为本城专属动态任务（economy.js），只在该阶段的时间窗口内发布
@@ -196,7 +274,7 @@
       .slice(0, 4).map(function (c) { return nm(byId.get(c.a)) + '—' + nm(byId.get(c.b)); });
     const fx = [];
     const act = new Map();
-    for (const key of ['grow', 'demand', 'sat']) for (const x of evFx(t, key)) { if (!act.has(x.e)) act.set(x.e, new Set()); act.get(x.e).add(key); }
+    for (const key of ['grow', 'demand', 'sat', 'finance']) for (const x of evFx(t, key)) { if (!act.has(x.e)) act.set(x.e, new Set()); act.get(x.e).add(key); }
     act.forEach(function (keys, e) { fx.push({ title: e.title || (CM.Macro && CM.Macro.LIB[e.id] ? CM.Macro.LIB[e.id].title : ''), note: Eras.fxNote(e, keys).replace(/^（模拟影响：|）$/g, '') }); });
     const goals = Eras.goals().filter(function (gl) { return gl.era === L[k].id; }).map(function (gl) {
       const T = g.tasks, find = function (arr) { return (arr || []).find(function (x) { return x.cityId === gl.id; }); };
@@ -216,7 +294,7 @@
   };
   const snap = function (g) {
     const tot = g.city.totals(), d = g.model.daily || {}, C = g.compiled, city = g.city;
-    let km = 0; for (const id in g.net.segments) km += CM.Metro.segGeom(g.net, g.net.segments[id], city).lenM / 1000;
+    let km = 0; for (const id in g.net.segments) { const cs = C && C.segs.get(id); km += (cs ? cs.g : CM.Metro.segGeom(g.net, g.net.segments[id], city)).lenM / 1000; }   // 编译结果里已有区段几何
     const R = city.regions.length, rp = new Array(R).fill(0), rj = new Array(R).fill(0), rd = new Array(R).fill(0);
     let dev = 0;
     for (let c = 0; c < city.N; c++) { const k = city.region[c]; const dv = devCell(city, c) ? 1 : 0; dev += dv; if (k < R) { rp[k] += city.pop[c]; rj[k] += city.jobs[c]; rd[k] += dv; } }
@@ -263,6 +341,19 @@
     const n = B.bw * B.bh, v = new Float32Array(n), scale = key === 'land' ? CM.CFG.CELL_M * CM.CFG.CELL_M / 1e6 : 1;
     for (let b = 0; b < n; b++) v[b] = (src[0][b] - src[1][b]) * scale;
     return { base: base, bw: B.bw, bh: B.bh, bs: BS, v: v, key: key };
+  };
+  // 本阶段的重点发展片区（v2.3「城市发展」图层还没有可见变化时显示）：阶段数据中人口 / 岗位增长倍数大于 1 的已开放片区，
+  // w 为按片区序号的 0–1 权重（倍数越大越深），list 为标注用
+  Eras.devPlan = function (g) {
+    if (!Eras.enabled()) return null;
+    const e = Eras.current(g.year()), gr = (e && e.grow) || {}, key = (CM.R && CM.R.layerOpt.devK) || 'pop';
+    const src = key === 'jobs' ? [gr.jobs] : key === 'land' ? [gr.pop, gr.jobs] : [gr.pop];
+    const city = g.city, w = new Float32Array(city.regions.length), list = [];
+    let mx = 1;
+    city.regions.forEach(function (r, k) { let f = 1; for (const s of src) if (s && s[r.id] > f) f = s[r.id]; if (f > 1 && city.regionOpen[k] && !r.scenic) { w[k] = f; mx = Math.max(mx, f); } });
+    city.regions.forEach(function (r, k) { if (w[k] > 0) { list.push({ k: k, name: String(r.name).replace(/（.*）/, ''), f: w[k], x: r.cx, y: r.cy }); w[k] = mx > 1 ? (w[k] - 1) / (mx - 1) : 1; } });
+    list.sort(function (a, b) { return b.f - a.f; });
+    return list.length ? { era: e, w: w, list: list.slice(0, 5) } : null;
   };
   // 片区排行：本阶段（或本局）以来人口、岗位、新开发用地变化最多的片区
   Eras.regionChange = function (g, which) {

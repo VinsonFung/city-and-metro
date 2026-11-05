@@ -6,7 +6,7 @@
   const h = U.h, I = CM.ICON, ic = CM.icon;
   const snd = function (name) { if (CM.Sound) CM.Sound.play(name); };
 
-  // 分析图层（v1.9 起分为三组）：城市（人口、职住、设施出行需求）· 交通（拥堵、出行方向）· 地铁（覆盖、车站客流、服务缺口）
+  // 分析图层（v1.9 起分为三组）：城市（人口、职住、设施出行需求、发展）· 交通（拥堵、出行方向、通勤时间、乘地铁比例）· 地铁（覆盖、车站客流、服务缺口、商业开发）
   const LAYER_GROUPS = [['city', '城市'], ['traffic', '交通'], ['metro', '地铁']];
   const LAYERS = [
     { id: 'pop', metric: true, group: 'city', name: '人口密度', icon: 'lyPop', color: '#e9641f', desc: '各街区常住人口' },
@@ -14,9 +14,12 @@
     { id: 'fac', group: 'city', name: '设施出行需求', icon: 'lyFac', color: '#c2410c', desc: '重要设施与各片区吸引的出行（按目的）' },
     { id: 'cong', metric: true, group: 'traffic', name: '道路拥堵', icon: 'lyCong', color: '#df3030', desc: '主要道路当前的拥堵程度' },
     { id: 'flow', group: 'traffic', name: '出行方向', icon: 'lyFlow', color: '#2557d6', desc: '各片区的主要出行方向' },
-    { id: 'cover', metric: true, group: 'metro', name: '地铁覆盖', icon: 'lyCover', color: '#14a252', desc: '步行可达车站的范围与阻隔' },
+    { id: 'commute', group: 'traffic', name: '通勤时间', icon: 'timer', color: '#8a4fd3', desc: '住在各片区的人上班要花多久（门到门）' },
+    { id: 'mshare', group: 'traffic', name: '乘地铁比例', icon: 'metro', color: '#0f7fb0', desc: '各片区居民的出行有多少乘地铁' },
+    { id: 'cover', group: 'metro', name: '地铁覆盖', icon: 'lyCover', color: '#14a252', desc: '步行可达车站的范围与阻隔', metric: true },
     { id: 'station', group: 'metro', name: '车站客流', icon: 'lyStation', color: '#109e90', desc: '客流与运力负荷' },
     { id: 'gap', group: 'metro', name: '地铁服务缺口', icon: 'lyGap', color: '#b91c1c', desc: '出行需求大但地铁服务不足的地方' },
+    { id: 'tod', group: 'metro', name: '商业开发', icon: 'bag', color: '#a8780c', desc: '已开发的车站、每月净收益与值得开发的车站' },
   ];
   UI.LAYERS = LAYERS;
   UI.weekdayName = function (ck) { const w = new Date(Date.UTC(ck.y, ck.m - 1, ck.d)).getUTCDay(); return ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][w] + (w === 0 || w === 6 ? '（周末）' : ''); };
@@ -102,7 +105,7 @@
       h('div', { class: 'spacer' }),
       h('div', { class: 'cluster glass metrics' },
         pill('money', '资金', 'coin', 'b-gold'), pill('econ', '经济增长', 'trend', 'b-violet', 'opt2'), pill('pop', '人口', 'people', 'b-blue', 'opt2', 'pop'), pill('share', '地铁分担率', 'metro', 'b-teal', 'opt3', 'cover'),
-        pill('cong', '拥堵指数', 'car', 'b-orange', 'opt5', 'cong'), pill('sat', '满意度', 'smile', 'b-green', 'opt4'),
+        pill('cong', '拥堵指数', 'car', 'b-orange', 'opt5', 'cong'),
         this.mFold = h('button', { class: 'pill mfold off', 'data-tip': '展开其余指标', 'aria-expanded': 'false', onclick: function () { self.toggleMetricsMore(); } }, h('span', { class: 'mf-n' }, ''), ic('chev'))),
       h('div', { class: 'cluster glass actions' },
         hb('search', 'search', '搜索车站、线路、道路、区域', function () { self.openSearch(); }, 'ui.search'),
@@ -173,6 +176,15 @@
     this.banner = h('div', { id: 'banner' });
     this.toasts = h('div', { id: 'toasts' });
     this.feed = h('div', { id: 'feed', class: 'hidden' }, this.pauseChip, this.banner, this.toasts);
+    // 城市纪事报（v2.3）：史实与经济事件改为右下角的报纸剪报，不再占地图中央；右侧面板打开时向左让开
+    this.newsHost = h('div', { id: 'newsHost', class: 'hidden', role: 'log', 'aria-live': 'polite' });
+    // 满意度入口（v2.3）：顶栏的满意度指标移到右下角，点击打开「乘客之声」（满意度与乘客反馈）
+    pill('sat', '满意度', 'smile', 'b-green');   // 保留指标对象（指标详情页沿用），不放进顶栏
+    // 地铁芯入口（v2.5）：在满意度左边，打开全部线路与车站的管理 App；角标为持续过载的项目数
+    this.opsDock = h('button', { class: 'sat-dock ops-dock hidden', 'data-tip': '地铁芯：线路、车站与列车管理', 'aria-label': '地铁芯', onclick: function () { self.openOpsApp(); } },
+      h('span', { class: 'sd-face' }, ic('chip', 20)), h('span', { class: 'sd-tx' }, h('small', null, '地铁芯'), h('b', { class: 'sd-v' }, '—')), h('span', { class: 'sd-dot', style: { display: 'none' } }));
+    this.satDock = h('button', { class: 'sat-dock smile hidden', 'data-tip': '乘客满意度与乘客之声', onclick: function () { self.openVoicesApp(); } },
+      h('span', { class: 'sd-face' }, ic('smile', 20)), h('span', { class: 'sd-tx' }, h('small', null, '满意度'), h('b', { class: 'sd-v' }, '—')), h('span', { class: 'sd-dot' }));
     this.feed.addEventListener('transitionend', function (e) {
       if (e.target === self.feed && (e.propertyName === 'left' || e.propertyName === 'max-width')) self.placeFeed();
     });
@@ -209,7 +221,8 @@
       const bs = Array.from(dd.querySelectorAll('button')), i = bs.indexOf(document.activeElement);
       bs[e.key === 'Home' ? 0 : e.key === 'End' ? bs.length - 1 : (i + (e.key === 'ArrowUp' ? -1 : 1) + bs.length) % bs.length].focus();
     }, true);
-    app.append(this.top, this.dock, this.legendCard, this.layerPanel, this.right, this.toolbar, this.bstack, this.feed, this.tip, this.uitip, this.fxLayer, this.statsEl, this.screen);
+    this.brDock = h('div', { class: 'br-dock' }, this.opsDock, this.satDock);
+    app.append(this.top, this.dock, this.layerPanel, this.legendCard, this.right, this.toolbar, this.bstack, this.feed, this.newsHost, this.brDock, this.tip, this.uitip, this.fxLayer, this.statsEl, this.screen);
     this.initTips();
     this.initPress();
     this.renderDock();
@@ -229,6 +242,7 @@
       for (const el of [this.top, this.toolbar, this.bstack, this.right, this.legendCard]) this.layoutObserver.observe(el);
     }
     CM.Settings.on(function (k) {
+      if (k === 'immersive') self.applyImmersive();
       if (k === 'grid' || k === 'gridSnap' || k === 'peakSlow') self.renderToolbar();
       if (k === 'uiScale') { self.layoutHud(); requestAnimationFrame(function () { self.renderToolbar(); }); }
       if (k === 'theme') { self.renderThemeBtns(); if (AX.enabled()) { self.renderDock(); if (self.stack.length) self.rerenderPage(); } }
@@ -236,19 +250,22 @@
     });
     this.renderThemeBtns();
   };
-  // 消息与提示条居中于地图未被遮挡的区域（右侧面板打开时向左让开，避免挡住面板上的分页）
+  // 消息与提示条（暂停提示、操作提示）位置固定（v2.3 玩家反馈：以前右侧面板滑入时整条向左挪）：
+  // 右侧始终按面板宽度预留、宽度限制在预留之外，面板开合都不挡面板也不挪位置
   UI.prototype.placeFeed = function () {
     const f = this.feed; if (!f) return;
     if (this.compact()) { f.style.left = ''; f.style.maxWidth = ''; }
     else {
       const z = CM.Settings.get('uiScale') || 1;
-      const open = this.right && !this.right.classList.contains('closed') && !this.right.classList.contains('hidden');
-      const rw = open ? this.right.getBoundingClientRect().width + 24 : 0;
-      // 左侧让开图层栏；教程时让开引导卡片
-      const dock = document.body.classList.contains('has-coach') ? 420 * z + 40 : 76 * z, avail = window.innerWidth - rw - dock;
+      const rw = Math.max(368 * z, this.right ? this.right.getBoundingClientRect().width : 0) + 24 * z;
+      // 左侧与右侧对称（居中于窗口）；教程时让开左上的引导卡片
+      const dock = document.body.classList.contains('has-coach') ? 460 * z : rw, avail = window.innerWidth - rw - dock;
       f.style.left = ((dock + avail / 2) / z) + 'px';
       f.style.maxWidth = (Math.max(280, avail - 32) / z) + 'px';
     }
+    // 剪报：贴在地图右下角，右侧面板打开时让开面板（短时出现的卡片，不盖住面板内容）；
+    // 满意度入口在面板下沿之下（面板最低到窗口底部 100px 处），位置固定不动
+    if (this.newsHost) { const zz = CM.Settings.get('uiScale') || 1, op = this.right && !this.right.classList.contains('closed') && !this.right.classList.contains('hidden'), rx = ((op && window.innerWidth > 760 ? this.right.getBoundingClientRect().width + 24 : 14) / zz) + 'px'; this.newsHost.style.right = rx; }
     // 空间不足时收起重复的暂停提示；顶栏暂停/继续按钮仍保留，图层标题和选项不被覆盖。
     const chip = this.pauseChip, card = this.legendCard;
     if (chip) {
@@ -273,7 +290,7 @@
   UI.prototype.queueLayout = function () {
     if (this._layoutFrame) return;
     const self = this;
-    this._layoutFrame = requestAnimationFrame(function () { self._layoutFrame = 0; self.measureLayout(); });
+    this._layoutFrame = requestAnimationFrame(function () { self._layoutFrame = 0; self.measureLayout(); if (self.layerPanelOpen()) self.placeLayerPanel(); });
   };
   UI.prototype.measureLayout = function () {
     const root = document.documentElement, v = this.viewport();
@@ -321,7 +338,7 @@
     this.queueLayout();
   };
   // 指标栏放不下时，按优先级从低到高收起（经济 → 满意度 → 分担率 → 人口 → 拥堵）
-  const METRIC_ORDER = ['money', 'econ', 'pop', 'share', 'cong', 'sat'];
+  const METRIC_ORDER = ['money', 'econ', 'pop', 'share', 'cong'];
   UI.prototype.metricEl = function (key) {
     const p = this.pills[key]; if (!p) return null;
     if (p.el.dataset.fold && this.mMore.classList.contains('off')) return this.mFold;
@@ -331,12 +348,12 @@
     const m = this.top.querySelector('.cluster.metrics'); if (!m || !m.clientWidth) return;
     const over = function () { return m.scrollWidth > m.clientWidth + 1; };
     // CSS 为窄屏隐藏的指标也进入「+N」，不能只收起溢出的可见指标。
-    for (const k of ['econ', 'sat', 'share', 'pop', 'cong']) {
+    for (const k of ['econ', 'share', 'pop', 'cong']) {
       const el = this.pills[k].el;
       if (el.parentNode === m && !el.classList.contains('gone') && getComputedStyle(el).display === 'none') { el.dataset.fold = '1'; this.mMore.appendChild(el); }
     }
     if (over() || this.mMore.children.length) this.mFold.classList.remove('off');
-    for (const k of ['econ', 'sat', 'share', 'pop', 'cong']) {
+    for (const k of ['econ', 'share', 'pop', 'cong']) {
       if (!over()) break;
       const el = this.pills[k].el; if (el.parentNode !== m || getComputedStyle(el).display === 'none') continue;
       el.dataset.fold = '1'; this.mMore.appendChild(el);
@@ -347,8 +364,14 @@
     this.mFold.querySelector('.mf-n').textContent = '+' + n;
     this.mFold.classList.toggle('off', !n);
   };
+  // 指标按钮（教程指引用）：被折叠进「+N」时指向折叠按钮或已展开的下拉框中的指标
+  UI.prototype.metricEl = function (key) {
+    const p = this.pills[key]; if (!p) return null;
+    if (p.el.dataset.fold && this.mMore.classList.contains('off')) return this.mFold;
+    return p.el;
+  };
   UI.prototype.showHUD = function (on) {
-    for (const el of [this.top, this.dock, this.right, this.toolbar, this.zoomCtl, this.feed, this.bstack]) {
+    for (const el of [this.top, this.dock, this.right, this.toolbar, this.zoomCtl, this.feed, this.bstack, this.newsHost, this.satDock, this.opsDock]) {
       const inactive = !on || (el === this.right && el.classList.contains('closed'));
       if (inactive && el.contains(document.activeElement)) document.activeElement.blur();
       el.classList.toggle('hidden', !on);
@@ -356,6 +379,9 @@
       el.setAttribute('aria-hidden', inactive ? 'true' : 'false');
     }
     if (!on) {
+      if (this.voApp) this.voApp.close(null, true);   // 「地铁圈」App 随游戏界面一起收起
+      if (this.opsApp) this.opsApp.close(null, true);
+      if (this.hideOpsPop) this.hideOpsPop();
       this.closeTimeOptions();
       this.toggleLayerPanel(false);
       this.toggleMetricsMore(false);
@@ -364,6 +390,33 @@
       this.legendCard.inert = true; this.legendCard.setAttribute('aria-hidden', 'true');
     }
     else { this.renderDock(); const self = this; requestAnimationFrame(function () { self.renderToolbar(); }); }
+    this.applyImmersive();
+  };
+  UI.prototype.toggleImmersive = function (on) { CM.Settings.set('immersive', on == null ? !CM.Settings.get('immersive') : !!on); };
+  UI.prototype.applyImmersive = function () {
+    const self = this, on = !!CM.Settings.get('immersive') && !!this.g() && !this.top.classList.contains('hidden'), was = document.body.classList.contains('cinema');
+    if (!this.immExit) {
+      this.immExit = h('button', { id: 'immExit', 'aria-label': '显示界面', onclick: function () { self.toggleImmersive(false); } }, ic('eye', 16), h('span', null, '显示界面'));
+      this.immHintEl = h('div', { id: 'immHint', role: 'status' });
+      document.getElementById('app').append(this.immExit, this.immHintEl);
+    }
+    document.body.classList.toggle('cinema', on);
+    this.immExit.inert = !on;
+    for (const el of [this.top, this.dock, this.right, this.toolbar, this.zoomCtl, this.feed, this.bstack, this.newsHost, this.satDock, this.legendCard, document.getElementById('coach')]) if (el && (on || was)) {
+      const inactive = on || el.classList.contains('hidden') || (el === this.right && el.classList.contains('closed'));
+      if (inactive && el.contains(document.activeElement)) document.activeElement.blur();
+      el.inert = inactive; el.setAttribute('aria-hidden', inactive ? 'true' : 'false');
+    }
+    if (on === was) return;
+    clearTimeout(this._immT);
+    if (on) {
+      this.setTooltip(null); this.toggleLayerPanel(false); this.closeTimeOptions(); this.toggleMetricsMore(false); this.closeMenu(); this.closeSearch();
+      const k = CM.Keys.hint('ui.hideUI');
+      this.immHintEl.textContent = '沉浸模式' + (k ? ' · 按 ' + k + ' 显示界面' : ' · 点右上角显示界面');
+      if (CM.I18n) CM.I18n.localize(this.immHintEl);
+      this.immHintEl.classList.add('on');
+      this._immT = setTimeout(function () { self.immHintEl.classList.remove('on'); }, 2600);
+    } else { this.immHintEl.classList.remove('on'); this.queueLayout(); }
   };
   // 界面提示：带 data-tip 的元素悬停时显示（可附快捷键），替代浏览器默认 title
   UI.prototype.initTips = function () {
@@ -403,7 +456,10 @@
     });
     document.addEventListener('pointerdown', hide, true);
     document.addEventListener('pointerout', function (e) {
-      if (cur && (!e.relatedTarget || !cur.contains(e.relatedTarget))) hide();
+      if (!cur || (e.relatedTarget && cur.contains(e.relatedTarget))) return;
+      // 指针下的子元素被刷新替换（数字、文字更新）时也会触发 pointerout：指针仍在原元素范围内就不隐藏（v2.3，修复提示闪烁）
+      if (!e.relatedTarget && document.body.contains(cur)) { const r = cur.getBoundingClientRect(); if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) return; }
+      hide();
     });
     document.addEventListener('keydown', hide, true);
     document.addEventListener('scroll', hide, true);
@@ -442,7 +498,18 @@
     }, { passive: true });
   };
   UI.prototype.blocking = function () {
-    return !this.screen.classList.contains('hidden') || !this.statsEl.classList.contains('hidden') || !!(CM.NetMap && CM.NetMap.isOpen()) || !!(this.g() && this.g().jumping);
+    return !this.screen.classList.contains('hidden') || !this.statsEl.classList.contains('hidden') || !!this.voApp || !!this.opsApp || !!(CM.NetMap && CM.NetMap.isOpen()) || !!(this.g() && this.g().jumping);
+  };
+  // App 是模态窗口；Tab 不进入背景 HUD，内层对话框先处理键盘。
+  UI.prototype.appKey = function (e, app, close) {
+    if (e.key !== 'Tab' && e.key !== 'Escape') return;
+    if (!this.screen.classList.contains('hidden') || Array.from(document.querySelectorAll('.qpop,.dropdown')).some(function (p) { return !app.contains(p) && p.getClientRects().length; })) return;
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); return; }
+    const items = Array.from(app.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),a[href],[tabindex="0"]')).filter(function (el) { return el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden' && !el.closest('[inert]'); });
+    const active = document.activeElement, first = items[0], last = items[items.length - 1];
+    if (!first) { e.preventDefault(); app.focus(); }
+    else if (e.shiftKey && (active === first || active === app || !app.contains(active))) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && (active === last || !app.contains(active))) { e.preventDefault(); first.focus(); }
   };
   UI.prototype.celebrationBlocked = function () {
     return this.blocking() || (this.compact() && (!this.right.classList.contains('closed') || !this.legendCard.classList.contains('hidden') || this.layerPanelOpen() || !!this.searchEl || !!this.dropdown || !!this.linePicker || !!document.getElementById('coach') || !!document.getElementById('followCard') || !!(this.g() && this.g().draft)));
@@ -457,22 +524,35 @@
     this.clearCelebrations();
     this.selection = null; this.stack = []; this.closePanel(true);
     this.layer = 'none'; this.R.layer = 'none'; this.renderDock();
-    g.on('toast', function (t) { self.toast(t.text, t.kind); });
-    g.on('draft', function () { self.lastDraftChange = performance.now(); self.tools.syncDraft(); self.syncSelection(); self.renderDraftbar(); self.renderToolOpts(); self.refreshObjectPage(); });
+    if (this.opsApp) this.opsApp.close(null, true);
+    if (this.hideOpsPop) this.hideOpsPop();
+    g.on('toast', function (t) {
+      const go = function (tab) { return function () { self.taskTab = tab; self.openPage('tasks', tab, { root: true }); }; };
+      if (t.ppp && t.kind === 'good') snd('contract');
+      self.toast(t.text, t.kind, t.offer ? { label: '查看挑战', fn: go('active') } : (t.ppp ? { label: '查看合同', fn: go('ppp') } : (t.fleet ? { label: '列车运营', fn: function () { self.openObj('line', t.fleet, 'ops'); } } : (t.models ? { label: '查看车型', fn: function () { self.openPage('fleet', null, { root: true }); } } : undefined))));
+    });
+    // 车队变化（v2.5）：正在看的线路页与车队页随之刷新
+    g.on('fleet', function () { const top = self.stack[self.stack.length - 1]; if (top && (top.kind === 'line' || top.kind === 'fleet')) self.rerenderPage(); else if (self.opsApp) self.opsApp.refresh(); });
+    g.on('draft', function () { self.lastDraftChange = performance.now(); self.tools.syncDraft(); self.syncSelection(); self.renderDraftbar(); self.renderToolOpts(); self.refreshObjectPage(); if (self.opsApp) self.opsApp.refresh(); });
     g.on('draftLive', function () { self.lastDraftChange = performance.now(); });
     g.on('prediction', function () { self.refreshPrediction(); self.renderDraftbar(); });
     g.on('network', function () { self.markUnsaved(); self.rerenderPage(); });
     g.on('tasksUpdated', function () { self.markUnsaved(); if (self.stack.length) self.rerenderPage(); });
-    g.on('trafficImpact', function () { self.markUnsaved(); if (self.stack.length) self.rerenderPage(); });
+    g.on('trafficImpact', function () { self.markUnsaved(); if (self.stack.length) self.rerenderPage(); if (CM.Tutorial && CM.Tutorial.onImpact && CM.Tutorial.onImpact()) return; self.toast('本次建设的效果报告已生成', 'info', { label: '查看报告', fn: function () { self.openPage('impact', null, { root: true }); } }); });
     g.on('finance', function () { self.markUnsaved(); self.rerenderPage(); self.scheduleAutosave(); });
-    g.on('month', function () { self.markUnsaved(); self.rerenderPage(); if (!g.jumping) { self.scheduleAutosave(); if (g.speed > 0) snd('month'); } });
+    g.on('month', function () { self.markUnsaved(); if (!g.jumping) { self.rerenderPage(); self.scheduleAutosave(); if (g.speed > 0) snd('month'); } });   // 跳月期间页面被推进卡片盖住，结束时统一刷新（v2.6）
+    g.on('month', function () { if (CM.OpsAlerts) { try { CM.OpsAlerts.record(g); } catch (e) { console.error(e); } } });
+    g.on('network', function () { self.updateOpsDock(); });
     g.on('autosave', function () { self.scheduleAutosave(); });
     g.on('failed', function (f) { snd('fail'); if (!g.jumping) self.showFailure(f); });
     g.on('jump', function () { snd('whoosh'); self.showJump(); });
     g.on('jumpProgress', function (p) { self.updateJump(p); });
-    g.on('jumpDone', function (r) { snd('chime'); self.showJumpResult(r); self.scheduleAutosave(); if (r.failed) self.showFailure(r.failed); });
+    g.on('jumpDone', function (r) { snd('chime'); self.rerenderPage(); self.showJumpResult(r); self.scheduleAutosave(); if (r.failed) self.showFailure(r.failed); });
     g.on('speed', function () { self.renderToolbar(); });
     // 里程碑：消息提示；重大节点弹出庆祝横幅（跳月 / 跳年期间只记录）
+    // 乘客之声：每月结算与建设效果更新后重新生成反馈（结果按月份与线网缓存）
+    const voGen = function () { if (CM.Voices && !g.jumping && CM.game === g) { try { CM.Voices.generate(g); } catch (e) { console.error(e); } if (self.voApp) self.voApp.refresh(); } };
+    g.on('month', voGen); g.on('trafficImpact', voGen); g.on('jumpDone', voGen);
     g.on('milestone', function (r) {
       if (g.jumping) return;
       const c = CM.Milestones.CAT[r.cat] || {};
@@ -535,22 +615,25 @@
       if (ev && ev.changed) g.requestPrediction();
     }
   };
-  UI.prototype.drawOverlay = function (ctx, R) { this.tools.drawOverlay(ctx, R); };
+  UI.prototype.drawOverlay = function (ctx, R) { this.tools.drawOverlay(ctx, R); if (this.tools.tagRect || this.tools.tagPrev) this.placeTip(this.tools.tagRect); if (CM.Corp) CM.Corp.drawOverlay(ctx, R, this); };
 
+  // 只在内容变化时写入（v2.3）：每帧重写会替换指针下的子节点，悬停提示与样式随之闪烁
+  const setH = function (el, html) { if (el._h !== html) { el._h = html; el.innerHTML = html; } };
+  const setT = function (el, text) { if (el._t !== text) { el._t = text; el.textContent = text; } };
   UI.prototype.updateTop = function () {
     const g = this.g(), c = this.pills, d = g.model.daily || {};
     const W = g.model.weights(g.clock.minute);
     const per = CFG.periods[g.model.hourPeriod[Math.floor(g.clock.minute / 60) % 24]];
-    c.date.v.innerHTML = U.esc(g.clock.y + '年' + g.clock.m + '月' + g.clock.d + '日') + ' <small>' + U.fmtClock(g.clock.minute) + '</small>';
+    setH(c.date.v, U.esc(g.clock.y + '年' + g.clock.m + '月' + g.clock.d + '日') + ' <small>' + U.fmtClock(g.clock.minute) + '</small>');
     const slowing = g.peakSlowNow();
-    c.date.k.textContent = UI.weekdayName(g.clock) + ' · ' + per.name + (slowing ? ' · 慢放中' : '');
+    setT(c.date.k, UI.weekdayName(g.clock) + ' · ' + per.name + (slowing ? ' · 慢放中' : ''));
     if (slowing !== this._peakOn) { this._peakOn = slowing; this.tbtns.peak.classList.toggle('active', slowing); }
     c.date.el.setAttribute('data-tip', g.stageName() + ' · 点击查看日期、时段与城市发展');
     const rg = this.dayRing, frac = (g.clock.minute % 1440) / 1440;
     rg.arc.setAttribute('stroke-dashoffset', String(rg.C * (1 - frac)));
     const night = g.clock.minute < 360 || g.clock.minute >= 1140;
     if (night !== rg.night) { rg.night = night; rg.ico.innerHTML = night ? I.moon : I.sun; rg.el.classList.toggle('night', night); }
-    if (g.econ.isFree()) c.money.v.innerHTML = '∞ <small>自由建造</small>';
+    if (g.econ.isFree()) setH(c.money.v, '∞ <small>自由建造</small>');
     else {
       const f = g.econ.funds;
       if (this._funds != null && Math.abs(f - this._funds) >= 300) this.moneyFloat(f - this._funds);
@@ -568,11 +651,11 @@
       if (Math.abs(dlt) < (pct ? 0.0005 : 0.005)) return '';
       return '<span class="trend ' + ((betterUp ? dlt > 0 : dlt < 0) ? 'good' : 'bad') + '">' + (dlt > 0 ? '▲' : '▼') + '</span>';
     };
-    c.share.v.innerHTML = U.fmtPct(d.metroShare || 0) + ' ' + trend(d.metroShare || 0, prev && prev.share, true, true);
+    setH(c.share.v, U.fmtPct(d.metroShare || 0) + ' ' + trend(d.metroShare || 0, prev && prev.share, true, true));
     if (!this._congT || performance.now() - this._congT > 900) { this._congT = performance.now(); this._cong = g.model.cityCongAt(W); }
-    const cg = this._cong;
-    c.cong.v.innerHTML = cg.toFixed(2) + ' <small>' + CM.Model.congestionNames[CM.Model.congestionLevel(cg)] + '</small>';
-    c.cong.badge.className = 'badge ' + ['b-green', 'b-gold', 'b-orange', 'b-red'][CM.Model.congestionLevel(cg)];
+    const cg = this._cong,congLevel=CM.Model.congestionLevel(cg);
+    setH(c.cong.v, cg.toFixed(2) + ' <small>' + CM.Model.congestionNames[congLevel] + '</small>');
+    c.cong.badge.className = 'badge ' + ['b-green', 'b-gold', 'b-orange', 'b-red'][congLevel];
     // 城市经济：最近一年的实际增速（尚无完整年度时为本年预测）与经济环境；教程等未启用的地图不显示
     const hasEco = !!(g.macro && CM.Macro);
     c.econ.el.classList.toggle('gone', !hasEco);
@@ -585,9 +668,11 @@
       c.econ.el.setAttribute('data-tip', '城市经济：' + mv.env.label + ' · ' + (L ? L.y + ' 年 GDP ' + UI.fmtBig(L.nom) : '本年 GDP 预测 ' + UI.fmtBig(mv.fc.nom)) + ' · 点击查看');
     }
     const sat = g.econ.sat;
-    c.sat.v.innerHTML = Math.round(sat) + ' ' + trend(sat, prev && prev.sat, true);
+    setH(c.sat.v, Math.round(sat) + ' ' + trend(sat, prev && prev.sat, true));
     const sk = sat >= 60 ? 'smile' : (sat >= 40 ? 'meh' : 'frown');
     if (c.sat.ico !== sk) { c.sat.ico = sk; c.sat.badge.className = 'badge ' + (sk === 'smile' ? 'b-green' : (sk === 'meh' ? 'b-orange' : 'b-red')); c.sat.badge.innerHTML = ''; c.sat.badge.appendChild(ic(sk)); }
+    if (CM.Voices && this.updateSatDock) this.updateSatDock(g);
+    if (this.tickOps) this.tickOps(g);
     const n = g.tasks.active.length;
     this.taskCnt.textContent = n; this.taskCnt.style.display = n ? '' : 'none';
     const s = this.save;
@@ -643,7 +728,7 @@
     if (d > 0) snd('coin');
     setTimeout(function () { el.remove(); }, 1700);
   };
-  // 同时触发的开通、任务和成就依次展示，退出动画结束后再显示下一条。
+  // 同时触发的开通和任务依次展示，退出动画结束后再显示下一条。
   UI.prototype.clearCelebrations = function () {
     clearTimeout(this._celebrationTimer); clearTimeout(this._celebrationExitTimer);
     if (this._celebrationActive) this._celebrationActive.box.remove();
@@ -675,7 +760,7 @@
     const box = h('div', { class: 'celebrate' }, h('div', { class: 'ribbon', style: { '--c': color || 'var(--accent)' } },
       h('span', { class: 'medal', 'aria-hidden': 'true' }, ic('trophy')),
       h('div', { class: 'celebrate-copy', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' }, h('div', { class: 't' }, title), sub ? h('div', { class: 's' }, sub) : null, count),
-      h('button', { class: 'hbtn celebrate-close', 'aria-label': '关闭当前成就提示', title: '关闭当前提示，继续下一条', onclick: function () { self.dismissCelebration(); } }, ic('close'))));
+      h('button', { class: 'hbtn celebrate-close', 'aria-label': '关闭当前提示', title: '关闭当前提示，继续下一条', onclick: function () { self.dismissCelebration(); } }, ic('close'))));
     this._celebrationActive = { box: box, item: item, closing: false };
     if (!rm) {
       const cols = [color || '#2f6fb6', '#f0a72b', '#16a085', '#e84393', '#6c5ce7', '#e2382e'];
@@ -694,6 +779,113 @@
     if (!item.shown) snd('celebrate');
     item.shown = true;
     this._celebrationTimer = setTimeout(function () { self.dismissCelebration(); }, Math.min(7000, Math.max(3800, (title.length + sub.length) * 70)));
+  };
+
+  UI.prototype.clearHist = function () {
+    this._histQ = []; this._phaseQ = [];
+    if (this.histHost) this.histHost.innerHTML = '';
+    if (this.newsHost) this.newsHost.innerHTML = '';
+  };
+  UI.prototype.flushHist = function () {
+    const g = this.g(); if (!g || g.jumping || this.blocking() || this.celebrationBlocked() || !this._histQ) return;
+    if (this._phaseQ.length) { const er = this._phaseQ[this._phaseQ.length - 1]; this._phaseQ.length = 0; this.showPhaseBanner(er); }
+    if (!this._histQ.length) return;
+    // 跳月 / 跳年后一次到来的多条事件合成一份「本期要闻」
+    if (this._histQ.length > 2) { this.showHistDigest(this._histQ.splice(0)); return; }
+    while (this._histQ.length && this.newsHost.querySelectorAll('.news-card').length < 2) this.showHistCard(this._histQ.shift());
+  };
+  // 卡片的停留、悬停暂停与退出
+  UI.prototype.histLife = function (box, ms) {
+    const self = this; let left = ms, t0 = performance.now(), timer = null;
+    const close = function () { if (box.classList.contains('out')) return; clearTimeout(timer); box.classList.add('out'); setTimeout(function () { box.remove(); self.flushHist(); }, CM.Settings.reducedMotion() ? 0 : 380); };
+    const run = function () { t0 = performance.now(); timer = setTimeout(close, left); box.style.setProperty('--life-play', 'running'); };
+    box.addEventListener('pointerenter', function () { clearTimeout(timer); left -= performance.now() - t0; box.style.setProperty('--life-play', 'paused'); });
+    box.addEventListener('pointerleave', run);
+    box.style.setProperty('--life', ms + 'ms');
+    run();
+    return close;
+  };
+  UI.prototype.showPhaseBanner = function (er) {
+    const self = this, E = CM.Eras; if (!E || !er || !er.era) return;
+    const L = E.list(), k = L.indexOf(er.era), e = er.era, to = E.endOf(k);
+    for (const old of this.histHost.querySelectorAll('.phase-banner')) old.remove();
+    // 展望：背景中「估算 / 模拟」的第一句；上一阶段的结果：人口、岗位、新开发用地与地铁
+    const en = CM.I18n && CM.I18n.get() === 'en';
+    const outlook = en ? (CM.I18n.text(String(e.summary || '')).split(/Estimated: |Simulated: |Fictional: /)[1] || '').split(/\.\s/)[0].replace(/\.$/, '')
+      : (String(e.summary || '').split(/估算：|模拟：|虚构：/)[1] || '').split('。')[0];
+    let prev = null;
+    if (er.prev && er.prev.start && er.prev.end) {
+      const a = er.prev.start, b = er.prev.end, pe = E.byId(er.prev.id), pc = function (x, y) { return x > 0 ? U.fmtSigned(Math.round((y / x - 1) * 100), 0) + '%' : '—'; };
+      const bits = ['人口 ' + pc(a.pop, b.pop), '岗位 ' + pc(a.jobs, b.jobs)];
+      if (a.dev != null && b.dev != null) bits.push('新开发用地 ' + U.fmtSigned(Math.round((b.dev - a.dev) * CFG.CELL_M * CFG.CELL_M / 1e5) / 10, 1) + ' km²');
+      bits.push(b.km > 0 ? '地铁 ' + U.fmtNum(b.km, 0) + ' km' : '尚无地铁');
+      prev = '「' + (pe ? pe.name : '上一阶段') + '」' + bits.join(' · ');
+    }
+    let close = null;
+    const box = h('div', { class: 'phase-banner', style: { '--ec': UI.ERA_COLORS[k % UI.ERA_COLORS.length] }, role: 'status' },
+      h('span', { class: 'pb-line' }),
+      h('div', { class: 'pb-num' }, h('b', null, String(k + 1)), h('small', null, '/ ' + L.length)),
+      h('div', { class: 'pb-body' },
+        h('div', { class: 'pb-kick' }, h('span', null, '号外 · 新的发展阶段 · ' + e.from + (to ? '–' + to : ' 年起')), h('span', { class: 'pb-tag' }, e.tag)),
+        h('div', { class: 'pb-title' }, e.name),
+        outlook ? h('div', { class: 'pb-sub' }, en ? outlook.charAt(0).toUpperCase() + outlook.slice(1) + '.' : outlook + '。') : null,
+        prev ? h('div', { class: 'pb-prev' }, ic('chart', 13), h('span', null, prev)) : null,
+        h('div', { class: 'pb-dots' }, L.map(function (x, i) { return h('i', { class: i < k ? 'past' : (i === k ? 'cur' : '') }); }))),
+      h('div', { class: 'pb-acts' },
+        h('button', { class: 'btn sm', onclick: function () { if (close) close(); self.openPage('era', null, { root: true }); } }, '查看变化'),
+        h('button', { class: 'iconbtn', 'aria-label': '关闭', onclick: function () { if (close) close(); } }, ic('close'))),
+      h('i', { class: 'pb-life' }));
+    this.histHost.prepend(box);
+    snd('chime');
+    close = this.histLife(box, 11000);
+  };
+  // 「历史时刻」：年份印章、史实 / 估算 / 模拟标签、事件说明与效果标签；能对应到片区或地标时可在地图上定位
+  UI.prototype.histTarget = function (ev, chips) {
+    const g = this.g(); if (!g) return null;
+    const rid = chips.length && chips[0].region;
+    if (rid) { const k = g.city.regions.findIndex(function (r) { return r.id === rid; }); if (k >= 0) return { region: k }; }
+    const lm = (CM.DATA.landmarks || []).filter(function (x) { return x.name && x.name.length >= 3 && String(ev.title).indexOf(String(x.name).replace(/（.*）/, '')) >= 0; })[0];
+    return lm ? { x: lm.x, y: lm.y, name: lm.name } : null;
+  };
+  // 城市纪事报（v2.3）：报头（城市与版面）、出版年月、衬线大标题、两行导语（点击展开全文）、史实 / 估算 / 模拟印章与影响标签。
+  // 贴在地图右下角，最多同时两份；悬停暂停计时，点击导语展开、再点收起
+  const NEWS_MAST = function (ev) { return '城市纪事 · ' + (CM.DATA.city || '') + (ev && ev.econ ? ' · 财经' : ''); };
+  const newsDate = function (ev) { return ev.y + ' 年 ' + (ev.m || 1) + ' 月'; };
+  UI.prototype.showHistCard = function (ev) {
+    const self = this, chips = CM.Eras ? CM.Eras.fxChips(ev.fx) : [], tgt = ev.econ ? null : this.histTarget(ev, chips);
+    const tagCls = { '史实': 'hist', '模拟': 'sim' }[ev.tag] || 'info';
+    let close = null;
+    const lead = ev.desc ? h('p', { class: 'nc-lead', 'data-tip': '点击展开或收起全文', onclick: function () { lead.classList.toggle('open'); } }, ev.desc) : null;
+    const box = h('article', { class: 'news-card' + (ev.econ ? ' econ' + (ev.neg ? ' neg' : '') : '') },
+      h('header', { class: 'nc-mast' }, h('b', null, NEWS_MAST(ev)), h('span', null, newsDate(ev)),
+        h('span', { class: 'nc-acts' },
+          tgt ? h('button', { class: 'iconbtn', 'data-tip': '在地图上查看', onclick: function () { if (tgt.region != null) self.locateRegion(tgt.region); else self.locatePoint(tgt.x, tgt.y, tgt.name, 2.5); } }, ic('locate', 14)) : null,
+          h('button', { class: 'iconbtn', 'aria-label': '关闭', onclick: function () { if (close) close(); } }, ic('close', 14)))),
+      h('h4', { class: 'nc-head' }, ev.econ ? h('span', { class: 'nc-trend ' + (ev.neg ? 'down' : 'up') }, ev.neg ? '▼' : '▲') : null, ev.title),
+      lead,
+      chips.length || ev.econ ? h('div', { class: 'nc-foot' }, ev.econ ? h('span', { class: 'nc-note' }, '对本城影响' + (ev.lvl || '')) : null,
+        chips.map(function (c) { return h('span', { class: 'hc-chip ' + (c.up ? 'up' : 'down') }, ic(c.icon, 12), c.text); })) : null,
+      h('span', { class: 'nc-stamp ' + tagCls }, ev.tag || '史实'),
+      h('i', { class: 'hc-life' }));
+    this.newsHost.appendChild(box);
+    snd('notify');
+    close = this.histLife(box, 10000 + Math.min(5000, String(ev.desc || '').length * 45));
+  };
+  UI.prototype.showHistDigest = function (list) {
+    const self = this;
+    let close = null;
+    const rows = list.slice(-5).map(function (ev) { return h('li', null, h('b', null, ev.y + '.' + (ev.m || 1)), h('span', null, (ev.econ ? (ev.neg ? '▼ ' : '▲ ') : '') + ev.title)); });
+    const box = h('article', { class: 'news-card digest' },
+      h('header', { class: 'nc-mast' }, h('b', null, NEWS_MAST(null)), h('span', null, '本期要闻 · ' + list.length + ' 则'),
+        h('span', { class: 'nc-acts' },
+          h('button', { class: 'iconbtn', 'data-tip': '城市纪事', onclick: function () { if (close) close(); self.openStats('milestones'); } }, ic('book', 14)),
+          h('button', { class: 'iconbtn', 'aria-label': '关闭', onclick: function () { if (close) close(); } }, ic('close', 14)))),
+      h('ul', { class: 'nc-list' }, rows),
+      list.length > 5 ? h('p', { class: 'nc-more' }, '另有 ' + (list.length - 5) + ' 则，见城市纪事') : null,
+      h('i', { class: 'hc-life' }));
+    this.newsHost.appendChild(box);
+    snd('notify');
+    close = this.histLife(box, 13000);
   };
 
   UI.prototype.updateBanner = function () {
@@ -721,7 +913,7 @@
       h('i', { class: 'life', style: { animationDuration: life + 'ms' } }));
     this.toasts.appendChild(t);
     while (this.toasts.children.length > 4) this.toasts.firstChild.remove();
-    if (kind === 'bad') snd('error'); else if (kind === 'good') snd('good'); else snd('notify');
+    if (kind === 'bad') snd('error'); else if (kind === 'good') snd('good'); else if (kind === 'warn') snd('warn'); else snd('notify');
     setTimeout(close, life);
   };
   UI.prototype.setTooltip = function (tip, sx, sy) {
@@ -740,11 +932,22 @@
     }
     el.classList.toggle('bad', !!tip.bad);
     el.classList.add('on');
-    const w = el.offsetWidth, hh = el.offsetHeight;
-    let x = sx + 18, y = sy + 18;
-    if (x + w > window.innerWidth - 8) x = sx - w - 14;
-    if (y + hh > window.innerHeight - 8) y = sy - hh - 14;
-    el.style.left = x + 'px'; el.style.top = y + 'px';
+    this._tipBox = { sx: sx, sy: sy, w: el.offsetWidth, h: el.offsetHeight };
+    this.placeTip(this.tools ? this.tools.tagRect : null);
+  };
+  // 提示框默认在光标右下；avoid（绘线、建站时光标下方的预览站名）被盖住时依次改到右上、左上、站名下方
+  UI.prototype.placeTip = function (avoid) {
+    const b = this._tipBox, el = this.tip;
+    if (!b || !el.classList.contains('on')) return;
+    const w = b.w, hh = b.h, W = window.innerWidth, H = window.innerHeight;
+    const right = b.sx + 18 + w > W - 8 ? b.sx - w - 14 : b.sx + 18, above = b.sy - hh - 14;
+    let x = right, y = b.sy + 18 + hh > H - 8 ? above : b.sy + 18;
+    if (avoid) {
+      const clear = function (px, py) { return py >= 8 && py + hh <= H - 8 && px >= 8 && px + w <= W - 8 && !(px < avoid.x1 && px + w > avoid.x0 && py < avoid.y1 && py + hh > avoid.y0); };
+      if (!clear(x, y)) for (const c of [[right, above], [b.sx - w - 14, above], [right, avoid.y1 + 4], [avoid.x1 + 6, avoid.y0]]) if (clear(c[0], c[1])) { x = c[0]; y = c[1]; break; }
+    }
+    if (b.x !== x) { b.x = x; el.style.left = x + 'px'; }
+    if (b.y !== y) { b.y = y; el.style.top = y + 'px'; }
   };
 
   // ======================== 工具坞与视图 ========================
@@ -758,7 +961,7 @@
       this.toolInd.style.transform = 'translateX(' + ab.offsetLeft + 'px)';
       this.toolInd.classList.toggle('danger', t === 'demolish');
       this.toolInd.classList.add('ready');
-    }
+    } else if (!ab) this.toolInd.classList.remove('ready');   // 测距不在工具栏上
     const sp = g ? g.speed : 0;
     // 暂停键：运行时显示「暂停」，暂停时显示「继续」并以琥珀色提示
     const pz = this.tbtns.pause;
@@ -854,6 +1057,7 @@
     snd('tool');
     this.renderToolbar();
     if (this.topIs(['build']) && !this.g().draft) this.closePanel();
+    if (this.multi && this.topIs(['multi'])) this.renderPage(false);   // 切到或切出拆除工具时，多选页随之变为批量拆除或批量修改
   };
   // 工具选项条：绘线时显示正在绘制的线路（可切换为新线路或支线）、建设方式与新站规模
   UI.prototype.lineColorInput = function (getColor, onPick, prefix) {
@@ -881,7 +1085,8 @@
     const gridOn = !!(CM.Grid && CM.Grid.on()), snapOn = !!(CM.Grid && CM.Grid.snapOn());
     const colorLine = T.chain && net.lines[T.lineChoice];
     const lineColor = colorLine ? colorLine.color : T.nextLineColor(true);
-    const key = [T.tool, T.chain, T.lineChoice, T.buildType, T.stationSize, g.draft ? g.draft.ver : 0, g.clock.y, gridOn, snapOn, lineColor].join('|');
+    const nMulti = this.multi ? this.multi.stations.size + this.multi.segs.size : 0;
+    const key = [T.tool, T.chain, T.lineChoice, T.buildType, T.stationSize, T.curveMode, T.newLineSpeed, g.draft ? g.draft.ver : 0, g.clock.y, gridOn, snapOn, lineColor, nMulti, T.meas.pts.length].join('|');
     if (key === this._toKey && !el.classList.contains('hidden')) return;
     this._toKey = key;
     const self = this, mc = CFG.metro, y = g.clock.y;
@@ -926,8 +1131,12 @@
       colorGroup.classList.add('to-color');
       colorGroup.setAttribute('data-tip', (colorLine ? '修改当前线路整条线的颜色，立即生效且不产生费用' : '为即将新建的线路选色，预览与建成后的线路使用同一颜色') + (AX.enabled() ? '；色盲辅助已开启，地图使用辅助配色，所选原色会保留' : ''));
       // 线形（v2.1）：平滑曲线把 Shift+点击的转弯点当作控制柄；穿点为原画法，曲线逐点穿过转弯点
-      const curveCtl = grp('线形', segc(T.curveMode, [['smooth', '平滑', '平滑曲线：Shift+点击放置的转弯点是控制柄，线路圆顺地从附近经过，放一个控制柄即可画出大半径弯道'], ['pass', '穿点', '穿过转弯点：线路逐点经过每个转弯点（原画法），适合贴着道路或河岸走线']], function (v) { T.curveMode = v; CM.Settings.set('curveMode', v); }));
-      el.append(colorGroup, h('span', { class: 'to-sep' }), typeCtl, sizeCtl('新站'), curveCtl);
+      const curveCtl = grp('线形', segc(T.curveMode, [['smooth', '平滑', '平滑曲线：Shift+点击放置控制柄'], ['pass', '穿点', '穿过转弯点：线路逐点经过，适合贴着道路走线']], function (v) { T.curveMode = v; CM.Settings.set('curveMode', v); }));
+      // 运行速度（v2.5）：新线路在这里选；延长既有线路时沿用该线的速度（在线路详情「列车运营」中调整）
+      const speedCtl = grp('速度', colorLine
+        ? h('span', { class: 'tag', 'data-tip': '本线最小转弯半径 ' + M.minRadius(colorLine) + ' m；可在线路详情「列车运营」中调整' }, M.lineKmh(colorLine) + ' km/h')
+        : segc(T.newLineSpeed || 80, mc.speedGrades.filter(function (x) { return !CM.Fleet || CM.Fleet.speedOpen(g.mapId, y, x.kmh).ok; }).map(function (x) { return [x.kmh, String(x.kmh), x.kmh + ' km/h：最小转弯半径 ' + x.minR + ' m，运营成本 ×' + x.ops.toFixed(2)]; }), function (v) { T.newLineSpeed = v; }));
+      el.append(colorGroup, h('span', { class: 'to-sep' }), typeCtl, sizeCtl('新站'), curveCtl, speedCtl);
       el.append.apply(el, snapCtl());
       if (T.chain) el.appendChild(h('button', { class: 'btn sm ghost', 'data-tip': '结束本次绘线', 'data-key-pre': '右键', 'data-act': 'build.finish', onclick: function () { T.endChain(); } }, ic('check'), '完成'));
     } else if (T.tool === 'station') {
@@ -936,10 +1145,17 @@
     } else if (T.tool === 'edit') {
       el.appendChild(hint('pencil', '拖动车站或圆点调整线形 · 拖动菱形增加转弯点 · 双击删除转弯点 · 选中车站后拖动旋转手柄调整站台方向 · Ctrl+点击多选'));
       el.append.apply(el, snapCtl());
+    } else if (T.tool === 'measure') {
+      el.append(hint('ruler', '依次点击量距离 · 靠近车站时吸附 · 右键结束'), h('span', { class: 'to-sep' }), typeCtl);
+      if (T.meas.pts.length) el.appendChild(h('button', { class: 'btn sm ghost', onclick: function () { T.clearMeasure(); } }, '清除'));
+      el.appendChild(h('button', { class: 'btn sm ghost', 'data-key': 'Esc', onclick: function () { T.setTool('select'); } }, ic('close'), '退出测距'));
     } else if (T.tool === 'demolish') {
-      el.appendChild(hint('bulldozer', '悬停查看拆除后的变化 · 点击拆除（进入草案，可撤销）'));
+      if (nMulti) el.append(hint('bulldozer', '已选 ' + nMulti + ' 项 · 点击已选对象或按 Enter 拆除 · 点击别处取消'), h('span', { class: 'to-sep' }),
+        h('button', { class: 'btn sm danger', 'data-tip': '拆除所选（进入草案，可一次撤销）', onclick: function () { self.demolishMulti(); } }, ic('bulldozer'), '拆除所选'),
+        h('button', { class: 'btn sm ghost', 'data-key': 'Esc', onclick: function () { self.clearMulti(); } }, '取消选择'));
+      else el.appendChild(hint('bulldozer', '悬停查看变化 · 点击拆除 · Ctrl+点击多选 · Shift+拖动框选'));
     }
-    el.classList.toggle('has-snap', gridOn && T.tool !== 'demolish');   // 窄窗口中把说明文字收成图标，给吸附开关留出位置
+    el.classList.toggle('has-snap', gridOn && T.tool !== 'demolish' && T.tool !== 'measure');   // 窄窗口中把说明文字收成图标，给吸附开关留出位置
     el.classList.toggle('has-color', T.tool === 'line');
     el.classList.remove('hidden');
   };
@@ -1036,12 +1252,14 @@
   UI.prototype.undo = function () {
     if (this.tools.cancelDrag()) return true;
     const g = this.g(); if (!g || !g.undo()) return false;
+    snd('undo');
     this.tools.chain = null; this.tools.bends = [];
     return true;
   };
   UI.prototype.redo = function () {
     if (this.tools.cancelDrag()) return true;
     const g = this.g(); if (!g || !g.redo()) return false;
+    snd('redo');
     this.tools.chain = null; this.tools.bends = [];
     return true;
   };
@@ -1087,9 +1305,9 @@
     const R = this.R, net = g.net;
     for (const s of newSeg) {
       const ln = net.lines[s.line]; if (!ln || !net.segments[s.id]) continue;
-      try { R.addFx('trace', 0, 0, { pts: M.segGeom(net, net.segments[s.id], g.city).pts, color: AX.line(ln) }); } catch (e) { /* 几何不可用时跳过 */ }
+      try { R.addFx('trace', 0, 0, { pts: M.segGeom(net, net.segments[s.id], g.city).pts, color: AX.line(ln), type: net.segments[s.id].type }); } catch (e) { /* 几何不可用时跳过 */ }
     }
-    newSt.forEach(function (s, k) { const ln = M.stationLines(net, s.id).map(function (l) { return net.lines[l]; })[0]; R.addFx('burst', s.x, s.y, { color: ln ? AX.line(ln) : '#2f6fb6', delay: 0.25 + k * 0.08 }); });
+    newSt.forEach(function (s, k) { const ln = M.stationLines(net, s.id).map(function (l) { return net.lines[l]; })[0]; R.addFx('burst', s.x, s.y, { color: ln ? AX.line(ln) : '#2f6fb6', delay: 0.25 + k * 0.08, type: s.type }); });
     if (newLines.length) {
       const L = newLines[0];
       const n = M.lineTopo(net, L.id).stations.length;
@@ -1104,7 +1322,7 @@
     const g = this.g(); if (!g.draft) return;
     const ev = g.draftEval();
     const self = this;
-    const doIt = function () { g.cancelDraft(); self.tools.chain = null; self.tools.bends = []; self.hoverConflict = null; self.toast('已放弃草案，正式网络与资金未改变', 'info'); self.renderDraftbar(); self.rerenderPage(); };
+    const doIt = function () { snd('discard'); g.cancelDraft(); self.tools.chain = null; self.tools.bends = []; self.hoverConflict = null; self.toast('已放弃草案，正式网络与资金未改变', 'info'); self.renderDraftbar(); self.rerenderPage(); };
     if (!ev.changed) { doIt(); return; }
     this.confirm('放弃建设草案？', '草案中的 ' + (ev.changes.add.length + ev.changes.mod.length + ev.changes.del.length) + ' 项修改将被丢弃，不产生任何费用。', '放弃草案', doIt, true, 'trash');
   };
@@ -1112,11 +1330,12 @@
   UI.prototype.demolishImpact = function (t) {
     const g = this.g(); if (!g || !t) return null;
     const net = g.draft ? g.draft.net : g.net, ver = g.draft ? g.draft.ver : -1;
-    const c = this._imp;
-    if (c && c.net === net && c.ver === ver && c.kind === t.kind && c.id === t.id) return c.v;
+    // 多选与单个对象分开缓存：多选时悬停其他对象不用反复重算
+    const many = t.kind === 'many', slot = many ? '_impMany' : '_imp', id = many ? t.stations.concat(t.segs).join(',') : t.id, c = this[slot];
+    if (c && c.net === net && c.ver === ver && c.kind === t.kind && c.id === id) return c.v;
     let v = null;
-    if ((t.kind === 'station' && net.stations[t.id]) || (t.kind === 'seg' && net.segments[t.id])) { try { v = M.demolishImpact(net, t); } catch (e) { console.error(e); } }
-    this._imp = { net: net, ver: ver, kind: t.kind, id: t.id, v: v };
+    if (many || (t.kind === 'station' && net.stations[t.id]) || (t.kind === 'seg' && net.segments[t.id])) { try { v = M.demolishImpact(net, t); } catch (e) { console.error(e); } }
+    this[slot] = { net: net, ver: ver, kind: t.kind, id: id, v: v };
     return v;
   };
   // 拆除车站或区段（进入草案），并说明实际网络变化
@@ -1131,6 +1350,22 @@
     if (r && r.error) { this.toast(r.error, 'bad'); return; }
     snd('demolish');
     this.toast('已在草案中拆除' + label + (imp && imp.lines.length ? '：' + imp.lines.slice(0, 3).join('；') + (imp.lines.length > 3 ? ' 等' : '') : ''), 'info');
+    this.select(null);
+  };
+  // 拆除所选（多选）：作为一步进入草案，可一次撤销
+  UI.prototype.demolishMulti = function () {
+    const g = this.g(), mu = this.multi; if (!g || !mu) return;
+    const net = g.draft ? g.draft.net : g.net, R = this.R;
+    const st = Array.from(mu.stations).filter(function (id) { return net.stations[id]; }), sg = Array.from(mu.segs).filter(function (id) { return net.segments[id]; }), n = st.length + sg.length;
+    if (!n) { this.clearMulti(); return; }
+    const imp = this.demolishImpact({ kind: 'many', stations: st, segs: sg });
+    for (const id of st) R.addFx('dust', net.stations[id].x, net.stations[id].y);
+    for (const id of sg) { const gp = M.segGeom(net, net.segments[id], g.city).pts; for (let k = 0; k < gp.length; k += Math.max(1, Math.floor(gp.length / 3))) R.addFx('dust', gp[k][0], gp[k][1], { small: true }); }
+    const r = g.edit(function (nn) { return { notes: M.removeMany(nn, st, sg) }; });
+    if (r && r.error) { this.toast(r.error, 'bad'); return; }
+    snd('demolish');
+    this.clearMulti();
+    this.toast('已在草案中拆除 ' + n + ' 项' + (imp && imp.lines.length ? '：' + imp.lines.slice(0, 2).join('；') + (imp.lines.length > 2 ? ' 等' : '') : ''), 'info');
     this.select(null);
   };
   // 执行冲突的修复建议
@@ -1189,7 +1424,12 @@
     card.classList.remove('hidden');
     this.placeFeed();
   };
-  UI.prototype.setLayer = function (id) { if (id !== this.layer) snd('soft'); this.layer = id; this.R.layer = id; this.R.heatKey = ''; this.renderDock(); };
+  UI.prototype.setLayer = function (id) {
+    const changed = id !== this.layer;
+    if (changed) snd('soft');
+    this.layer = id; this.R.layer = id; this.R.heatKey = ''; this.renderDock();
+    if (changed && this.topIs(['metric']) && !this.right.classList.contains('closed')) this.rerenderPage();
+  };
   UI.prototype.layerPanelOpen = function () { return !!this.layerPanel && !this.layerPanel.classList.contains('hidden'); };
   UI.prototype.toggleLayerPanel = function (open) {
     const p = this.layerPanel, on = open == null ? !this.layerPanelOpen() : !!open;
@@ -1197,51 +1437,67 @@
     if (on === this.layerPanelOpen()) return;
     if (!on && p.contains(document.activeElement)) this.layerBtn.focus();
     p.classList.toggle('hidden', !on); p.inert = !on;
+    document.body.classList.toggle('layer-panel-open', on);
     this.layerBtn.classList.toggle('open', on); this.layerBtn.setAttribute('aria-expanded', on ? 'true' : 'false');
-    if (!on) { this.dockBtns = {}; this._lpKey = null; return; }
+    if (!on) { this.dockBtns = {}; this._lpKey = null; this.queueLayout(); return; }
     snd('open');
     this.closeTimeOptions();
+    this.measureLayout();
     this.renderLayerPanel();
   };
   UI.prototype.renderLayerPanel = function () {
     const self = this, p = this.layerPanel;
-    const key = this.layer + '|' + !!(CM.Grid && CM.Grid.on());
-    if (key === this._lpKey) { this.placeLayerPanel(); return; }
-    this._lpKey = key;
     p.innerHTML = '';
     this.dockBtns = {};
-    let first = true;
+    const rows = [];
     for (const G of LAYER_GROUPS) {
-      if (!first) p.appendChild(h('i', { class: 'lp-sep' }));
-      first = false;
+      const row = h('div', { class: 'lp-row', role: 'group', 'aria-label': G[1] });
       for (const L of LAYERS) {
-        if (L.group !== G[0] || L.metric) continue;   // 人口密度、道路拥堵、地铁覆盖随顶栏指标打开
+        if (L.group !== G[0]) continue;
         const on = self.layer === L.id;
-        const b = h('button', { class: 'lp-btn' + (on ? ' on' : ''), 'data-tip': G[1] + ' · ' + L.name + ' · ' + L.desc + (on ? '（再次点击关闭）' : ''), 'aria-label': L.name, 'aria-pressed': on ? 'true' : 'false',
+        const b = h('button', { class: 'lp-btn' + (on ? ' on' : ''), 'data-tip': L.name + ' · ' + L.desc, 'aria-label': L.name, 'aria-pressed': on ? 'true' : 'false',
           onclick: function () { self.setLayer(self.layer === L.id ? 'none' : L.id); self.toggleLayerPanel(false); } }, ic(L.icon));
         b.style.setProperty('--lc', L.color);
-        self.dockBtns[L.id] = b; p.appendChild(b);
+        self.dockBtns[L.id] = b; row.appendChild(b);
       }
+      rows.push(row);
     }
-    // 地图显示：经纬网格（建站与绘线时可吸附到交叉点）
-    if (CM.Grid) {
-      const gridOn = !!CM.Grid.on();
-      p.appendChild(h('i', { class: 'lp-sep' }));
-      p.appendChild(h('button', { class: 'lp-btn opt' + (gridOn ? ' on' : ''), 'data-act': 'view.grid', 'data-silent': '1', role: 'switch', 'aria-label': '经纬网格', 'aria-checked': gridOn ? 'true' : 'false',
-        'data-tip': '显示 · 经纬网格（' + (gridOn ? '已开启' : '已关闭') + '）· 建站与绘线时可吸附到交叉点', onclick: function () { self.toggleGrid(); self.renderLayerPanel(); } }, ic('graticule')));
-    }
+    // 小工具：经纬网格（建站与绘线时可吸附到交叉点）、测距、线路标注、任务标记
+    const S = CM.Settings, T = this.tools;
+    const opt = function (icon, name, desc, on, act, fn) {
+      return h('button', { class: 'lp-btn opt' + (on ? ' on' : ''), 'data-act': act, 'data-silent': '1', role: 'switch', 'aria-label': name, 'aria-checked': on ? 'true' : 'false', 'data-tip': name + ' · ' + desc, onclick: fn }, ic(icon));
+    };
+    const flip = function (key) { return function () { S.set(key, !S.get(key)); snd('toggle'); self.renderLayerPanel(); }; };
+    rows.push(h('div', { class: 'lp-row', role: 'group', 'aria-label': '小工具' },
+      opt('graticule', '经纬网格', '建站与绘线时可吸附', !!CM.Grid.on(), 'view.grid', function () { self.toggleGrid(); self.renderLayerPanel(); }),
+      opt('ruler', '测距', '量距离，估算步行与乘车时间、站数和建设费', !!T && T.tool === 'measure', 'tool.measure', function () { T.setTool(T.tool === 'measure' ? 'select' : 'measure'); self.toggleLayerPanel(false); }),
+      opt('lineTag', '线路标注', '在地图的线路上标出线路编号', !!S.get('lineTags'), null, flip('lineTags')),
+      opt('flag', '任务标记', '在地图上标出进行中任务的地点，点击查看任务', !!S.get('taskPins'), null, flip('taskPins'))));
+    rows.forEach(function (row, i) { if (i) p.appendChild(h('i', { class: 'lp-sep' })); p.appendChild(row); });
     this.placeLayerPanel();
   };
   UI.prototype.placeLayerPanel = function () {
     const p = this.layerPanel;
-    // 在按钮旁展开，限制在顶栏与手机详情抽屉之间。
+    // 在按钮旁展开；同时检查图例、草案、工具栏、教程及手机安全视区。
     const z = CM.Settings.get('uiScale') || 1, r = this.layerBtn.getBoundingClientRect(), v = this.viewport();
     const root = getComputedStyle(document.documentElement), compact = this.compact();
     const lo = compact ? parseFloat(root.getPropertyValue('--mobile-hud-bottom')) || v.top + 8 : v.top + 8;
     const hi = compact ? parseFloat(root.getPropertyValue('--mobile-side-bottom')) || v.bottom : v.bottom;
-    p.style.left = (U.clamp(r.right + 10, v.left + 8, v.right - p.offsetWidth * z - 8) / z) + 'px';
-    const hh = p.offsetHeight * z;
-    p.style.top = (U.clamp(r.top, lo, Math.max(lo, hi - hh - 8)) / z) + 'px';
+    p.style.maxWidth = Math.max(1, (v.w - 16) / z) + 'px';
+    p.style.maxHeight = Math.max(1, (hi - lo - 8) / z) + 'px';
+    const hh = p.offsetHeight * z, ww = p.offsetWidth * z;
+    const obstacles = [this.legendCard, this.draftbar, this.toolopts, this.toolbar, this.right, document.getElementById('coach')].filter(function (el) {
+      return el && !el.classList.contains('hidden') && !el.classList.contains('closed') && getComputedStyle(el).display !== 'none' && getComputedStyle(el).visibility !== 'hidden';
+    }).map(function (el) { return el.getBoundingClientRect(); }).filter(function (b) { return b.width && b.height; });
+    const xs = [r.right + 10, v.right - ww - 8, v.left + 8], ys = [r.top].concat(obstacles.map(b => b.bottom + 8), obstacles.map(b => b.top - hh - 8), [lo, hi - hh - 8]);
+    let best = null;
+    for (const x of xs) for (const y of ys) {
+      const left = U.clamp(x, v.left + 8, Math.max(v.left + 8, v.right - ww - 8)), top = U.clamp(y, lo, Math.max(lo, hi - hh - 8));
+      const overlap = obstacles.reduce(function (sum, b) { return sum + Math.max(0, Math.min(left + ww + 6, b.right) - Math.max(left - 6, b.left)) * Math.max(0, Math.min(top + hh + 6, b.bottom) - Math.max(top - 6, b.top)); }, 0);
+      const score = overlap * 1000 + Math.abs(left - r.right - 10) + Math.abs(top - r.top);
+      if (!best || score < best.score) best = { left, top, score };
+    }
+    p.style.left = (best.left / z) + 'px'; p.style.top = (best.top / z) + 'px';
   };
   UI.prototype.syncMetricLayer = function (key) {
     const p = key && this.pills[key], want = p && p.layer ? p.layer : null, a = this._autoLayer;
@@ -1281,7 +1537,26 @@
     switch (id) {
       case 'pop': grad(['#ffe296', '#f99e4c', '#de5434'], '0', '6 万人/km²'); note = '每个街区的常住人口密度（每月更新）。'; break;
       case 'jobs': li('#f0963c', '以住宅为主'); li('#9aa0b0', '职住混合'); li('#3468d6', '以就业岗位为主'); note = '颜色越深，人口与岗位越密集。'; break;
-      case 'cong': opts('cong', [['now', '当前时刻'], ['am', '工作日早高峰']]); li(CC[0], AX.enabled() ? '畅通 · 实线' : '畅通', 'line'); li(CC[1], AX.enabled() ? '缓行 · 长虚线' : '缓行', 'line'); li(CC[2], AX.enabled() ? '拥堵 · 点线' : '拥堵', 'line'); li(CC[3], AX.enabled() ? '严重拥堵 · 点划线' : '严重拥堵', 'line'); note = '颜色按实际行驶时间 ÷ 自由流时间：<1.15 畅通，1.15–1.35 缓行，1.35–1.60 拥堵，≥1.60 严重拥堵；显示较拥堵方向。全城平均与单条道路分别统计。'; break;
+      case 'cong': {
+        // v2.3 重新设计：「拥堵程度」看当前时刻或工作日早高峰；「拥堵变化」与对比基准（最近一次新增车站的建设前、一年前）相比
+        const g = self.g(), v = R.layerOpt.cong || 'now', diff = v === 'build' || v === 'year';
+        const seg = function (list, cur, set) { const ctl = h('div', { class: 'seg-ctl sm', style: { margin: '2px 0 8px' } }); for (const o of list) ctl.appendChild(h('button', { class: cur === o[0] ? 'on' : '', 'data-silent': '1', onclick: function () { set(o[0]); snd('soft'); self.renderDock(); } }, o[1])); box.appendChild(ctl); };
+        seg([['lvl', '拥堵程度'], ['diff', '拥堵变化']], diff ? 'diff' : 'lvl', function (k) { if (k === (diff ? 'diff' : 'lvl')) return; if (k === 'diff') { R._congL = v; R.layerOpt.cong = R._congD || 'build'; } else { R._congD = v; R.layerOpt.cong = R._congL || 'am'; } });
+        if (diff) {
+          seg([['build', '建设以来'], ['year', '一年来']], v, function (k) { R.layerOpt.cong = k; });
+          const ref = g && g.congRefFor ? g.congRefFor(v) : null, DC = CM.Renderer.DIFF_COLS();
+          if (ref) {
+            li(DC[0], '明显缓解', 'line'); li(DC[1], '有所缓解', 'line'); li(DC[2], '基本不变', 'line'); li(DC[3], '有所加重', 'line'); li(DC[4], '明显加重', 'line');
+            box.appendChild(h('div', { class: 'tiny muted', style: { margin: '6px 0 2px' } }, '对比：' + Math.floor(ref.ym / 12) + ' 年 ' + (ref.ym % 12 + 1) + ' 月' + (v === 'build' && ref.label ? '（' + ref.label + (ref.label === '手动设定' ? '' : ' 建设前') + '）' : '')));
+          } else box.appendChild(h('div', { class: 'tiny muted', style: { margin: '2px 0 6px' } }, v === 'build' ? '还没有对比基准：确认一次新增车站的建设后开始记录。地图暂按早高峰拥堵程度显示。' : '年度基准在交通计算完成后记录，每年 1 月更新。地图暂按早高峰拥堵程度显示。'));
+          if (g && g.compiled.routes.length) { const hm = g.model.habitMean(); box.appendChild(h('div', { class: 'lg-habit', 'data-tip': '按人口平均：车站开通后约 4 年，周边居民的出行习惯逐步转向地铁' }, h('span', null, '车站周边出行习惯'), h('i', null, h('em', { style: { width: Math.round(hm * 100) + '%' } })), h('b', null, U.fmtPct(hm, 0)))); }
+          if (g) box.appendChild(h('button', { class: 'btn sm ghost', style: { marginTop: '6px' }, onclick: function () { const sn = g.congSnapshot(); if (!sn) { self.toast('交通数据正在更新，稍后再试', 'info'); return; } sn.label = '手动设定'; (g.congRef || (g.congRef = {})).build = sn; R.layerOpt.cong = 'build'; self.markUnsaved(); self.renderDock(); self.toast('已把现在设为拥堵变化的对比基准', 'good'); } }, ic('flag', 13), '从现在开始对比'));
+          note = '比较工作日早高峰各主要道路的拥堵比（行驶时间 ÷ 自由流时间）：下降 0.03 以上为缓解，0.12 以上为明显缓解。地铁开通后，周边居民的出行习惯在约 4 年内逐步转向地铁、少开车，沿线道路会持续慢慢缓解；城市增长、新区开放也会让一些道路变堵。';
+          break;
+        }
+        seg([['now', '当前时刻'], ['am', '工作日早高峰']], v, function (k) { R.layerOpt.cong = k; });
+        li(CC[0], AX.enabled() ? '畅通 · 实线' : '畅通', 'line'); li(CC[1], AX.enabled() ? '缓行 · 长虚线' : '缓行', 'line'); li(CC[2], AX.enabled() ? '拥堵 · 点线' : '拥堵', 'line'); li(CC[3], AX.enabled() ? '严重拥堵 · 点划线' : '严重拥堵', 'line'); note = '颜色按实际行驶时间 ÷ 自由流时间：<1.15 畅通，1.15–1.35 缓行，1.35–1.60 拥堵，≥1.60 严重拥堵；显示较拥堵方向。可切换工作日早高峰，与任务和建设效果使用同一口径；「拥堵变化」显示地铁开通以来道路的缓解。'; break;
+      }
       case 'flow': opts('flow', [['all', '全部'], ['car', CM.DATA.bg ? '非地铁' : '汽车'], ['metro', '地铁']]); if (R.layerOpt.flow === 'all') { li('#80869a', CM.DATA.bg ? '非地铁出行' : '汽车出行', 'line'); li('#2166cc', '其中乘地铁（箭头中间的蓝色部分）', 'line'); } note = '每个片区当前时段最主要的出行方向（第二方向接近时也画出）：箭头从片区指向目的地，尖端标出目的地名称；两个片区互为主要方向时画成双向箭头。线越粗出行越多，新区域开放、修建地铁后会随之变化。'; break;
       case 'cover': opts('cover', [['time', '步行时间'], ['station', '所属车站']]);
         if (R.layerOpt.cover === 'station') { li('rgba(20,162,82,0.5)', '每个颜色块为步行最近的车站（细线为分界）'); li('#d73027', '人口密集但无地铁'); }
@@ -1302,12 +1577,66 @@
         note = (CM.DATA.bg ? "片区颜色为普通设施（中小学、社区商业、诊所、街区公园等）按片区汇总的吸引出行；重要设施单独计算，点击圆点查看详情。设施位置与年份为史实参考，规模为估算，到访量为模拟结果（道路、背景交通及地铁出行）。" : '片区颜色为普通设施（中小学、社区商业、诊所、街区公园等）按片区汇总的吸引出行；重要设施单独计算，点击圆点查看详情。设施位置与年份为史实参考，规模为估算，到访量为模拟结果（汽车 + 地铁出行，不含步行）。');
         break;
       }
+      case 'dev': {
+        opts('devK', [['pop', '人口'], ['jobs', '岗位'], ['land', '新用地'], ['pull', '地铁带动']]);
+        // 地铁带动（v2.3）：车站对周边增长的吸引与线网成熟度（成熟度越高，增长越多地跟着车站与枢纽走）
+        if (R.layerOpt.devK === 'pull') {
+          const g = self.g(), P = g && g.metroPull ? g.metroPull() : null;
+          grad(['#e2d6fa', '#966ce2', '#5c28aa'], '吸引较弱', '枢纽与商业开发');
+          if (P) {
+            box.appendChild(h('div', { class: 'lg-habit', 'data-tip': '按地铁步行覆盖的人口比例：覆盖 8% 起步，45% 达到满值' }, h('span', null, '线网成熟度'), h('i', null, h('em', { style: { width: Math.round(P.M * 100) + '%', background: '#7a44c8' } })), h('b', null, U.fmtPct(P.M, 0))));
+            box.appendChild(h('div', { class: 'tiny muted', style: { margin: '6px 0 2px' } }, '新增人口与岗位里，车站带动的权重约为 ×' + U.fmtNum(P.w, 2) + '（线网成熟后为 ×1）'));
+          } else box.appendChild(h('div', { class: 'tiny muted', style: { margin: '4px 0 2px' } }, '还没有运营中的车站。'));
+          note = '每座运营车站吸引周边约 1 km 的新增人口与岗位：换乘线路越多、客流越大、车站商业开发等级越高，吸引越强；车站开通后约 4 年逐步形成。线网越成熟（地铁覆盖的人口越多），城市增长越多地跟着车站走，历史阶段预设的重点片区影响越弱——先把地铁修过去、做好车站开发，人口与岗位会随之聚集。全城增长总量不变，只改变落在哪里。';
+          break;
+        }
+        opts('devB', [['era', '本阶段以来'], ['start', '本局以来']]);
+        const g = self.g(), base = g && (R.layerOpt.devB === 'start' ? g.startBase : g.eraBase), land = R.layerOpt.devK === 'land';
+        const ramp = { pop: ['#c8ecd2', '#48b278', '#147846'], jobs: ['#c4d6fa', '#5c84e6', '#2846be'], land: ['#fae2aa', '#e2a03c', '#b06014'] }[R.layerOpt.devK];
+        // v2.3：色标随实际变化自适应；还没有变化时显示本阶段的重点发展片区（斜纹）
+        const sc = R.devScale && R.devScale.key === R.layerOpt.devK ? R.devScale : null, months = g && base ? g.ym() - U.ymIndex(base.y, base.m) : 0;
+        const amt = function (v) { return land ? U.fmtNum(v, 2) + ' km²' : U.fmtPeople(v); };
+        if (sc && !sc.any) {
+          grad(ramp, '规划倾向较弱', '本阶段重点发展');
+          note = '对比基准' + (months > 0 ? '只有 ' + months + ' 个月' : '刚刚建立') + '，城市还没有明显变化。斜纹标出本阶段' + (land ? '' : (R.layerOpt.devK === 'jobs' ? '就业' : '人口')) + '重点增长的片区；推进几个月后，这里会显示实际的增减。';
+          if (g && base && R.layerOpt.devB === 'era' && g.startBase && U.ymIndex(g.startBase.y, g.startBase.m) < U.ymIndex(base.y, base.m)) note += ' 也可以切换到「本局以来」。';
+        } else {
+          grad(ramp, '增加 ' + amt(sc ? sc.min : (land ? 0.05 : 300)), '增加 ' + amt(sc ? sc.full : (land ? 1 : 3000)) + ' 以上');
+          li('#c83232', '减少（疏解、外迁或拆除）');
+          note = base ? '对比：' + base.y + ' 年 ' + base.m + ' 月' + (R.layerOpt.devB === 'start' ? '（本局开始）' : '（' + ((CM.Eras.byId(base.id) || {}).name || '本阶段') + '开始）') + (base.joined ? '，旧存档从读档时开始比较' : '') + '。以约 1 km 的方块统计、平滑显示，地图上标出变化最大的片区；色标随变化幅度自动调整。' : '尚无对比基准。';
+        }
+        break;
+      }
+      case 'commute': {
+        const sc = (R.rateScales && R.rateScales.commute) || { lo: 15, hi: 45 };
+        grad(['#40aa78', '#f5c850', '#cd3232'], sc.lo + ' 分钟以内', sc.hi + ' 分钟以上');
+        const dw = self.g() && self.g().model.dailyWk;
+        note = '工作日早高峰，住在该片区的人从家到工作地点的门到门时间（含步行、候车、换乘、停车）' + (dw && dw.commute ? '。全市平均 ' + U.fmtNum(dw.commute, 1) + ' 分钟' : '') + '。';
+        break;
+      }
+      case 'mshare': opts('shareDt', [['wd', '工作日'], ['we', '周末']]);
+        grad(['#d6e8f5', '#5aa0dc', '#14469f'], '很少', U.fmtPct(R.rateScales && R.rateScales.mshare ? R.rateScales.mshare.hi : 0.2, 0) + ' 以上');
+        note = '该片区居民全天的出行中乘地铁的比例；浅色片区是地铁还有潜力的地方。';
+        break;
+      case 'tod':
+        li('#c9971c', '已开发：数字为等级，圈越大每月净收益越高');
+        li('#d63031', '已开发但每月净亏损');
+        li('#2fa36b', '尚未开发、开发后能盈利：圈越大收益越高', 'ring');
+        li('#78808c', '尚未开发、开发后暂不盈利', 'ring');
+        note = '车站接入运营线路后才会显示。点击车站，在详情中开发或升级商业空间。';
+        break;
       case 'gap': opts('gapDt', [['wd', '工作日'], ['we', '周末']]);
         li('#c62828', '出行多，但步行 15 分钟内没有地铁站'); li('#ef8a3a', '已有地铁，但车站或区间高峰超载'); li('#7a1f1f', '重要设施：步行 15 分钟内没有地铁站', 'ring');
         note = '缺口 = 片区出发与到达的出行量 ×（1 − 地铁步行覆盖比例），按面积折算；颜色越深缺口越大。超载按高峰小时计。';
         break;
     }
-    box.appendChild(h('div', { class: 'note', style: { marginTop: '6px' } }, note));
+    // v2.3 精简：色标与选项常显，较长的说明收进可折叠的「说明」（按图层记住展开状态）
+    if (note && note.length > 36) {
+      const key = 'lg-' + id, det = h('details', { class: 'lg-more' }, h('summary', null, ic('info', 13), '说明'), h('div', { class: 'note' }, note));
+      if (self.open[key]) det.open = true;
+      det.addEventListener('toggle', function () { self.open[key] = det.open; });
+      box.appendChild(det);
+    } else if (note) box.appendChild(h('div', { class: 'note', style: { marginTop: '6px' } }, note));
     return box;
   };
 
@@ -1332,6 +1661,8 @@
   };
   UI.prototype.openPage = function (kind, id, opts) {
     opts = opts || {};
+    // 居民满意度详情（v2.3）融入「地铁圈」App 的满意度视图，不再从右侧面板打开
+    if (kind === 'metric' && id === 'sat' && this.openVoicesApp) { this.openVoicesApp('sat'); return; }
     const top = this.stack[this.stack.length - 1];
     if (top && top.kind === kind && top.id === id && !this.right.classList.contains('closed')) { if (opts.toggle) this.closePanel(); else this.renderPage(false); return; }
     if (opts.replaceTop && top) this.stack[this.stack.length - 1] = { kind: kind, id: id };
@@ -1358,7 +1689,7 @@
     this.syncMetricLayer(null);
     this.placeFeed();
   };
-  UI.prototype.rerenderPage = function () { if (this.stack.length) this.renderPage(false); };
+  UI.prototype.rerenderPage = function () { if (this.stack.length) this.renderPage(false); if(this.opsApp)this.opsApp.refresh(); };
   UI.prototype.refreshBuild = function () {
     const top = this.stack[this.stack.length - 1];
     if (top && top.kind === 'build') this.renderPage(false);
@@ -1377,7 +1708,7 @@
     this.pageDailyStale = !!this.g().model.dailyStale;
     const scroll = anim ? 0 : this.rBody.scrollTop;
     let page;
-    try { page = this['page_' + top.kind](top.id); }
+    try { const g = this.g(); page = M.withSegIndex([g.net, g.draft && g.draft.net], () => this['page_' + top.kind](top.id)); }
     catch (e) { console.error(e); page = { title: '详情', el: h('div', { class: 'callout bad' }, '无法显示：' + e.message) }; }
     if (!page) { this.back(); return; }
     // 标题直接改名（v2.1 第二轮）：车站、线路详情点标题即可改名；线路的彩色徽标点一下改颜色。
@@ -1519,25 +1850,37 @@
   UI.prototype.toggleMulti = function (kind, id) {
     if (!this.multi) {
       this.multi = { stations: new Set(), segs: new Set() };
-      // 已选中的单个对象作为多选的第一项
-      const s = this.selection;
+      // 已选中的单个对象作为多选的第一项（拆除工具除外：只拆玩家这次点到的）
+      const s = this.tools && this.tools.tool === 'demolish' ? null : this.selection;
       if (s && s.kind === 'station') this.multi.stations.add(s.id);
       if (s && s.kind === 'seg') this.multi.segs.add(s.id);
     }
     const set = kind === 'station' ? this.multi.stations : this.multi.segs;
     if (set.has(id)) set.delete(id); else set.add(id);
     snd('soft');
+    this.showMulti();
+  };
+  // 框选：把一批对象加入多选
+  UI.prototype.addMulti = function (stations, segs) {
+    if (!this.multi) this.multi = { stations: new Set(), segs: new Set() };
+    for (const id of stations) this.multi.stations.add(id);
+    for (const id of segs) this.multi.segs.add(id);
+    snd('soft');
+    this.showMulti();
+  };
+  UI.prototype.showMulti = function () {
     this.pruneMulti();
     if (this.multi) { if (this.topIs(['multi'])) this.renderPage(false); else this.openPage('multi', null, { replaceTop: this.topIs(['station', 'line', 'road', 'zone', 'facility']) }); }
+    this.renderToolOpts();
   };
   UI.prototype.pruneMulti = function () {
     const g = this.g(), mu = this.multi; if (!mu || !g) return;
     const net = g.draft ? g.draft.net : g.net;
     mu.stations.forEach(function (id) { if (!net.stations[id]) mu.stations.delete(id); });
     mu.segs.forEach(function (id) { if (!net.segments[id]) mu.segs.delete(id); });
-    if (!mu.stations.size && !mu.segs.size) { this.multi = null; if (this.topIs(['multi'])) this.back(); }
+    if (!mu.stations.size && !mu.segs.size) { this.multi = null; if (this.topIs(['multi'])) this.back(); this.renderToolOpts(); }
   };
-  UI.prototype.clearMulti = function () { this.multi = null; if (this.topIs(['multi'])) this.back(); };
+  UI.prototype.clearMulti = function () { this.multi = null; if (this.topIs(['multi'])) this.back(); this.renderToolOpts(); };
   UI.prototype.topIs = function (kinds) { const t = this.stack[this.stack.length - 1]; return !!t && kinds.indexOf(t.kind) >= 0; };
   UI.prototype.flyTo = function (x, y, z) { this.R.flyTo(x, y, z || Math.max(this.R.cam.zoom, 22)); };
 
@@ -1620,14 +1963,19 @@
     wrap.appendChild(this.callout('bad', 'error', h('span', null, h('b', null, '有 ' + ev.conflicts.length + ' 处冲突，需解决后才能确认建设。'), h('br'), '地图上的红色编号图钉标出了每处冲突的位置，相关轨道或车站以红色高亮。')));
     const list = h('div', { class: 'cf-list' });
     for (const c of ev.conflicts) {
-      const fixes = h('div', { class: 'cf-fix' });
+      const fixes = h('div', { class: 'cf-fix' }), gd = this.tools && this.tools.guideFor ? this.tools.guideFor(c) : null;
       fixes.appendChild(h('button', { class: 'btn sm', onclick: function (e) { e.stopPropagation(); self.hoverConflict = c.n; self.flyTo(c.x, c.y, Math.max(self.R.cam.zoom, 22)); } }, ic('locate'), '定位'));
-      for (const f of (c.fixes || [])) fixes.appendChild(h('button', { class: 'btn sm' + (f.op === 'segType' || f.op === 'splitBranch' || f.op === 'normalize' || f.op === 'removeBend' ? ' primary' : ''), onclick: function (e) { e.stopPropagation(); self.applyFix(f); } }, f.label));
+      // 试算得到的具体调整（v2.3）：一键按建议移动转弯点或车站
+      // 支线把既有线路的站台方向拉偏时（v2.4），「保持原站台方向」优先于移动受影响区段的转弯点
+      const keepDir = (c.fixes || []).some(function (f) { return f.op === 'platDir'; });
+      if (gd && gd.fix) fixes.appendChild(h('button', { class: 'btn sm' + (keepDir ? '' : ' primary'), onclick: function (e) { e.stopPropagation(); self.applyFix(gd.fix); } }, ic('sparkle', 14), gd.fix.label));
+      for (const f of (c.fixes || [])) fixes.appendChild(h('button', { class: 'btn sm' + (f.op === 'platDir' || (!(gd && gd.fix) && (f.op === 'segType' || f.op === 'splitBranch' || f.op === 'normalize' || f.op === 'removeBend')) ? ' primary' : ''), onclick: function (e) { e.stopPropagation(); self.applyFix(f); } }, f.label));
       const card = h('div', { class: 'cf-card' + (self.hoverConflict === c.n ? ' on' : ''),
         onmouseenter: function () { self.hoverConflict = c.n; },
         onmouseleave: function () { if (self.hoverConflict === c.n) self.hoverConflict = null; },
         onclick: function () { self.hoverConflict = c.n; self.flyTo(c.x, c.y, Math.max(self.R.cam.zoom, 20)); } },
         h('div', { class: 'cf-top' }, h('span', { class: 'cf-num' }, String(c.n)), h('div', { class: 'cf-msg' }, c.msg)),
+        gd && gd.text ? h('div', { class: 'cf-guide' }, ic('target', 14), h('span', null, gd.text)) : null,
         c.how ? h('div', { class: 'cf-how' }, h('b', null, '怎么解决：'), c.how) : null,
         fixes);
       list.appendChild(card);
@@ -1659,6 +2007,7 @@
       g ? item('book', '新手指南', function () { self.openPage('guide', null, { root: true }); }) : null,
       item('help', '操作说明', function () { self.openPage('help', null, { root: true }); }),
       item('megaphone', '更新公告', function () { self.showNews(); }),
+      g ? item(CM.Settings.get('immersive') ? 'eye' : 'eyeOff', CM.Settings.get('immersive') ? '显示界面' : '沉浸模式', function () { self.toggleImmersive(); }, CM.Keys.hint('ui.hideUI')) : null,
       // 窄屏（手机）顶栏收起了深浅模式与设置按钮，在菜单里提供
       narrowItem(document.documentElement.dataset.theme === 'dark' ? 'sun' : 'moon', document.documentElement.dataset.theme === 'dark' ? '浅色模式' : '深色模式', function () { self.toggleTheme(); }),
       narrowItem('gear', '设置', function () { self.showSettings(); }),
@@ -1720,6 +2069,9 @@
     if (dk) x0 = dk.right + 8;
     if (tp) y0 = tp.bottom + 8;
     if (tb && tb.top > this.R.h * 0.5) y1 = tb.top - 8;
+    const bs = box('buildStack'), co = box('coach');
+    if (bs && bs.top > this.R.h * 0.4) y1 = Math.min(y1, bs.top - 8);
+    if (co && co.left < this.R.w * 0.3 && co.right < this.R.w * 0.45) x0 = Math.max(x0, co.right + 8);
     return { x0: x0, y0: y0, x1: x1, y1: y1 };
   };
   // 飞到一个范围并让它落在可见区域中央（略偏下，给上方的名称标签留位置）
@@ -1831,7 +2183,7 @@
     };
     const mark = function () { Array.prototype.forEach.call(list.querySelectorAll('.srch-item'), function (el, k) { el.classList.toggle('on', k === cur); }); };
     const render = function () {
-      const q = input.value.trim().toLowerCase(), all = entries();
+      const q = input.value.trim().toLowerCase(), all = M.withSegIndex([g.net, g.draft && g.draft.net], entries);
       list.innerHTML = ''; items = []; cur = 0;
       if (!q) {
         const fav = [];
@@ -1891,7 +2243,9 @@
       sc.className = (cls || '') + ' scr-in-' + tr;
       sc.appendChild(old); sc.appendChild(card);
       clearTimeout(this._scrT);
-      this._scrT = setTimeout(function () { old.remove(); sc.classList.remove('scr-in-' + tr); }, 420);
+      // 只移走旧界面；scr-in-* 类保留到下一次换界面（v2.3）：以前过渡结束时摘掉它，标题与菜单的入场动画名随之改变、
+      // 浏览器会把动画从头再播一遍，返回主菜单时整块内容先消失再浮现（闪一下）
+      this._scrT = setTimeout(function () { old.remove(); }, 420);
     } else {
       for (const n of kids) n.remove();
       sc.className = cls || '';
@@ -1998,7 +2352,9 @@
           row('label', '界面语言', seg('language', [['zh-CN', '简体中文'], ['zh-TW', '繁体中文'], ['en', 'English']]), '切换后立即生效，下次启动保留此选择'),
           row('sun', '主题', seg('theme', [['light', '浅色', 'sun'], ['dark', '深色', 'moon'], ['auto', '跟随系统']], function () { self.renderThemeBtns(); })),
           row('expand', '界面大小', seg('uiScale', [[0.9, '小'], [1, '标准'], [1.15, '大']])),
+          row('eyeOff', '沉浸模式', toggle('immersive'), '城市中隐藏全部界面，只看画面' + (CM.Keys.hint('ui.hideUI') ? '（' + CM.Keys.hint('ui.hideUI') + ' 切换）' : '')),
           group('地图'),
+          row('view3d', '画质', seg('gfx', [['auto', '自动'], ['standard', '标准'], ['high', '高质量']]), '自动：按画面负载调整细节。标准：减少远景细节和动画，优先流畅。高质量：保留更多细节，优先画面。'),
           row('label', '地图标注', seg('labels', [['all', '全部'], ['stations', '仅车站'], ['none', '关闭']])),
           row('car', '车辆与行人', toggle('agents'), '关闭后交通模拟照常进行，只是不显示运动的车辆和行人'),
           group('辅助功能'),
@@ -2187,7 +2543,8 @@
   // 开始游戏 → 选择地图：每张地图可开始新游戏（选择模式）、继续该地图最近的进度，或读取该地图的存档
   UI.prototype.showNewGame = function () { this.showMapSelect(); };
   // mapId：只显示该地图的进度（从地图选择页进入时）
-  UI.prototype.showSaveManager = function (inGame, mapId) {
+  // onBack（v2.5）：返回时回到打开它的界面（如世界地图办公桌上的档案盒）
+  UI.prototype.showSaveManager = function (inGame, mapId, onBack) {
     const self = this;
     const fileIn = h('input', { type: 'file', accept: '.json,.cmsave,application/json', style: { display: 'none' }, onchange: function (e) { const f = e.target.files[0]; if (f) self.importFile(f, true); e.target.value = ''; } });
     const list = h('div');
@@ -2265,7 +2622,7 @@
     };
     draw();
     this.screenRefresh = draw;
-    const back = function () { if (inGame) self.closeScreen(); else if (mapId) self.showMapSelect(mapId); else self.showStart(); };
+    const back = function () { if (onBack) onBack(); else if (inGame) self.closeScreen(); else if (mapId) self.showMapSelect(mapId); else self.showStart(); };
     const card = h('div', { class: 'card wide' }, this.cardHead('folder', 'b-blue', '读取存档' + (mapId && CM.MAPS[mapId] ? ' · ' + CM.MAPS[mapId].name : '')),
       h('div', { class: 'note' }, '存档保存在当前浏览器、当前网址的站点数据中。每个进度相互独立；自动保存使用两个轮换槽位，手动存档最多 ' + CFG.saves.maxManual + ' 个。导入存档会新增槽位；同一进度已存在时创建独立副本。更换网址、浏览器或设备前请先导出备份。'),
       list, fileIn,
@@ -2296,27 +2653,47 @@
       return r;
     }).catch(function (e) { self.toast('导出失败：' + e.message, 'bad'); return { error: e.message }; });
   };
+  UI.prototype.showLoadError = function (e, slotId) {
+    const self = this;
+    this._slotLoadRequest = null; snd('error');
+    const message = e && e.message || '存档数据未能在当前版本中恢复。';
+    this.openScreen(h('div', { class: 'card' }, this.cardHead('error', 'b-red', '无法载入'), this.callout('bad', 'error', message),
+      h('div', { class: 'note' }, '原存档与当前进度已保留。若旧档持续无法载入，可先导出备份，再选择其他存档或新建游戏。'),
+      h('div', { class: 'modal-actions' },
+        slotId ? h('button', { class: 'btn', onclick: function () { self.exportSlot(slotId); } }, '导出原存档') : null,
+        h('button', { class: 'btn', onclick: function () { self.showSaveManager(!!self.g()); } }, '其他存档'),
+        h('button', { class: 'btn', onclick: function () { self.backToMenu(function () { self.showMapSelect(); }); } }, '新建游戏'),
+        h('button', { class: 'btn primary', onclick: function () { if (self.g()) self.closeScreen(); else self.showStart(); } }, '返回'))));
+  };
   UI.prototype.loadSlot = function (slotId) {
     const self = this, request = this._slotLoadRequest = {};
     this.showLoading('正在读取存档…', 'load', CM.Save.slotInfo(slotId)?.map);
-    CM.Save.load(slotId).then(function (data) { if (self._slotLoadRequest === request) CM.loadGame(data); }, function (e) {
+    CM.Save.load(slotId).then(function (data) { if (self._slotLoadRequest === request) { self._loadingSlotId = slotId; CM.loadGame(data); } }, function (e) {
       if (self._slotLoadRequest !== request) return; self._slotLoadRequest = null;
-      snd('error');
-      self.openScreen(h('div', { class: 'card' }, self.cardHead('error', 'b-red', '无法载入'), self.callout('bad', 'error', e.message), h('div', { class: 'note' }, '原有存档与当前进度未受影响。可先导出原存档用于备份或恢复检查。'), h('div', { class: 'modal-actions' }, h('button', { class: 'btn', onclick: function () { self.exportSlot(slotId); } }, '导出原存档'), h('button', { class: 'btn primary', onclick: function () { if (self.g()) self.closeScreen(); else self.showStart(); } }, '确定'))));
+      self.showLoadError(e, slotId);
     });
   };
   // 返回主菜单：先确认最新状态已成功保存；保存失败时保留当前游戏
   // after：返回后要打开的界面（默认主菜单）
+  // 短暂的忙碌遮罩（透明，挡住点击）：保存等很快完成的操作不弹出卡片（v2.3）
+  UI.prototype.showBusy = function (on) {
+    if (!this._busy) { this._busy = h('div', { id: 'busyBlock', 'aria-hidden': 'true' }); document.body.appendChild(this._busy); }
+    this._busy.classList.toggle('on', !!on);
+  };
   UI.prototype.backToMenu = function (after) {
     const self = this;
     const g = this.g();
-    const go = function () { CM.endGame(); if (typeof after === 'function') after(); else self.showStart(); };
+    // 回主菜单（v2.3）：开始界面整体淡入，标题与按钮不再逐个重新弹出
+    const go = function () { CM.endGame(); if (typeof after === 'function') after(); else self.showStart(null, true); };
     if (!g) { go(); return; }
     const leave = function () {
       if (g.speed > 0) self.setSpeed(0);   // 先暂停，保证保存的就是离开时的状态
       if (self.isSaved()) { go(); return; }
-      self.showLoading('正在保存当前进度…');
+      // 保存很快时不弹出保存卡片（以前会一闪而过）；超过 0.35 秒才显示
+      self.showBusy && self.showBusy(true);
+      const slow = setTimeout(function () { if (self.g() === g) self.showLoading('正在保存当前进度…'); }, 350);
       self.doAutosave(true).then(function (r) {
+        clearTimeout(slow); self.showBusy && self.showBusy(false);
         if (self.g() !== g) return;
         if (r && r.ok && self.isSaved()) { go(); return; }
         snd('error');

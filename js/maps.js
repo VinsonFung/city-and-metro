@@ -4,7 +4,7 @@
 (function (CM) {
   const CFG = CM.CFG, U = CM.U;
   // 随地图切换的配置项：格网、起始日期、人口增长、货币与价格基年、建设与运营成本、票价、财政、城市经济、出行选择与道路参数
-  const CFG_KEYS = ['W', 'H', 'START', 'growth', 'money', 'econBase', 'cost', 'ops', 'fareDefault', 'fareRange', 'economy', 'macro', 'choice', 'road', 'workWeek'];
+  const CFG_KEYS = ['W', 'H', 'ZONE', 'START', 'growth', 'money', 'econBase', 'cost', 'ops', 'fareDefault', 'fareRange', 'economy', 'macro', 'choice', 'road', 'workWeek'];
   const GZ_CFG = {}; for (const k of CFG_KEYS) GZ_CFG[k] = k === 'START' ? Object.assign({}, CFG.START) : CFG[k];
   // 出行选择参数按「发展阶段对应年份」平移并按本城货币缩放：devOffset 为广州曲线年份减本城年份，money 为本城货币相对广州曲线的倍数
   const shift = function (curve, off, k) { return curve.map(function (p) { return [p[0] - off, p[1] * (k || 1)]; }); };
@@ -37,10 +37,18 @@
     },
   };
   // 其他地图（教程与新增城市）由各自的数据文件登记为 CM.MAP_LIST；未写的配置项沿用广州样本
+  // 交通小区边长（v2.6）：交通计算量随小区数的平方增长。现有地图都是 4 格（约 1 km）；更大的地图没有指定时自动放大，
+  // 让全图小区数保持在同一量级（约 2000 个以内），跳月速度与内存不随地图面积成倍增长。边长须能整除地图宽高
+  const autoZone = function (W, H) {
+    for (const z of [4, 6, 8, 10, 12, 16, 20, 24]) if (W % z === 0 && H % z === 0 && W * H / (z * z) <= 2200) return z;
+    return 4;
+  };
+  CM.autoZone = autoZone;
   for (const m of CM.MAP_LIST || []) {
     const cfg = Object.assign({}, GZ_CFG);
     if (m.econ) Object.assign(cfg, CM.deriveChoice(m.econ.devOffset || 0, m.econ.money || 1));
     Object.assign(cfg, m.cfg);
+    if (m.cfg.ZONE == null) cfg.ZONE = autoZone(cfg.W, cfg.H);
     // 城市经济：只在真实城市启用；没有专门参数的真实地图使用通用参数（'auto'），教程等虚构地图不启用
     cfg.macro = m.kind === 'real' ? (m.cfg.macro || 'auto') : null;
     m.cfg = cfg;
@@ -52,6 +60,24 @@
     m.mapVersion = m.mapVersion || 1;
     m.fp = U.fnv([id, m.cfg.W, m.cfg.H, (G.water || []).length, (G.roads || []).length, (G.names || []).length, (m.data.regions || []).map(function (r) { return r.id; }).join(',')].join('|'));
   }
+  // 位置校正（v2.3 玩家反馈：杭州站位置错位）：部分手填坐标取自国内地图（GCJ-02 坐标系），比 OSM（WGS-84）偏东南 400–600 m。
+  // 铁路车站地标、铁路枢纽设施对齐 OSM 同名火车站（800 m 内）；任务与阶段目标的锚点对齐 OSM 同名地铁站（750 m 内）。
+  // 只按名称精确匹配，与 OSM 已经一致的不变；上海、武汉的数据文件此前已对设施与锚点做过同样的校正
+  (function () {
+    const strip = function (s) { return String(s).replace(/（.*?）/g, '').trim(); };
+    for (const id in MAPS) {
+      const m = MAPS[id]; if (m.kind !== 'real' || !m.geo || !m.geo.places) continue;
+      const byName = [new Map(), new Map()];
+      for (const p of m.geo.places) if (p[3] === 0 || p[3] === 1) { const t = byName[p[3]]; if (!t.has(p[0])) t.set(p[0], []); t.get(p[0]).push(p); }
+      const near = function (names, type, x, y, r) { let best = null; for (const n of names) for (const p of byName[type].get(n) || []) { const d = U.dist(p[1], p[2], x, y); if (d <= r && (!best || d < best.d)) best = { d: d, x: p[1], y: p[2] }; } return best; };
+      const railNames = function (s) { s = strip(s); return [s, s.replace(/火车站$|站$/, ''), s.replace(/站$/, '')]; };
+      for (const lm of m.data.landmarks || []) if (lm.kind === 'rail') { const b = near(railNames(lm.name), 1, lm.x, lm.y, 3.2); if (b && b.d > 0.4) { lm.x = b.x; lm.y = b.y; } }
+      for (const f of m.data.facilities || []) if (f.at && f.t === 'rail') { const b = near(railNames(f.n), 1, f.at[0], f.at[1], 3.6); if (b && b.d > 0.4) f.at = [b.x, b.y]; }
+      const anchors = function (list) { for (const a of list || []) { const b = near([strip(a.name), strip(a.name).replace(/一带$/, '')], 0, a.x, a.y, 3) || near(railNames(a.name), 1, a.x, a.y, 3); if (b && b.d > 0.4) { a.x = b.x; a.y = b.y; } } };
+      for (const t of (m.data.histTasks || []).concat(m.data.dynTasks || [])) anchors(t.anchors);
+      for (const e of m.data.eras || []) for (const t of e.goals || []) anchors(t.anchors);
+    }
+  })();
   // 地图范围扩展的存档迁移（地图版本升级）：spec = { from, dx, dy, oldW, oldH, oldRegionIds, oldLandmarkIds, note }。
   // dx / dy 为新格网中原地图左上角的位置（格，须为交通小区边长 4 的倍数，投影系数不变）。只改解析出的存档副本：
   //  · 城市逐格数据放入新格网对应位置，新增范围标记为待生成（载入时按存档年份生成，见 City.fillNewCells）；
@@ -163,36 +189,99 @@
     return { min: 0, max: Math.max(step * 4, Math.round(R.max * k / step) * step), step: step };
   };
 
-  // 地图缩略图：水系、主要道路与铁路（不切换当前地图，直接解码该地图的数据），按主题配色，结果缓存
-  const thumbs = {};
+  // 地图缩略图：水系、主要道路与铁路（不切换当前地图，直接解码该地图的数据），按主题配色，结果缓存。
+  // v2.4：以前打开选择地图时逐张同步画图并编码（每张数十至数百毫秒，打开列表明显卡一下）。现在画图分成小段（生成器，每段几毫秒），
+  // 编码交给 toBlob 在后台完成；主菜单空闲时预先生成，选图列表拿到就显示
+  const thumbs = {}, pend = {};
+  const drawThumb = function* (id, theme, hd) {
+    const m = MAPS[id];
+    const G = m.geo, dec = CM.Geo.dec, Wc = m.cfg.W, Hc = m.cfg.H;
+    const S = hd ? Math.min(1800 / Wc, 1200 / Hc) : Math.min(640 / Wc, 400 / Hc), cv = document.createElement('canvas');
+    cv.width = Math.round(Wc * S); cv.height = Math.round(Hc * S);
+    // CPU 位图（之后要编码成图片）；分段之间先提交已记录的绘制命令（同 render.js 的 flushCanvas：跨帧分段绘制时 Chromium 可能丢掉整段命令）
+    const c = cv.getContext('2d', { willReadFrequently: true }), dark = theme === 'dark', sync = function () { c.getImageData(0, 0, 1, 1); };
+    c.fillStyle = dark ? '#1b2533' : '#eef3f0'; c.fillRect(0, 0, cv.width, cv.height);
+    c.setTransform(S, 0, 0, S, 0, 0);
+    let n = 0;
+    const poly = function* (rows, col) {
+      c.fillStyle = col; c.beginPath();
+      for (const row of rows) { for (let k = 1; k < row.length; k++) { if (typeof row[k] !== 'string') continue; const p = dec(row[k], 1); c.moveTo(p[0], p[1]); for (let q = 2; q < p.length; q += 2) c.lineTo(p[q], p[q + 1]); } if (++n % 150 === 0) { sync(); yield; } }
+      c.fill('evenodd');
+    };
+    const line = function (p) { c.beginPath(); c.moveTo(p[0], p[1]); for (let q = 2; q < p.length; q += 2) c.lineTo(p[q], p[q + 1]); c.stroke(); };
+    yield* poly(G.woods || [], dark ? '#22362f' : '#dbe9dc');
+    yield* poly(G.reserves || [], dark ? '#2a4238' : '#c9dfcc');
+    yield* poly(G.parks || [], dark ? '#264034' : '#cfe6cf');
+    yield* poly((G.water || []).filter(function (r) { return typeof r[1] !== 'number'; }), dark ? '#2b4f78' : '#a9cdeb');
+    c.lineCap = 'round'; c.lineJoin = 'round';
+    for (const r of G.water || []) if (typeof r[1] === 'number') { c.strokeStyle = dark ? '#2b4f78' : '#a9cdeb'; c.lineWidth = Math.max(r[1], 0.25); line(dec(r[2])); if (++n % 150 === 0) { sync(); yield; } }
+    for (const r of G.rail || []) { if (r[1] & 2) continue; c.strokeStyle = dark ? '#5b6676' : '#9aa3ae'; c.lineWidth = 0.18; line(dec(r[2])); if (++n % 150 === 0) { sync(); yield; } }
+    for (const cls of hd ? [2, 3, 4] : [3, 4]) for (const r of G.roads || []) {
+      if (r[1] !== cls || (r[2] & 6)) continue;
+      c.strokeStyle = dark ? (cls === 4 ? '#b8964a' : cls === 3 ? '#6f7b8c' : '#4f5a68') : (cls === 4 ? '#f0b54a' : cls === 3 ? '#c4ccd6' : '#d6dce3'); c.lineWidth = cls === 4 ? 0.45 : cls === 3 ? 0.3 : 0.2;
+      line(dec(r[3])); if (++n % 150 === 0) { sync(); yield; }
+    }
+    sync();
+    return cv;
+  };
+  const finish = function (it) { let r = it.next(); while (!r.done) r = it.next(); return r.value; };
+  // 同步取得（必须马上有图时；有缓存直接返回）
   CM.mapThumb = function (id, theme) {
     const key = id + ':' + theme;
     if (thumbs[key]) return thumbs[key];
-    const m = MAPS[id]; if (!m) return null;
-    const G = m.geo, dec = CM.Geo.dec, Wc = m.cfg.W, Hc = m.cfg.H;
-    const S = Math.min(640 / Wc, 400 / Hc), cv = document.createElement('canvas');
-    cv.width = Math.round(Wc * S); cv.height = Math.round(Hc * S);
-    const c = cv.getContext('2d'), dark = theme === 'dark';
-    c.fillStyle = dark ? '#1b2533' : '#eef3f0'; c.fillRect(0, 0, cv.width, cv.height);
-    c.setTransform(S, 0, 0, S, 0, 0);
-    const poly = function (rows, col) {
-      c.fillStyle = col; c.beginPath();
-      for (const row of rows) for (let k = 1; k < row.length; k++) { if (typeof row[k] !== 'string') continue; const p = dec(row[k], 1); c.moveTo(p[0], p[1]); for (let q = 2; q < p.length; q += 2) c.lineTo(p[q], p[q + 1]); }
-      c.fill('evenodd');
-    };
-    poly(G.woods || [], dark ? '#22362f' : '#dbe9dc');
-    poly(G.reserves || [], dark ? '#2a4238' : '#c9dfcc');
-    poly(G.parks || [], dark ? '#264034' : '#cfe6cf');
-    poly((G.water || []).filter(function (r) { return typeof r[1] !== 'number'; }), dark ? '#2b4f78' : '#a9cdeb');
-    c.lineCap = 'round'; c.lineJoin = 'round';
-    for (const r of G.water || []) if (typeof r[1] === 'number') { const p = dec(r[2]); c.strokeStyle = dark ? '#2b4f78' : '#a9cdeb'; c.lineWidth = Math.max(r[1], 0.25); c.beginPath(); c.moveTo(p[0], p[1]); for (let q = 2; q < p.length; q += 2) c.lineTo(p[q], p[q + 1]); c.stroke(); }
-    for (const r of G.rail || []) { if (r[1] & 2) continue; const p = dec(r[2]); c.strokeStyle = dark ? '#5b6676' : '#9aa3ae'; c.lineWidth = 0.18; c.beginPath(); c.moveTo(p[0], p[1]); for (let q = 2; q < p.length; q += 2) c.lineTo(p[q], p[q + 1]); c.stroke(); }
-    for (const cls of [3, 4]) for (const r of G.roads || []) {
-      if (r[1] !== cls || (r[2] & 6)) continue;
-      const p = dec(r[3]); c.strokeStyle = dark ? (cls === 4 ? '#b8964a' : '#6f7b8c') : (cls === 4 ? '#f0b54a' : '#c4ccd6'); c.lineWidth = cls === 4 ? 0.45 : 0.3;
-      c.beginPath(); c.moveTo(p[0], p[1]); for (let q = 2; q < p.length; q += 2) c.lineTo(p[q], p[q + 1]); c.stroke();
-    }
-    thumbs[key] = cv.toDataURL('image/png');
+    if (!MAPS[id]) return null;
+    thumbs[key] = finish(drawThumb(id, theme)).toDataURL('image/jpeg', 0.9);
     return thumbs[key];
+  };
+  CM.mapThumbReady = function (id, theme, hd) { return thumbs[id + ':' + theme + (hd ? ':hd' : '')] || null; };
+  // 后台生成：空闲时分段画图，toBlob 编码，结果为对象 URL
+  const idle = window.requestIdleCallback ? function (f) { window.requestIdleCallback(f, { timeout: 400 }); } : function (f) { setTimeout(function () { f({ timeRemaining: function () { return 6; } }); }, 16); };
+  // 画图（不编码）：结果是画布，可直接绘制或后台编码。每段至少做几毫秒——画面持续动画、
+  // 空闲回调只能超时触发时（剩余时间为 0）也照常推进（v2.4 以前此时每 0.4 秒才画一小段，城市画面要等好几秒）
+  const drawn = {}, pendDraw = {};
+  CM.mapThumbDraw = function (id, theme, hd) {
+    const key = id + ':' + theme + (hd ? ':hd' : '');
+    if (drawn[key]) return Promise.resolve(drawn[key]);
+    if (pendDraw[key]) return pendDraw[key];
+    if (!MAPS[id]) return Promise.resolve(null);
+    const it = drawThumb(id, theme, hd);
+    return (pendDraw[key] = new Promise(function (res) {
+      const step = function (dl) {
+        const t0 = performance.now(), budget = dl.didTimeout ? 8 : Math.max(4, dl.timeRemaining() - 1);
+        let r = it.next();
+        while (!r.done && performance.now() - t0 < budget) r = it.next();
+        if (!r.done) { idle(step); return; }
+        drawn[key] = r.value; delete pendDraw[key]; res(r.value);
+      };
+      idle(step);
+    }));
+  };
+  CM.mapThumbAsync = function (id, theme, hd) {
+    const key = id + ':' + theme + (hd ? ':hd' : '');
+    if (thumbs[key]) return Promise.resolve(thumbs[key]);
+    if (pend[key]) return pend[key];
+    if (!MAPS[id]) return Promise.resolve(null);
+    return (pend[key] = CM.mapThumbDraw(id, theme, hd).then(function (cv) {
+      return new Promise(function (res) {
+        // 编码完成后画布不再保留（展示使用对象 URL）
+        const done = function (url) { thumbs[key] = url; delete pend[key]; delete drawn[key]; res(url); };
+        if (cv.toBlob) cv.toBlob(function (b) { done(b ? URL.createObjectURL(b) : cv.toDataURL('image/jpeg', 0.9)); }, 'image/jpeg', 0.9);
+        else done(cv.toDataURL('image/jpeg', 0.9));
+      });
+    }));
+  };
+  // 图片元素先空着，缩略图就绪后淡入（列表、城市海报、简报共用）
+  CM.thumbInto = function (img, id, theme) {
+    const u = CM.mapThumbReady(id, theme);
+    if (u) { img.src = u; return img; }
+    img.classList.add('thumb-wait');
+    CM.mapThumbAsync(id, theme).then(function (url) { if (url) { img.src = url; img.classList.remove('thumb-wait'); } });
+    return img;
+  };
+  // 主菜单空闲时依次预生成全部地图的缩略图
+  CM.prewarmThumbs = function (theme) {
+    const ids = CM.MAP_ORDER.slice(); let i = 0;
+    const next = function () { if (i < ids.length) CM.mapThumbAsync(ids[i++], theme).then(next); };
+    next();
   };
 })(window.CM);

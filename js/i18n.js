@@ -17,7 +17,7 @@
   function initNames(){
     if(namesReady||!CM.MAPS)return;namesReady=true;
     for(const m of Object.values(CM.MAPS)){
-      const list=[...(m.geo.names||[]),...(m.data.landmarks||[]).map(x=>x.name),...(m.data.regions||[]).map(x=>x.name),...(m.data.facilities||[]).map(x=>x.n),...(m.data.districtLabels||[]).map(x=>x[0]),...Object.keys(m.data.roadYears||{}),...Object.keys(m.data.bridgeYears||{}),...(m.data.places||[]).map(x=>Array.isArray(x)?x[0]:x.name)];
+      const list=[...(m.geo.names||[]),...(m.data.landmarks||[]).map(x=>x.name),...(m.data.regions||[]).flatMap(x=>[x.name,...(x.streets||[]),...(x.district||[])]),...(m.data.facilities||[]).flatMap(x=>[x.n,x.label]),...((m.data.bgViz&&m.data.bgViz.ferries)||[]).map(x=>x.name),...(m.data.districtLabels||[]).map(x=>x[0]),...Object.keys(m.data.roadYears||{}),...Object.keys(m.data.bridgeYears||{}),...(m.data.places||[]).map(x=>Array.isArray(x)?x[0]:x.name)];
       if(m.data.defaultRegion)list.push(m.data.defaultRegion.name);
       for(const task of m.data.histTasks||[])for(const anchor of task.anchors||[])list.push(anchor.name);
       for(const raw of list)if(typeof raw==='string')for(const s of new Set([raw,raw.replace(/（.*?）/g,'').trim()]))if(s.length>1&&s.length<80&&!en[s]){
@@ -30,24 +30,35 @@
     for(const [source,target]of Object.entries(en)){if(!source||!hasHan(source))continue;let n=trie;for(const c of source){if(!n.has(c))n.set(c,new Map());n=n.get(c);}n.out=target;}
   }
   function english(s){
-    if(en[s]!==undefined)return en[s];initNames();if(names.has(s)){let v=names.get(s);if(!v){v=nameEnglish(s);names.set(s,v);}return v;}initTrie();
-    if(!templates)templates=Object.entries(en).filter(([k])=>/\{[\w.]+\}/.test(k)).map(([key,target])=>{const keys=[];let last=0,pattern='^';for(const m of key.matchAll(/\{([\w.]+)\}/g)){pattern+=key.slice(last,m.index).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(.+?)';keys.push(m[1]);last=m.index+m[0].length;}pattern+=key.slice(last).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$';return {re:new RegExp(pattern),keys,target};});
+    if(en[s]!==undefined)return en[s];
+    // Leading or trailing spaces (text joined to a following tag or number) must not stop whole-sentence templates from matching.
+    const core=s.trim();if(core&&core!==s)return (/^\s/.test(s)?' ':'')+english(core)+(/\s$/.test(s)?' ':'');
+    initNames();if(names.has(s)){let v=names.get(s);if(!v){v=nameEnglish(s);names.set(s,v);}return v;}initTrie();
+    if(!templates)templates=Object.entries(en).filter(([k])=>/\{[\w.]+\}/.test(k)).map(([key,target])=>{const keys=[];let last=0,pattern='^';for(const m of key.matchAll(/\{([\w.]+)\}/g)){pattern+=key.slice(last,m.index).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(.+?)';keys.push(m[1]);last=m.index+m[0].length;}pattern+=key.slice(last).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$';return {re:new RegExp(pattern),keys,target,weight:key.replace(/\{[\w.]+\}/g,'').length};}).sort((a,b)=>b.weight-a.weight);
     for(const t of templates){const m=t.re.exec(s);if(m)return t.target.replace(/\{([\w.]+)\}/g,(_,k)=>text(m[t.keys.indexOf(k)+1]));}
-    // 数字与币种仅在显示时转换；游戏日志和存档仍由原始格式函数生成。
-    const compact=n=>compactFormat.format(n);
-    s=s.replace(/(-?\d[\d,]*(?:\.\d+)?)\s*(亿|万)?(新台币|新法郎|欧元|法郎|人民币|日元|港币|元)/g,(_,n,scale,unit)=>{
-      const codes={'新台币':'TWD','新法郎':'FRF','法郎':'FRF','欧元':'EUR','人民币':'CNY','日元':'JPY','港币':'HKD'};
-      return compact(Number(n.replace(/,/g,''))*(scale==='亿'?1e8:scale==='万'?1e4:1))+' '+(codes[unit]||(CM.CFG&&CM.CFG.money&&CM.CFG.money.code)||'CNY');
-    }).replace(/(-?\d[\d,]*(?:\.\d+)?)\s*万/g,(_,n)=>compact(Number(n.replace(/,/g,''))*1e4));
-    s=s.replace(/(\d+)\s*号线/g,'Line $1').replace(/(\d+)\s*条线路/g,(_,n)=>n+(+n===1?' line':' lines')).replace(/(\d+)\s*座车站/g,(_,n)=>n+(+n===1?' station':' stations')).replace(/(\d+)\s+站/g,(_,n)=>n+(+n===1?' station':' stations')).replace(/(\d+)\s*项历史任务/g,'$1 historical tasks').replace(/(\d+)\s*个里程碑/g,(_,n)=>n+(+n===1?' milestone':' milestones')).replace(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/g,'$1-$2-$3').replace(/(\d{4})\s*年\s*(\d{1,2})\s*月/g,'$1-$2');
+    // 不先改写整句中的数字，否则会破坏含线路号 / 日期的完整短语。仅在没有更长译文时处理数字前缀。
+    const numbered=function(t){let m;
+      const money=/^(-?\d[\d,]*(?:\.\d+)?)\s*(亿|万)?(新台币|新法郎|欧元|法郎|人民币|日元|港币|元)/.exec(t);
+      if(money){const code={'新台币':'TWD','新法郎':'FRF','法郎':'FRF','欧元':'EUR','人民币':'CNY','日元':'JPY','港币':'HKD'};return[money[0].length,compactFormat.format(Number(money[1].replace(/,/g,''))*(money[2]==='亿'?1e8:money[2]==='万'?1e4:1))+' '+(code[money[3]]||CM.CFG.money.code)];}
+      if(m=/^(-?\d[\d,]*(?:\.\d+)?)\s*万/.exec(t))return[m[0].length,compactFormat.format(Number(m[1].replace(/,/g,''))*1e4)];
+      if(m=/^(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/.exec(t))return[m[0].length,m[1]+'-'+m[2]+'-'+m[3]];
+      if(m=/^(\d{4})\s*年\s*(\d{1,2})\s*月/.exec(t))return[m[0].length,m[1]+'-'+m[2]];
+      if(m=/^(\d+)\s*号线/.exec(t))return[m[0].length,'Line '+m[1]];
+      if(m=/^(\d+)\s*条线路/.exec(t))return[m[0].length,m[1]+(+m[1]===1?' line':' lines')];
+      if(m=/^(\d+)\s*(?:座车站|项历史任务|个里程碑)/.exec(t)){const unit=m[0].includes('车站')?'station':m[0].includes('历史任务')?'historical task':'milestone';return[m[0].length,m[1]+' '+unit+(+m[1]===1?'':'s')];}
+      if(m=/^(\d+)\s+站/.exec(t))return[m[0].length,m[1]+(+m[1]===1?' station':' stations')];
+      return null;
+    };
     // Prefer the longest phrase; a place name inside a translated sentence must not break that sentence.
     let out='',i=0;while(i<s.length){
       let n=trie,end=-1,value='';for(let j=i;j<s.length&&n.has(s[j]);j++){n=n.get(s[j]);if(n.out!==undefined){end=j+1;value=n.out;}}
+      // Fragments that start with a space (" 站", " 列") must not cut off a longer phrase that begins right after the space.
+      if(end>0&&s[i]===' '){let m=trie,e2=-1;for(let j=i+1;j<s.length&&m.has(s[j]);j++){m=m.get(s[j]);if(m.out!==undefined)e2=j+1;}if(e2>end){out+=' ';i++;continue;}}
       for(let len=Math.min(nameLengths.get(s[i])||0,s.length-i);len>Math.max(1,end-i);len--){
         const candidate=s.slice(i,i+len);if(!names.has(candidate))continue;
         value=names.get(candidate);if(!value){value=nameEnglish(candidate);names.set(candidate,value);}end=i+len;break;
       }
-      if(end>=0){out+=' '+value+' ';i=end;}else out+=s[i++];
+      if(end>=0){out+=' '+value+' ';i=end;}else{const n=/[0-9-]/.test(s[i])?numbered(s.slice(i)):null;if(n){out+=' '+n[1]+' ';i+=n[0];}else out+=s[i++];}
     }
     if(hasHan(out)&&missing.size<128)missing.add(s);
     const result=out.replace(/[ \t]+/g,' ').replace(/\s+([.,:;!?%\)\]])/g,'$1').replace(/([\(\[])\s+/g,'$1').replace(/，/g,', ').replace(/。/g,'. ').replace(/：/g,': ').replace(/；/g,'; ').replace(/[「『]/g,'“').replace(/[」』]/g,'”').replace(/（/g,' (').replace(/）/g,') ').trim();
@@ -61,7 +72,7 @@
     const source=sanitize(value.replace(/(?:[A-Za-z]:[\\/]|\\\\)[^\r\n<>"|]*|https?:\/\/[^\s<>"）)]+/g,p=>{const token='\uE000'+protectedParts.length+'\uE001';protectedParts.push(p);return token;}));
     const restore=s=>s.replace(/\uE000(\d+)\uE001/g,(_,i)=>protectedParts[+i]);
     if(language==='zh-CN'||!hasHan(source))return restore(source);
-    if(language==='zh-TW'){if(!traditional)traditional=window.OpenCC.Converter({from:'cn',to:'tw'});result=traditional(source);}else result=english(source);
+    if(language==='zh-TW'){if(!traditional)traditional=window.OpenCC.Converter({from:'cn',to:'tw'});result=traditional(traditional(source));}else result=english(source);
     result=restore(result);
     if(cache.size>12000)cache.delete(cache.keys().next().value);cache.set(key,result);return result;
   }
@@ -79,8 +90,8 @@
     const walker=document.createTreeWalker(root,NodeFilter.SHOW_ELEMENT|NodeFilter.SHOW_TEXT);for(let n=walker.nextNode();n;n=walker.nextNode()){if(n.nodeType===3)node(n);else element(n);}
   }
   function invalidate(){
-    const R=CM.R;if(R){R.clearImages();R.dropThemeStash();R.textWidths.clear();R._rk=null;R.labelImage=null;R.lastLabelKey=null;R.labelSprites.forEach(x=>{x.cv.width=x.cv.height=1;});R.labelSprites.clear();R.labelSpritePx=0;R.overview=null;R.overviewStale=true;R.heatKey='';}
-    if(CM.ui){if(CM.ui.g())CM.ui.updateTop();const coach=document.getElementById('coach');if(coach)document.documentElement.style.setProperty('--coach-h',coach.offsetHeight+'px');CM.ui.layoutHud();}
+    const R=CM.R;if(R){R.clearImages();R.dropThemeStash();R.textWidths.clear();R._rk=null;R.labelImage=null;R.overview=null;R.overviewStale=true;R.heatKey='';}
+    if(CM.ui){if(CM.ui.g())CM.ui.updateTop();CM.ui.layoutHud();if(CM.ui.opsApp)CM.ui.opsApp.refresh();if(CM.ui.voApp)CM.ui.voApp.refresh();}
     if(CM.Stats&&CM.Stats.isOpen())CM.Stats.redraw();if(CM.NetMap)CM.NetMap.refresh(true);
   }
   function apply(next){
@@ -93,7 +104,7 @@
   // Translate newly constructed controls before callers measure or attach them.
   const h=CM.U.h;CM.U.h=function(){const el=h.apply(this,arguments);localize(el);return el;};
   const prototypes=[window.CanvasRenderingContext2D&&window.CanvasRenderingContext2D.prototype,window.OffscreenCanvasRenderingContext2D&&window.OffscreenCanvasRenderingContext2D.prototype];
-  for(const proto of prototypes)if(proto)for(const key of ['fillText','strokeText','measureText']){const base=proto[key];proto[key]=function(value){const args=Array.from(arguments);args[0]=text(String(value));return base.apply(this,args);};}
+  for(const proto of prototypes)if(proto)for(const key of ['fillText','strokeText','measureText']){const base=proto[key];proto[key]=function(value){const args=Array.from(arguments);args[0]=value==null?'':text(String(value));return base.apply(this,args);};}
   // Observe changed nodes only; source text is retained so switching back never translates a translation.
   const observer=new MutationObserver(records=>{observer.disconnect();for(const r of records){if(r.type==='characterData')node(r.target);else if(r.type==='attributes')element(r.target);else for(const n of r.addedNodes)localize(n);}observe();});
   function observe(){observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:attrKeys});}

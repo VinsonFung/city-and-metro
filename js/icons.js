@@ -9,6 +9,7 @@
     // 通用
     menu: S('<path d="M4 7h16M4 12h16M4 17h16"/>'),
     close: S('<path d="M6 6l12 12M18 6L6 18"/>'),
+    chip: S('<rect x="7" y="7" width="10" height="10" rx="2"/><rect x="10.5" y="10.5" width="3" height="3" rx=".6"/><path d="M10 7V4M14 7V4M10 20v-3M14 20v-3M7 10H4M7 14H4M20 10h-3M20 14h-3"/>'),
     back: S('<path d="M15 5l-7 7 7 7"/>'),
     chev: S('<path d="M9 6l6 6-6 6"/>'),
     check: S('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
@@ -28,7 +29,6 @@
     sun: S('<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/>'),
     moon: S('<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>'),
     sound: S('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>'),
-    mute: S('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>'),
     chart: S('<path d="M4 20V4M4 20h16"/><path d="M8 16v-4M12 16V8M16 16v-6"/>'),
     save: S('<path d="M5 4h11l3 3v13H5z"/><path d="M8 4v5h7V4M8 20v-6h8v6"/>'),
     folder: S('<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>'),
@@ -52,12 +52,9 @@
     // 图层
     layers: S('<path d="M12 3.5l9 4.8-9 4.8-9-4.8z"/><path d="M3 12.5l9 4.8 9-4.8"/><path d="M3 16.5l9 4.8 9-4.8"/>'),
     eyeOff: S('<path d="M3 3l18 18"/><path d="M10.6 6.1A9.6 9.6 0 0 1 12 6c5.5 0 9 6 9 6a15.6 15.6 0 0 1-2.6 3.3M6.6 6.6C4.2 8.2 3 12 3 12s3.5 6 9 6a8.6 8.6 0 0 0 4.1-1"/>'),
-    density: S('<rect x="3.5" y="13" width="4" height="7" rx="1"/><rect x="10" y="8" width="4" height="12" rx="1"/><rect x="16.5" y="4" width="4" height="16" rx="1"/>'),
     briefcase: S('<rect x="3.5" y="7.5" width="17" height="12" rx="2"/><path d="M9 7.5V5.5h6v2M3.5 12.5h17"/>'),
     traffic: S('<rect x="8" y="2.5" width="8" height="19" rx="3"/><circle cx="12" cy="7" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="17" r="1.5"/>'),
     flow: S('<path d="M4 17c4-8 8-8 16-10"/><path d="M16 4l4 3-3.5 3.5"/><circle cx="4" cy="17" r="1.6"/>'),
-    radar: S('<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/>'),
-    stationflow: S('<circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="8.5" stroke-dasharray="3 2.4"/>'),
     map: S('<path d="M3.5 6.5l5.5-2 6 2 5.5-2v13l-5.5 2-6-2-5.5 2z"/><path d="M9 4.5v13M15 6.5v13"/>'),
     lock: S('<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>'),
     // 工具
@@ -117,7 +114,6 @@
     road: S('<path d="M8.5 3L5 21M15.5 3L19 21M12 4v3M12 10.5v3M12 17v3"/>'),
     graticule: S('<path d="M3.5 8.2c5.5-1.1 11.5-1.1 17 0M3.5 15.8c5.5 1.1 11.5 1.1 17 0M8.2 3.5c-1.1 5.5-1.1 11.5 0 17M15.8 3.5c1.1 5.5 1.1 11.5 0 17"/><circle cx="15.6" cy="8.2" r="1.7" fill="currentColor" stroke="none"/>'),
     globe: S('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.8 3 2.8 15 0 18M12 3c-2.8 3-2.8 15 0 18"/>'),
-    filter: S('<path d="M4 5h16l-6 7.5V19l-4 1.5v-8z"/>'),
     book: S('<path d="M12 6.5C10 5 7.5 4.5 4 4.5v14c3.5 0 6 .5 8 2 2-1.5 4.5-2 8-2v-14c-3.5 0-6 .5-8 2z"/><path d="M12 6.5v14"/>'),
     wave: S('<path d="M2.5 9c2 0 2-1.5 4-1.5s2 1.5 4 1.5 2-1.5 4-1.5 2 1.5 4 1.5 1.5-1.5 2.5-1.5"/><path d="M2.5 14c2 0 2-1.5 4-1.5s2 1.5 4 1.5 2-1.5 4-1.5 2 1.5 4 1.5 1.5-1.5 2.5-1.5"/><path d="M2.5 19h19"/>'),
     mountain: S('<path d="M2.5 19.5l6.5-11 4 6.5 2.5-3.5 6 8z"/><path d="M7.2 11.6l1.8 1.6 1.6-1.3"/>'),
@@ -127,7 +123,6 @@
     briefing: S('<rect x="4" y="3.5" width="16" height="17" rx="2.5"/><path d="M8 8h8M8 12h8M8 16h5"/>'),
     // 城市经济、任务与推进报告
     trend: S('<path d="M3.5 17l5.5-5.5 4 4L20.5 8"/><path d="M15 8h5.5v5.5"/>'),
-    trendDown: S('<path d="M3.5 7l5.5 5.5 4-4L20.5 16"/><path d="M15 16h5.5v-5.5"/>'),
     bank: S('<path d="M3.5 9.5L12 4l8.5 5.5z"/><path d="M5.5 9.5V17M10 9.5V17M14 9.5V17M18.5 9.5V17M3.5 20h17M4.5 17h15"/>'),
     pulse: S('<path d="M2.5 12h4l2.5-6 4.5 12 2.5-6h5.5"/>'),
     shield: S('<path d="M12 3l7.5 3v6c0 4.4-3.2 7.6-7.5 9-4.3-1.4-7.5-4.6-7.5-9V6z"/><path d="M8.7 12l2.3 2.3 4.3-4.3"/>'),
@@ -140,6 +135,8 @@
     report: S('<rect x="4" y="3" width="16" height="18" rx="2.5"/><path d="M8 16v-3M12 16V9M16 16v-5"/>'),
     // v1.9：设施与新图层
     lyFac: S('<g stroke-width="2.1"><circle cx="7" cy="8" r="3"/><circle cx="17" cy="7" r="2.2"/><circle cx="14" cy="17" r="3.8"/><path d="M9.6 9.6l2.4 4M15 9l-.6 4.2"/></g>'),
+    ruler: S('<path d="M3.5 16.5L16.5 3.5l4 4L7.5 20.5z"/><path d="M7 13l2 2M10 10l2.5 2.5M13 7l2 2"/>'),
+    lineTag: S('<path d="M2.5 12H7M17 12h4.5"/><rect x="7" y="7.5" width="10" height="9" rx="2.6"/><path d="M11 10.5l1.4-.8v4.8"/>'),
     lyGap: S('<g stroke-width="2.1"><path d="M12 3a7 7 0 0 1 7 7c0 5-7 11-7 11S5 15 5 10a7 7 0 0 1 7-7z"/><path d="M9.5 8l5 5M14.5 8l-5 5"/></g>'),
     plane: S('<path d="M10.5 21l1.5-1.2 1.5 1.2v-2l-1-1V13l7 2v-2l-7-4V4.5a1 1 0 0 0-2 0V9l-7 4v2l7-2v4.9l-1 1z"/>'),
     school: S('<path d="M2.5 9.5L12 5l9.5 4.5L12 14z"/><path d="M6.5 11.5V16c1.5 1.4 3.5 2 5.5 2s4-.6 5.5-2v-4.5M21.5 9.5V15"/>'),

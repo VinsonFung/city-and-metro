@@ -141,14 +141,22 @@
     }
     if (refill.size) this.groups.forEach(function (g) { if (refill.has(g.rt.lineId)) g.refill = true; });
   };
+  // 车队（v2.5）：新发出的列车按所在交路的配属列车轮流取车型与编组（外观与车厢数），没有车队时沿用线路编组与年代外观
+  Agents.prototype.dress = function (t, model) {
+    const pl = model && model.fleetOf ? model.fleetOf(this.netRef) : null, fp = pl && pl[t.g.r];
+    if (!fp) return t;
+    const us = fp.units[t.g.rt.loop ? t.g.dir : 0]; if (!us || !us.length) return t;
+    const u = us[(t.id * 7) % us.length]; t.mdl = u.m; t.cars = Math.min(u.cars, t.g.rt.cars);
+    return t;
+  };
   // 按发车间隔 h 沿整个周转铺满一组列车（第 i 列在 i·h 之前从起点发车）
-  Agents.prototype.fillGroup = function (g, h, alpha) {
+  Agents.prototype.fillGroup = function (g, h, alpha, model) {
     const need = Math.max(1, Math.ceil(g.cycle / h));
     for (let i = 0; i < need; i++) {
       let off = i * h, leg = 0;
       while (leg < g.legs.length && off >= g.legs[leg].T + g.legs[leg].dwell) { off -= g.legs[leg].T + g.legs[leg].dwell; leg++; }
       if (leg >= g.legs.length) break;
-      this.trains.push({ id: ++this.seq, g: g, gkey: g.key, leg: leg, t: off, alpha: alpha, dying: false, held: false });
+      this.trains.push(this.dress({ id: ++this.seq, g: g, gkey: g.key, leg: leg, t: off, alpha: alpha, dying: false, held: false }, model));
       g.count++;
     }
     g.lastDep = this.vt;
@@ -162,13 +170,13 @@
     if (net) {
       const fill = this.fillPending;
       this.groups.forEach((g) => {
-        const f = model.freqAt(g.r, W);
+        const f = model.freqAt(g.r, W, g.rt.loop ? g.dir : null);   // 环线两个方向的列车数可以不同（v2.5）
         g.h = f > 0.1 ? 3600 / f : Infinity;
         g.need = isFinite(g.h) ? Math.max(1, Math.ceil(g.cycle / g.h)) : 0;
-        if ((fill || g.refill) && isFinite(g.h) && g.count === 0) { this.fillGroup(g, g.h, fill ? 1 : 0); return; }
+        if ((fill || g.refill) && isFinite(g.h) && g.count === 0) { this.fillGroup(g, g.h, fill ? 1 : 0, model); return; }
         g.refill = false;
         if (g.count < g.need && vt >= g.lastDep + g.h) {
-          this.trains.push({ id: ++this.seq, g: g, gkey: g.key, leg: 0, t: 0, alpha: 0, dying: false, held: false });
+          this.trains.push(this.dress({ id: ++this.seq, g: g, gkey: g.key, leg: 0, t: 0, alpha: 0, dying: false, held: false }, model));
           g.lastDep = vt; g.count++;
         }
       });
@@ -211,7 +219,7 @@
   function wrapD(d, total, loop) { return loop ? ((d % total) + total) % total : U.clamp(d, 0, total); }
   Agents.prototype.trainSpan = function (t, pos, out) {
     const rt = t.g.rt, total = rt.cum[rt.cum.length - 1];
-    const Lt = Math.max(CAR_M * rt.cars / CFG.CELL_M, 0.12), dir = pos.fwd ? 1 : -1;
+    const Lt = Math.max(CAR_M * (t.cars || rt.cars) / CFG.CELL_M, 0.12), dir = pos.fwd ? 1 : -1;
     let head = pos.d + dir * Lt / 2, rear = pos.d - dir * Lt / 2;
     if (!rt.loop) { const lo = Math.min(head, rear), hi = Math.max(head, rear), sh = lo < 0 ? -lo : (hi > total ? total - hi : 0); head += sh; rear += sh; }
     out.head = head; out.rear = rear; out.dir = dir; out.Lt = Lt; out.total = total; out.loop = rt.loop;
@@ -255,15 +263,46 @@
   Agents.prototype.legLoad = function (t, L, model, W) {
     const net = this.netRef, re = net && net.rideEdge && net.rideEdge[t.g.r];
     if (!model || !re || !W) return 0;
-    const f = model.freqAt(t.g.r, W);
-    return f > 0 ? model.edgeLoadAt(re[2 * L.k + (L.rev ? 1 : 0)], W) / (f * t.g.rt.cap) : 0;
+    const f = model.freqAt(t.g.r, W, t.g.rt.loop ? (L.rev ? 1 : 0) : null);
+    return f > 0 ? model.edgeLoadAt(re[2 * L.k + (L.rev ? 1 : 0)], W) / (f * model.capOf(t.g.r, net)) : 0;
   };
   // 两种视图共用外观、门位及上下车动作；这些对象不进入存档或交通求解。
   Agents.DOOR_FRACTIONS = [0.3, 0.7];
   Agents.CAR_M = CAR_M; Agents.GAP_M = GAP_M;
+  // 年代外观（v2.3）：列车与站台按年代换代，2D、3D 与站台模型共用。
+  // 列车按「线路开通年份」与「当前年份 − 25 年（车队更新）」中较晚者取年代，站台按「建成年份」与「当前年份 − 40 年（翻新）」中较晚者：
+  // early 早期木质 / 铆接车厢（1900–1939）· classic 战后涂装车（1940–1974）· modern 不锈钢通勤车（1975–2004）· current 现代全涂装（2005–2034）· future 未来流线型（2035 起）
+  const ERA_STEPS = [[1940, 'early'], [1975, 'classic'], [2005, 'modern'], [2035, 'current']];
+  Agents.eraOf = function (y) { for (const s of ERA_STEPS) if (y < s[0]) return s[1]; return 'future'; };
+  const lineYears = new WeakMap();   // 按线网对象缓存（不写进线网，避免进入存档）
+  Agents.lineBuiltYear = function (net, lid) {
+    if (!net) return 0; let memo = lineYears.get(net); if (!memo) lineYears.set(net, memo = {}); if (memo[lid] != null) return memo[lid];
+    let y = 1e9; for (const id in net.segments) { const s = net.segments[id]; if (s.line === lid && s.built) y = Math.min(y, s.built[0]); }
+    return (memo[lid] = y < 1e9 ? y : 0);
+  };
+  Agents.trainEra = function (R, lid) {
+    const g = R.game, y = g && g.clock ? g.clock.y : 2000, built = g && g.net ? Agents.lineBuiltYear(g.net, lid) : 0;
+    return Agents.eraOf(Math.max(built || y, y - 25));
+  };
+  // 车身、窗带、腰线与车顶的颜色：早期深色清漆车身配线路色腰线，战后整车涂装配奶白窗带，不锈钢车配线路色色带，未来车为白色车身配发光色带
+  Agents.ERA_TRAIN = {
+    early: { body: '#5a2e24', band: 'line', roof: '#3a3634', win: '#f4d9a2', ends: 'square', w: 0.86 },
+    classic: { body: 'line', band: '#efe6cc', roof: '#4d5257', win: '#fff3d6', ends: 'round', w: 0.94 },
+    modern: { body: '#c4ccd4', band: 'line', roof: '#9aa3ad', win: '#ffffff', ends: 'square', w: 1 },
+    current: { body: 'line', band: '#26303b', roof: 'line', win: '#ffffff', ends: 'round', w: 1 },
+    future: { body: '#f1f4f7', band: 'line', roof: '#e3e8ee', win: '#d8f2ff', ends: 'pointed', w: 1, glow: true },
+  };
   Agents.prototype.trainLook = function (t, R, lf) {
     const rt=t.g.rt,line=R.drawnC?.net.lines[rt.lineId]||R.game?.net.lines[rt.lineId]||rt.line||{id:rt.lineId,color:rt.color};
-    return {color:AX.line(line),window:R.th.night?'#ffe496':lf>1?'#ffc8c8':'#ffffff',door:R.th.night?'#ffecaa':'#fffceb'};
+    const color=AX.line(line),night=!!R.th.night,year=R.game&&R.game.clock?R.game.clock.y:0;
+    let lk=t._look;
+    if(!lk||lk.color!==color||lk.night!==night||lk.year!==year||lk.mdl!==t.mdl){
+      // 车队的车型外观（v2.5）优先：式样与配色按车型（'line' 用线路色），没有车型时按线路年代
+      const ml=t.mdl&&t.mdl.look,era=ml?ml.era:Agents.trainEra(R,rt.lineId),E=ml?Object.assign({},Agents.ERA_TRAIN[ml.era],ml):Agents.ERA_TRAIN[era],pick=function(c){return c==='line'?color:c;};
+      lk=t._look={color:color,era:era,body:pick(E.body),band:pick(E.band),roof:pick(E.roof),ends:E.ends,wf:E.w,glow:!!E.glow,win:E.win,window:E.win,door:night?'#ffecaa':'#fffceb',night:night,year:year,mdl:t.mdl};
+    }
+    lk.window=night?'#ffe496':lf>1?'#ffc8c8':lk.win;
+    return lk;
   };
   Agents.prototype.trainRiders = function (t, ph, nCar, model, W, out) {
     out=out||[];out.length=0;const L=t.g.legs[t.leg];if(!L||ph.door<=0||nCar<=1)return out;
@@ -286,7 +325,7 @@
     const showWin = z >= 22, showDoor = z >= 30, showPax = z >= 30 && tier < 2 && (!game || game.speed <= 2);
     let paxBudget = Math.round(CFG.perf.maxRiders * (tier === 1 ? 0.5 : 1));
     const UD = CM.RENDER_CONST.UNDER_DEPTH;
-    const joints = this._joints || (this._joints = []);
+    const joints = this._joints || (this._joints = []), batch = new Map();
     const trainList=R.follow?[R.follow,...this.trains.filter(t=>t!==R.follow)]:this.trains;
     for (const t of trainList) {
       if (!t.g || t.alpha <= 0.01) continue;
@@ -295,9 +334,9 @@
       U.posAt(rt.pts, rt.cum, tmp.d, q);
       if (R.follow !== t && (q.x < v.x0 - 1 || q.x > v.x1 + 1 || q.y < v.y0 - 1 || q.y > v.y1 + 1)) continue;
       this.trainSpan(t, tmp, sp);
-      const off = (R.p3 ? 0.014 : 0.055) * sp.dir;
+      const off = 0.055 * sp.dir;
       // 车厢接缝的屏幕坐标：沿实际轨道曲线取点，转弯时各节车厢分别转向
-      const nCar = z >= 14 ? rt.cars : 1, step = z >= 14 ? carLen : sp.Lt;
+      const allCars = z >= 14, nCar = allCars ? (t.cars || rt.cars) : 1, step = allCars ? carLen : sp.Lt;
       for (let k = 0; k <= nCar; k++) {
         const dd = k === nCar ? sp.rear : sp.head - sp.dir * k * step;
         U.posAt(rt.pts, rt.cum, wrapD(dd, sp.total, sp.loop), q);
@@ -319,8 +358,8 @@
       else if (under > 0) alpha *= U.lerp(1, 0.4, under);
       if (hl && hl !== rt.lineId) alpha *= 0.3;
       ctx.globalAlpha = alpha;
-      const L=t.g.legs[t.leg],lf=z>=14&&L?this.legLoad(t,L,model,W):0,look=this.trainLook(t,R,lf);
       this.phase(t,t.animation||(t.animation={}));Object.assign(ph,t.animation);t.door=ph.door;t.state=ph.state;
+      const L=t.g.legs[t.leg],lf=z>=14&&L?this.legLoad(t,L,model,W):0,look=this.trainLook(t,R,lf);
       const riders=t.riders||(t.riders=[]);riders.length=0;
       if(showPax&&paxBudget>0)this.trainRiders(t,ph,nCar,model,W,riders);
       if(riders.length>paxBudget)riders.length=paxBudget;paxBudget-=riders.length;t.riderFrame=R.frame;
@@ -330,10 +369,17 @@
         ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(t.sx, t.sy, rr + pr * 3, 0, Math.PI * 2); ctx.stroke();
         ctx.strokeStyle = look.color; ctx.lineWidth = 2.2; ctx.stroke();
       }
-      if (R.p3) continue;   // 三维车厢由 Actors3D 绘制；点击跟随、声音与状态仍使用上面的同一组列车数据。
       if (z < 7) {
         ctx.fillStyle = look.color; ctx.beginPath(); ctx.arc(head.x, head.y, 2.6, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.stroke();
+        continue;
+      }
+      if (z < 14 && nCar === 1 && R.follow !== t && !(look.glow && night)) {
+        const wb = width * (look.wf || 1), ed = look.era === 'current' ? look.color : look.band, key = ed + '|' + look.body + '|' + wb + '|' + Math.round(alpha * 8);
+        let b = batch.get(key);
+        if (!b) { b = { edge: ed, body: look.body, w: wb, a: Math.round(alpha * 8) / 8, p: [] }; batch.set(key, b); }
+        b.p.push(tail.x, tail.y, head.x, head.y);
+        t.door = ph.door; t.state = ph.state;
         continue;
       }
       // 车体：外廓 + 线路色；近景各节车厢分开画（接缝留空）
@@ -343,14 +389,23 @@
         ctx.moveTo(a.x + (b.x - a.x) * g0, a.y + (b.y - a.y) * g0); ctx.lineTo(b.x + (a.x - b.x) * g1, b.y + (a.y - b.y) * g1);
       };
       ctx.lineCap = nCar > 1 ? 'butt' : 'round';
-      ctx.strokeStyle = 'rgba(20,24,30,0.55)'; ctx.lineWidth = width + 2;
+      // 年代外观（v2.3）：外缘为腰线 / 色带颜色，内部为车身颜色；端部按年代为方头、圆头或流线尖头；未来车夜间色带微微发光
+      const wB = width * (look.wf || 1), edge = look.era === 'current' ? look.color : look.band;
+      ctx.strokeStyle = 'rgba(20,24,30,0.55)'; ctx.lineWidth = wB + 2;
       ctx.beginPath(); for (let k = 0; k < nCar; k++) carPath(k); ctx.stroke();
-      ctx.strokeStyle = look.color; ctx.lineWidth = width;
+      if (look.glow && night) { ctx.shadowColor = look.color; ctx.shadowBlur = wB * 1.6; }
+      ctx.strokeStyle = edge; ctx.lineWidth = wB;
       ctx.beginPath(); for (let k = 0; k < nCar; k++) carPath(k); ctx.stroke();
-      if (nCar > 1) {
-        // 车头、车尾：圆润的端部
-        ctx.fillStyle = look.color;
-        ctx.beginPath(); ctx.arc(head.x, head.y, width / 2, 0, Math.PI * 2); ctx.arc(tail.x, tail.y, width / 2, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+      if (edge !== look.body && z >= 9) { ctx.strokeStyle = look.body; ctx.lineWidth = wB * 0.66; ctx.beginPath(); for (let k = 0; k < nCar; k++) carPath(k); ctx.stroke(); }
+      if (nCar > 1 && look.ends !== 'square') {
+        ctx.fillStyle = edge;
+        if (look.ends === 'pointed') {
+          // 流线车头：沿行进方向收成尖头；车尾仍为圆端
+          const hx0 = head.x - joints[1].x, hy0 = head.y - joints[1].y, hl0 = Math.hypot(hx0, hy0) || 1, ux0 = hx0 / hl0, uy0 = hy0 / hl0;
+          ctx.beginPath(); ctx.moveTo(head.x + uy0 * wB / 2, head.y - ux0 * wB / 2); ctx.lineTo(head.x + ux0 * wB * 1.1, head.y + uy0 * wB * 1.1); ctx.lineTo(head.x - uy0 * wB / 2, head.y + ux0 * wB / 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(tail.x, tail.y, wB / 2, 0, Math.PI * 2); ctx.fill();
+        } else { ctx.beginPath(); ctx.arc(head.x, head.y, wB / 2, 0, Math.PI * 2); ctx.arc(tail.x, tail.y, wB / 2, 0, Math.PI * 2); ctx.fill(); }
       }
       if (z >= 14) {
         // 车窗：夜间亮灯；过度拥挤时偏红
@@ -396,6 +451,15 @@
         }
       }
       t.door = ph.door; t.state = ph.state;
+    }
+    if (batch.size) {
+      const seg = function (p) { ctx.beginPath(); for (let i = 0; i < p.length; i += 4) { ctx.moveTo(p[i], p[i + 1]); ctx.lineTo(p[i + 2], p[i + 3]); } ctx.stroke(); };
+      ctx.lineCap = 'round';
+      for (const b of batch.values()) { ctx.globalAlpha = b.a; ctx.strokeStyle = 'rgba(20,24,30,0.55)'; ctx.lineWidth = b.w + 2; seg(b.p); }
+      for (const b of batch.values()) {
+        ctx.globalAlpha = b.a; ctx.strokeStyle = b.edge; ctx.lineWidth = b.w; seg(b.p);
+        if (b.edge !== b.body && z >= 9) { ctx.strokeStyle = b.body; ctx.lineWidth = b.w * 0.66; seg(b.p); }
+      }
     }
     ctx.globalAlpha = 1; ctx.lineCap = 'round';
   };
@@ -980,7 +1044,6 @@
     return out;
   };
   Agents.prototype.drawAll = function (ctx, R, alpha) {
-    if (R.p3) return;
     const road = this.roadRef, tmp = {};
     const list = [];
     if (road) for (const c of this.cars) { if (c.alpha <= 0.01) continue; this.carWorld(c, road, tmp); c.wx = tmp.x; c.wy = tmp.y; c.wa = tmp.ang; list.push(c); }
@@ -991,7 +1054,6 @@
   // 车辆按车型画出长短与宽窄：公交与货车更长，自行车与摩托车细短并带骑车人；拥堵减速时亮刹车灯
   // 2D 全量绘制与 2.5D 分块绘制共用此入口，保持建筑与人车的遮挡顺序。
   Agents.prototype.drawList = function (ctx, R, list, alpha) {
-    if (R.p3) return;
     const z = R.z, iso = R.tEase > 0.5, night = !!(R.th && R.th.night), lift = iso ? 1 : 0;
     const fullDetail = z >= 28 || !R.detail || R.detail.tier === 0;
     ctx.lineCap = 'round';

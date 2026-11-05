@@ -42,6 +42,7 @@
     const job = waiting = { reveal: reveal, t0: performance.now(), f0: R.frame };
     R.warm(1200);
     const wait = function () {
+      // 等画面内的缓存准备好再收起快照。
       const ready = !R.game || (R.frame > job.f0 + 1 && R.sharpReady());
       if (!ready && performance.now() - job.t0 < 1200) { requestAnimationFrame(wait); return; }
       waiting = null; R.warmUntil = 0;
@@ -163,17 +164,20 @@
     if (CM.Tutorial) CM.Tutorial.detach();
     if (CM.game && CM.game !== g && CM.game.model) CM.game.model.retired = true;   // 旧进度的交通求解不再占用工作线程
     CM.game = g;
+    if (CM.Fleet) CM.Fleet.ensure(g);   // 车队（v2.5）：新局的既有线路与旧存档按当前运营所需建立车队，并接入模拟
     R.setGame(g);
     canvas.classList.add('map-in');   // 快速进入游戏时，菜单背景任务可能尚未执行
     CM.agents.reset();
     tools.tool = 'select'; tools.chain = null; tools.bends = []; tools.lineChoice = 'new';
-    tools.newLineColor = null;
+    tools.newLineColor = null; tools.newLineSpeed = null; tools.clearMeasure();
     tools.drag = tools.ptr = tools.cursor = tools.hover = tools.hint = tools.snapPt = tools.mouse = tools.portalHover = null;
     tools.lineLock = false; tools.keys.clear(); tools.keyMods = {};
     if (tools.touches) tools.touches.clear(); tools.pinch = null;
     ui.setTooltip(null); R.cv.style.cursor = '';
     ui.attachGame(g);
-    ui.closeScreen();
+    // 新开局随后要显示简报：载入卡片直接换成简报，不先关掉界面层（v2.3：以前会露出一帧游戏界面再盖上，看起来闪一下）
+    const briefNext = isNew && !g.tutorial && CM.DATA.briefing && ui.showBriefing;
+    if (!briefNext) ui.closeScreen();
     const mp = CM.curMap(), cam = mp.cam || { cx: CFG.W / 2, cy: CFG.H / 2, zoom: 18 };
     R.cam.cx = cam.cx; R.cam.cy = cam.cy; R.cam.zoom = R.cam.tz = cam.zoom; R.cam.view = 1; R.cam.t = 1; R.cam.under = R.cam.tu = 0; R.cam.anchor = null; R.cam.fly = null;
     g.setSpeed(0);
@@ -200,8 +204,15 @@
   }
   // 驱动开局 / 读档生成器：等待工作线程时让出主线程，普通步骤按短时间片推进。
   // 地图配置切换后暂停旧进度的模拟与绘制；失败时恢复旧地图、货币及进度。
-  CM.loadProgress = function (p, label) { ui.loadProgress(p, label); };
+  CM.loadProgress = function (p, label) {
+    const job = loading;
+    if (job && (p > job.reported || label !== job.reportedLabel)) {
+      job.waitAt = null; job.reported = p; job.reportedLabel = label;
+    }
+    ui.loadProgress(p, label);
+  };
   let loading = null;
+  const LOAD_WAIT_LIMIT = 60000;
   CM.isLoading = function () { return loading !== null; };
   function cancelLoad() {
     const job = loading;
@@ -214,7 +225,7 @@
   function runLoad(mapId, message, makeGen, isNew, what) {
     if (loading) return;   // 包括尚未开始的延时任务，防止快速重复点击启动两次载入
     const prev = CM.game;
-    const job = loading = { gen: null, timer: null, mapId: CM.mapId, prevRetired: prev && prev.model && prev.model.retired };
+    const job = loading = { gen: null, timer: null, waitAt: null, reported: -1, reportedLabel: null, mapId: CM.mapId, prevRetired: prev && prev.model && prev.model.retired };
     if (prev && prev.model) prev.model.retired = true;
     if (CM.CarPool) CM.CarPool.onReq = null;
     ui.showLoading(message, isNew ? (message.includes('推演') ? 'pre' : 'new') : 'load', mapId);
@@ -238,21 +249,28 @@
             return;
           }
           if (r.value === CM.SIM_WAIT) {
+            if (job.waitAt === null) job.waitAt = performance.now();
+            if (performance.now() - job.waitAt >= LOAD_WAIT_LIMIT) {
+              const error = new Error('恢复交通计算长时间未响应，已停止本次载入。');
+              error.code = 'LOAD_TIMEOUT'; throw error;
+            }
             if (CM.CarPool) CM.CarPool.onReq = job.resume;
             job.timer = setTimeout(step, 100);   // 后台标签页或异常环境下仍可继续检查回退状态
             return;
           }
+          job.waitAt = null;
           if (performance.now() - t0 >= 8) { job.timer = setTimeout(step, 0); return; }
         }
       } catch (e) {
-        if (job.gen) job.gen.return();
+        try { if (job.gen) job.gen.return(); } catch (closeError) { console.error(closeError); }
         end();
+        if (e && e.code === 'LOAD_TIMEOUT') for (const pool of [CM.SkimPool, CM.OdPool, CM.CarPool]) if (pool) pool.fail('载入计算长时间未响应');
         CM.useMap(job.mapId || 'gz');
         if (prev && CM.game === prev) {
           if (prev.model) prev.model.retired = job.prevRetired;
           if (CM.applyMoneyEra) CM.applyMoneyEra(prev.clock.y, prev.clock.m);
         }
-        fail(e, what);
+        if (what === '载入存档') ui.showLoadError(e, ui._loadingSlotId); else fail(e, what);
       }
     };
     job.resume = function () { if (loading === job) { clearTimeout(job.timer); job.timer = setTimeout(step, 0); } };
@@ -261,6 +279,7 @@
   // opts.map：地图（默认广州）；opts.tutorial：新手教程
   CM.newGame = function (opts) {
     ui._slotLoadRequest = null;
+    ui._loadingSlotId = null;
     if (CM.Soundscape) CM.Soundscape.reset();
     const mp = CM.MAPS[opts.map] || CM.MAPS.gz;
     runLoad(mp.id, opts.startYear > mp.cfg.START.y ? '从 ' + mp.cfg.START.y + ' 年推演到 ' + opts.startYear + ' 年的' + mp.data.city : '正在生成 ' + mp.cfg.START.y + ' 年的' + mp.data.city + '，并计算居民出行…', function () { return CM.Game.createGen(opts); }, true, '创建新游戏');
@@ -301,7 +320,13 @@
     previewCamera(0);
   };
 
-  let last = performance.now(), fpsAcc = 0, fpsN = 0;
+  let last = performance.now(), fpsAcc = 0, fpsN = 0, lastJumpPaint = -1e9;
+  let idleN = 0, uiDt = 0, inputAt = 0;
+  for (const ev of ['pointermove', 'pointerdown', 'wheel', 'keydown']) window.addEventListener(ev, function () { inputAt = performance.now(); }, { capture: true, passive: true });
+  const isStill = function (g, t) {
+    return g.speed === 0 && !g.jumping && !g.pending && !g.draft && !R.interacting && t - inputAt > 600 && !waiting && !R.warmUntil && !R.stats.pendingVisible
+      && !(R.fx && R.fx.length) && !R.hl && !R.cam.fly && !R.overviewJob && !CM.Follow.active() && !CM.Tutorial.active();
+  };
   function frame(t) {
     const workStarted = performance.now();
     R.frameWorkStart = workStarted;
@@ -320,10 +345,21 @@
       previewCamera(dt);
       try { CM.agents.updatePreview(dt, preview, R); } catch (e) { console.error(e); }
     }
-    try { R.render(dt, ui); } catch (e) { console.error(e); }
-    try { CM.Soundscape.tick(dt); } catch (e) { console.error(e); }
-    ui.tick(dt);
-    R.noteFrameTime(performance.now() - workStarted);
+    // 跳月 / 跳年期间画面被推进卡片遮住、列车车辆静止：地图降频重绘，把时间留给结算
+    const jumpHold = g && g.jumping && t - lastJumpPaint < CFG.perf.jumpRenderMs;
+    // 静止画面降频（v2.5 性能）：暂停、没有操作、没有待补的地图块和动画时每 6 帧才重绘一次，把 CPU 与 GPU 省下来
+    const still = !jumpHold && g && isStill(g, t);
+    idleN = still ? idleN + 1 : 0;
+    const paint = !jumpHold && (!still || idleN % 6 === 0);
+    if (paint) { if (g && g.jumping) lastJumpPaint = t; try { R.render(dt, ui); } catch (e) { console.error(e); } }
+    // 界面与环境音是低优先级任务：镜头移动时约 20 次/秒，其余时间每帧（dt 累计，不丢时间）
+    uiDt += dt;
+    if (!R.interacting || uiDt >= 0.05) {
+      try { CM.Soundscape.tick(uiDt); } catch (e) { console.error(e); }
+      ui.tick(uiDt);
+      uiDt = 0;
+    }
+    if (paint) R.noteFrameTime(performance.now() - workStarted);   // 暂停期间的空帧不计入画质自适应
     fpsAcc += dt; fpsN++;
     if (fpsAcc > 1) { R.stats.fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
     requestAnimationFrame(frame);
@@ -342,5 +378,6 @@
     if (!preview) { try { preview = makePreview(); } catch (e) { console.error(e); } }
     if (preview && !CM.game) { R.setGame(preview); preview.ready = false; preview.firstFrame = R.frame; }
     requestAnimationFrame(function () { canvas.classList.add('map-in'); });
+    setTimeout(function () { if (CM.prewarmThumbs) CM.prewarmThumbs(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'); }, 1500);
   }, 80);
 })(window.CM);

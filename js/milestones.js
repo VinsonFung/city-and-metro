@@ -29,6 +29,11 @@
     return r;
   }
 
+  // 同一系列一次跨过多个关口（如一次建成多条线路）：都记入城市纪事，只为最高的关口弹出庆祝
+  function series(g, arr, ok, id, make) {
+    const st = state(g), hit = arr.filter(function (k) { return ok(k) && !st.done[id + k]; });
+    hit.forEach(function (k, i) { add(g, id + k, make(k), i < hit.length - 1 ? g.clock : undefined); });
+  }
   // ---------- 网络状态 ----------
   function netInfo(g) {
     const C = g.compiled, net = g.net;
@@ -64,15 +69,15 @@
     if (n.xfer) add(g, 'first-xfer', { cat: 'metro', icon: 'network', title: '第一座换乘站', desc: '「' + n.xfer.name + '」连接 ' + M.stationLines(g.net, n.xfer.id).map(function (l) { return g.net.lines[l].name; }).join('、') });
     if (n.river) add(g, 'first-cross', { cat: 'metro', icon: 'route', big: true, title: '地铁首次跨越' + n.river, desc: '跨水区段约 ' + U.fmtKm(n.crossM) + '，两岸由地铁直接相连' });
     if (n.loop) add(g, 'first-loop', { cat: 'metro', icon: 'route', title: '第一条环线建成', desc: n.loop.name + '首尾相接，形成环线' });
-    for (const k of KM) if (n.km >= k) add(g, 'km-' + k, { cat: 'metro', icon: 'metro', big: k >= 100, title: '地铁总里程突破 ' + k + ' 公里', desc: '目前 ' + n.lines + ' 条线路，共 ' + U.fmtNum(n.km, 1) + ' km' });
-    for (const k of LINES) if (n.lines >= k) add(g, 'lines-' + k, { cat: 'metro', icon: 'network', title: '地铁线路达到 ' + k + ' 条', desc: '网络总里程 ' + U.fmtNum(n.km, 0) + ' km' });
+    series(g, KM, function (k) { return n.km >= k; }, 'km-', function (k) { return { cat: 'metro', icon: 'metro', big: k >= 100, title: '地铁总里程突破 ' + k + ' 公里', desc: '目前 ' + n.lines + ' 条线路，共 ' + U.fmtNum(n.km, 1) + ' km' }; });
+    series(g, LINES, function (k) { return n.lines >= k; }, 'lines-', function (k) { return { cat: 'metro', icon: 'network', title: '地铁线路达到 ' + k + ' 条', desc: '网络总里程 ' + U.fmtNum(n.km, 0) + ' km' }; });
   }
 
   // 每月：城市与客流类里程碑
   function onMonth(g) {
     const d = g.model.daily || {}, tot = g.city.totals(), st = state(g);
     const pop0 = st.pop0 || (st.pop0 = g.history.length ? g.history[0].pop : tot.pop);
-    for (const k of POP) if (k > pop0 * 1.04 && tot.pop >= k) add(g, 'pop-' + k, { cat: 'city', icon: 'people', big: k >= 1e6 && k % 1e6 === 0 && k >= pop0 * 1.3, title: '城市人口突破 ' + fmtN(k), desc: '地图范围内常住人口约 ' + U.fmtPeople(tot.pop) });
+    series(g, POP, function (k) { return k > pop0 * 1.04 && tot.pop >= k; }, 'pop-', function (k) { return { cat: 'city', icon: 'people', big: k >= 1e6 && k % 1e6 === 0 && k >= pop0 * 1.3, title: '城市人口突破 ' + fmtN(k), desc: '地图范围内常住人口约 ' + U.fmtPeople(tot.pop) }; });
     // 开局既有地铁（如东京银座线）：开局时已达到的客流门槛不再记为里程碑
     if (g.mapInit && g.mapInit.metro && st.ride0 == null) {
       st.ride0 = d.metro || 0; st.share0 = d.metroShare || 0;
@@ -80,8 +85,8 @@
       for (const k of SHARE) if (k <= st.share0 * 1.1) st.done['share-' + k] = 1;
     }
     if (g.compiled.stations.length) {
-      for (const k of RIDE) if ((d.metro || 0) >= k) add(g, 'ride-' + k, { cat: 'ride', icon: 'people', big: k >= 1e6, title: '地铁日客运量突破 ' + fmtN(k) + ' 人次', desc: '日均（周平均）' + U.fmtPeople(d.metro) + ' 人次，分担率 ' + U.fmtPct(d.metroShare || 0, 1) });
-      for (const k of SHARE) if ((d.metroShare || 0) >= k) add(g, 'share-' + k, { cat: 'ride', icon: 'metro', title: '地铁分担率达到 ' + Math.round(k * 100) + '%', desc: '每 ' + Math.round(1 / k) + ' 次出行就有 1 次乘地铁' });
+      series(g, RIDE, function (k) { return (d.metro || 0) >= k; }, 'ride-', function (k) { return { cat: 'ride', icon: 'people', big: k >= 1e6, title: '地铁日客运量突破 ' + fmtN(k) + ' 人次', desc: '日均（周平均）' + U.fmtPeople(d.metro) + ' 人次，分担率 ' + U.fmtPct(d.metroShare || 0, 1) }; });
+      series(g, SHARE, function (k) { return (d.metroShare || 0) >= k; }, 'share-', function (k) { return { cat: 'ride', icon: 'metro', title: '地铁分担率达到 ' + Math.round(k * 100) + '%', desc: '每 ' + Math.round(1 / k) + ' 次出行就有 1 次乘地铁' }; });
       if ((d.coverage || 0) >= 0.5) add(g, 'cover-50', { cat: 'ride', icon: 'station', title: '地铁覆盖过半人口', desc: U.fmtPct(d.coverage, 0) + ' 的居民步行 15 分钟可到达地铁站' });
     }
   }

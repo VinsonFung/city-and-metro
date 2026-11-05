@@ -123,7 +123,8 @@
       Object.assign(at(30.2420, 120.0990), { id: 'hz_lingyin', name: '灵隐寺', w: 200, d: 300, year: 1950, kind: 'temple' }),
       Object.assign(at(30.2635, 120.1235), { id: 'hz_zju', name: '浙江大学（玉泉）', w: 900, d: 700, year: 1928, kind: 'campus' }),
       Object.assign(at(30.2437, 120.1826), { id: 'hz_station', name: '杭州站', w: 300, d: 160, year: 1999, kind: 'rail' }),
-      Object.assign(at(30.2683, 120.1395), { id: 'hz_huanglong', name: '黄龙体育中心', w: 400, d: 300, year: 2000, kind: 'stadium' }),
+      // v2.3 位置校正：体育场在黄龙路以西、天目山路与曙光路之间（原坐标偏东约 1 km）
+      Object.assign(at(30.2698, 120.1288), { id: 'hz_huanglong', name: '黄龙体育中心', w: 400, d: 300, year: 2000, kind: 'stadium' }),
       Object.assign(at(30.2310, 120.1488), { id: 'hz_leifeng', name: '雷峰塔', w: 70, d: 70, year: 2002, kind: 'pagoda', h: 72 }),
       Object.assign(at(30.3040, 120.0855), { id: 'hz_zjg', name: '浙江大学（紫金港）', w: 1600, d: 1300, year: 2002, kind: 'campus' }),
       Object.assign(at(30.2440, 120.2135), { id: 'hz_opera', name: '杭州大剧院', w: 260, d: 160, year: 2004, kind: 'opera' }),
@@ -192,6 +193,17 @@
       { id: 'hz7', appear: [2016, 1], deadline: [2023, 8], type: 'connect', reward: 60000, title: '亚运会：奥体中心', desc: '连接杭州奥体中心、钱江新城与杭州东站。', anchors: [anchor('奥体中心', 30.2290, 120.2280, 3), anchor('钱江新城', 30.2465, 120.2125, 3), anchor('杭州东站', 30.2906, 120.2128, 3)] },
     ],
     taskNote: '历史主题任务参考杭州 2000 年起的发展需求（跨江、撤市设区、高教园区、东站枢纽、G20 与亚运会），不要求按真实线路走向建设，只需满足目标描述。',
+    // 城市策略难题（v2.3，可选挑战）
+    scenarios: [
+      { id: 'hz-sc1', theme: '杭州：西湖保护与钱塘江', title: '过江，但别碰西湖', type: 'budgetConnect', from: [2002, 1], to: [2014, 12], months: 60, rewardMonths: 3, budgetX: 1.2,
+        anchors: [['武林广场', 3], ['城站', 3], ['江陵路', 3]],
+        desc: '西湖风景区不能随意设站，穿越还要付环境保护费；钱塘江隧道又很贵。用有限的预算把老城中心接到江对岸的滨江。',
+        tips: ['沿湖东侧的老城走，不穿过风景区', '过江选江面较窄的位置，一次过江', '老城段站距可以短，滨江段可以长'] },
+      { id: 'hz-sc2', theme: '杭州：新城与老城', title: '让钱江新城和滨江用上地铁', type: 'regionCov', from: [2008, 1], to: [2020, 12], months: 48, rewardMonths: 3,
+        regions: ['qjxc', 'binjiang'], areaName: '钱江新城与滨江', target: 0.5,
+        desc: '城市跨过钱塘江向东、向南发展，新城的人口和岗位越来越多，地铁却还集中在湖滨老城。让新城一半以上的人步行就能到地铁站。',
+        tips: ['打开「地铁覆盖」图层，看新城哪里是空白', '新城道路宽、街区大，站点要放在人口最密处', '用支线或延伸线接入，比另起一条新线便宜'] },
+    ],
     dataNote: [
       ['真实地理', 'hist', '钱塘江与西湖水系、道路与桥隧、铁路、公园与风景区、街道边界与地名来自 OpenStreetMap（© OpenStreetMap 贡献者，ODbL），为现代数据，按 250 m 网格投影。'],
       ['史实参考', 'hist', '萧山、余杭撤市设区（2001 年）、钱江新城与城东新城开发、过江大桥与城市快速路通车年份、地标落成年份。'],

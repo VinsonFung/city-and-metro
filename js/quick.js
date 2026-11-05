@@ -56,6 +56,11 @@
     const cuts = splitLines(id);
     if (cuts.length) acts.push({ icon: 'scissors', label: '在此拆开线路', fn: function (b) { popSplit(id, cuts, b); } });
     acts.push({ icon: 'layers', label: '规模与站台', fn: function () { ui.openObj('station', id, 'build'); } });
+    // 运营车站的商业开发与装修主题（v2.3）：在小气泡里直接完成，不必进详情页
+    if (game().net.stations[id]) {
+      if (ui.todInfo(id)) acts.push({ icon: 'bag', label: '商业开发（TOD）', fn: function (b) { popTod(id, b); } });
+      acts.push({ icon: 'palette', label: '车站装修', fn: function (b) { popDecor(id, b); } });
+    }
     acts.push({ icon: 'cursor', label: '移动车站', fn: function () { ui.tools.setTool('edit'); ui.select({ kind: 'station', id: id }); ui.toast('拖动车站到新位置', 'info'); } });
     acts.push({ icon: 'bulldozer', label: '拆除', danger: true, fn: function () { ui.demolish({ kind: 'station', id: id }); } });
     return acts;
@@ -68,9 +73,10 @@
       { icon: 'palette', label: '改颜色', fn: function (b) { popColor(lid, b); } },
       { icon: 'route', label: '延长', fn: function (b) { popExtend(lid, b); } },
       { icon: 'merge', label: '贯通、拆开与支线', fn: function (b) { popOrg(lid, b); } },
+    ].concat(game() && game().fleet && ui.lineOpsTab && game().net.lines[lid] ? [{ icon: 'train', label: '列车运营', fn: function () { ui.openObj('line', lid, 'ops'); } }] : [], [   // 列车运营（v2.5）：已运营的线路
       { icon: 'layers', label: '本段形式与线形', fn: function (b) { popSeg(segId, b); } },
       { icon: 'bulldozer', label: '拆除', danger: true, fn: function (b) { popDemolish(segId, b); } },
-    ];
+    ]);
   }
   function actsFor(sel) { return sel.kind === 'station' ? stationActs(sel.id) : lineActs(sel.id); }
   // 经过本站、可在本站拆开的线路（本站是线路中间站）
@@ -126,7 +132,9 @@
     const R = ui.R, n = net();
     if (cur.kind === 'station') { const s = n.stations[cur.id]; if (s) at = [s.x, s.y]; }
     if (!at) return;
-    const p = R.P(at[0], at[1], 0), z = zoom();
+    // 跟着对象画面上的高度（高架车站、线路在 3D 中位于桥面），2D / 2.5D 下按钮条都贴着同一个对象（v2.3）
+    const ob = cur.kind === 'station' ? n.stations[cur.id] : n.segments[cur.id];
+    const p = R.P(at[0], at[1], ob ? R.trackH(ob.type) : 0), z = zoom();
     const w = bar.offsetWidth * z || 260, hh = bar.offsetHeight * z || 40;
     let x = p.x - w / 2, y = p.y - hh - 26;
     if (y < 70) y = p.y + 26;
@@ -198,6 +206,16 @@
     mark();
     openPop(anchor, L.name + ' 的颜色', h('div', null, box, h('label', { class: 'btn sm lc-custom', style: { marginTop: '6px' } }, custom, ic('pencil', 14), '自定义')));
   }
+  // 商业开发与车站装修气泡：与车站详情页共用控件，操作后原地刷新
+  function popPanel(id, anchor, title, build) {
+    const s = net().stations[id]; if (!s) return;
+    const body = h('div', { class: 'qpop-panel' });
+    const fill = function () { body.replaceChildren(build(function () { fill(); key = ''; render(); })); if (CM.I18n) CM.I18n.localize(body); };
+    fill();
+    openPop(anchor, s.name + ' · ' + title, body);
+  }
+  function popTod(id, anchor) { popPanel(id, anchor, '商业开发', function (after) { return ui.todBody(id, after); }); }
+  function popDecor(id, anchor) { popPanel(id, anchor, '车站装修', function (after) { return ui.decorBody(id, after); }); }
   function drawRows(sid) {
     const n = net(), rows = [];
     for (const lid of M.stationLines(n, sid)) {
@@ -295,5 +313,6 @@
       [L, '拆除整条 ' + L.name + '（车站保留）', function () { closePop(); g.edit(function (x) { for (const s of M.lineSegs(x, lid)) delete x.segments[s.id]; delete x.lines[lid]; }); ui.select(null); ui.toast('已在草案中拆除 ' + L.name + ' 全部轨道', 'info'); }, true],
     ]));
   }
+  Q.popTod = popTod; Q.popDecor = popDecor;   // 财政页「车站商业」列表也直接打开商业开发气泡
   Q.popColor = popColor;   // 线路详情标题前的彩色徽标也打开调色气泡
 })(window.CM);

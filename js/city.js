@@ -11,11 +11,13 @@
   let CITY_SEQ = 0;
   function City() {
     this.uid = ++CITY_SEQ;   // 城市实例编号：几何等缓存按实例区分（不同地图、不同进度不会互相复用）
+    this.mapId = CM.mapId;   // 所属地图：切换地图后旧城市的迟到调用不能混用新地图的数据（见 Fac.list）
     this.terrainVer = 0;     // 地形阶段（填海后递增）
     this.W = CFG.W; this.H = CFG.H; this.N = this.W * this.H;
     this.VW = this.W + 1; this.VH = this.H + 1; this.V = this.VW * this.VH;
     this.version = 0; this.roadVersion = 0;
-    this.lockVer = 0;
+    this.lockVer = 0;        // 区域开放状态（可建设范围缓存，见 lockState）
+    this.geoVer = 0;         // 线路几何依赖的城市数据（水面、铁路、地标、机场）：月度增长不变，线路几何不必每月重算
     this.dirty = new Set();
   }
   CM.City = City;
@@ -36,10 +38,13 @@
   const FS = 4;   // 水域、绿地栅格：每格 4×4 子像素（约 62 m）
   const BS = 8;   // 建筑避让栅格：每格 8×8 子像素（约 31 m）
   // opts.densityScale：人口中心密度（按开局年标定）放大的倍数，只影响「是否已城市化」的判断（地图扩展迁移按存档年份生成新增范围时使用）
-  City.prototype.generate = function (seed, startYear, opts) {
+  // 生成与恢复城市分步执行（v2.6）：载入界面的动画和进度不再被几秒钟的同步计算卡住；结果与一次算完相同
+  City.prototype.generate = function (seed, startYear, opts) { const it = this.generateGen(seed, startYear, opts); let r = it.next(); while (!r.done) r = it.next(); };
+  City.prototype.generateGen = function* (seed, startYear, opts) {
     const W = this.W, H = this.H, N = this.N, ds = (opts && opts.densityScale) || 1;
     this.seed = seed;
     this.regions = D.regions.concat([D.defaultRegion]);
+    for (const r of this.regions) if (r.plan0) r.plan = r.plan0;   // 上一局改变过的片区规划（applyReplan）恢复原样
     this.regionOpen = new Uint8Array(this.regions.length);
     this.regionOpenDate = this.regions.map(function () { return null; });
     for (let k = 0; k < this.regions.length; k++) {
@@ -59,6 +64,7 @@
     this.landmarkOn = new Uint8Array(D.landmarks.length);
     this.terrainYear = startYear;   // 历史海岸线：此年份之后才形成的填海土地仍按水域处理
     this.buildTerrain();
+    yield;
 
     // 规划用地
     const airportK = this.regions.findIndex(function (r) { return r.id === 'airport'; });
@@ -73,10 +79,12 @@
       else if (D.airport && this.region[c] === airportK && startYear < D.airport.closeYear) this.lu[c] = LU.AIRPORT;
     }
     this.activateLandmarks(startYear);
+    yield;
 
     // 1990 年人口与就业（估算）
     let sumP = 0, sumJ = 0;
     for (let c = 0; c < N; c++) {
+      if ((c & 4095) === 4095) yield;
       const L = this.lu[c];
       if (L === LU.WATER || L === LU.HILL || L === LU.PARK || L === LU.AIRPORT) continue;
       const i = c % W, j = (c / W) | 0, cx = i + 0.5, cy = j + 0.5;
@@ -105,6 +113,7 @@
     const tP = U.interp(CFG.growth.popCurve, startYear), tJ = tP * U.interp(CFG.growth.jobsRatio, startYear);
     for (let c = 0; c < N; c++) { this.pop[c] *= tP / sumP; this.jobs[c] *= tJ / sumJ; }
     for (let c = 0; c < N; c++) this.bh[c] = this.heightFor(c, startYear);
+    yield;
 
     // 道路格网顶点（规则方格；真实道路在其上近似通行，绘制使用真实线形）
     this.vx = new Float32Array(this.V); this.vy = new Float32Array(this.V);
@@ -119,12 +128,14 @@
     this.eName = new Uint16Array(nTot);
     this.eCls = new Uint8Array(nTot);   // 最终等级
     this.eBlock = new Uint8Array(nTot); // 跨水
-    for (let e = 0; e < nTot; e++) this.eBlock[e] = this.edgeBlock(e);
+    for (let e = 0; e < nTot; e++) { this.eBlock[e] = this.edgeBlock(e); if ((e & 16383) === 16383) yield; }
     this.buildRoadGroups();
-    this.applyRoads(startYear);
+    yield;
+    yield* this.applyRoadsGen(startYear);
     this.updateStreets();
-    if (!opts || !opts.deferGraphs) this.buildGraphs();
-    this.version++;
+    yield;
+    if(!opts||!opts.deferGraphs)yield* this.buildGraphsGen();
+    this.version++; this.geoVer++;
   };
 
   function luSplit(L) {
@@ -138,6 +149,45 @@
   }
 
   // 规划用地：按所在区域的用地配方随机选取，并用低频噪声让同类用地成片（确定性，填海后的新土地复用）
+  // 历史城区（v2.6，机制见 traits.js）：区域的 heritage 标记（1，只能走地下、造价更高）与地标周围的地下保护范围（D.heritage.guards，2，更贵）。
+  // 只由地图数据决定，不进存档
+  City.prototype.buildHeritage = function () {
+    this.heritage = null; const H = D.heritage; if (!H) return;
+    const W = this.W, a = new Uint8Array(this.N), R = this.regions;
+    for (let c = 0; c < this.N; c++) if (R[this.region[c]].heritage && this.landMax[c] >= 0.5) a[c] = 1;
+    this.heritageGuards = [];
+    for (const g of H.guards || []) {
+      const lm = D.landmarks.find(function (l) { return l.id === g.lm; }); if (!lm) continue;
+      this.heritageGuards.push({ x: lm.x, y: lm.y, r: g.r, name: g.name || lm.name });
+      const r = Math.ceil(g.r + 1), i0 = Math.floor(lm.x), j0 = Math.floor(lm.y);
+      for (let j = j0 - r; j <= j0 + r; j++) for (let i = i0 - r; i <= i0 + r; i++) { if (i < 0 || j < 0 || i >= W || j >= this.H) continue; if (U.dist(i + 0.5, j + 0.5, lm.x, lm.y) <= g.r && this.landMax[j * W + i] >= 0.5) a[j * W + i] = 2; }
+    }
+    this.heritage = a;
+  };
+  City.prototype.heritageName = function (c) {
+    const g = (this.heritageGuards || []).find(function (q) { return U.dist(c % this.W + 0.5, ((c / this.W) | 0) + 0.5, q.x, q.y) <= q.r; }, this);
+    return g && this.heritage[c] === 2 ? g.name : String(this.regions[this.region[c]].name).replace(/（.*）/, '');
+  };
+  // 片区规划随年代改变（v2.6，码头关闭后改作商务区，D.replan）：之后这里长出的是办公楼。keepLu 为读档时（用地已从存档恢复）只改规划名称
+  City.prototype.applyReplan = function (year, keepLu) {
+    const list = D.replan; if (!list) return [];
+    const done = this._replan || (this._replan = {}), out = [];
+    list.forEach(function (e, i) {
+      if (done[i] || year < e.year) return;
+      done[i] = 1;
+      const k = this.regions.findIndex(function (r) { return r.id === e.region; }); if (k < 0) return;
+      const rg = this.regions[k]; if (!rg.plan0) rg.plan0 = rg.plan;
+      rg.plan = e.plan; if (e.maxHeight) rg.maxHeight = e.maxHeight;
+      out.push(e);
+      if (keepLu) return;
+      for (let c = 0; c < this.N; c++) {
+        if (this.region[c] !== k || this.plan[c] === LU.WATER || this.plan[c] === LU.PARK || this.plan[c] === LU.HILL || this.plan[c] === LU.AIRPORT) continue;
+        const p = this.planFor(c); this.plan[c] = p;
+        if (this.lu[c] === LU.IND) { this.lu[c] = p; this.dirty.add(c); }
+      }
+    }, this);
+    return out;
+  };
   City.prototype.planFor = function (c) {
     const W = this.W, i = c % W, j = (c / W) | 0, rg = this.regions[this.region[c]];
     const planName = rg.plan || 'res', dist = D.plans[planName] || D.plans.res;
@@ -450,7 +500,7 @@
     // 新土地可能把隔开的片区连起来（v2.2 可建设范围按格计算）：范围有变化的格重画
     const prevLock = this._lkPrevMask;
     if (prevLock) { const now = this.lockState().mask; for (let c = 0; c < N; c++) if (prevLock[c] !== now[c]) this.dirty.add(c); }
-    this.version++;
+    this.version++; this.geoVer++;
     return list;
   };
   // 格网边的跨水标记：0 陆地；1 跨越现代水面（快速路、主干道可作为桥梁通行）；
@@ -508,6 +558,7 @@
     this.region = new Uint8Array(N);
     for (let c = 0; c < N; c++) this.region[c] = rr[c] === NONE ? def : rr[c];
     this.mergeRegionFragments();
+    this.buildHeritage();
     // 区域中心（标注与定位用）与范围
     const sx = new Float64Array(regions.length), sy = new Float64Array(regions.length), sn = new Float64Array(regions.length);
     const bb = regions.map(function () { return [1e9, 1e9, -1e9, -1e9]; });
@@ -813,6 +864,7 @@
   };
   // 地标场地内的陆地格设为受保护（cells 为 null 时处理全部场地格，否则只处理其中的格，如刚成陆的格）
   City.prototype.protectLandmark = function (k, cells) {
+    this.geoVer++;
     const lm = D.landmarks[k];
     for (const c of this.landmarkCells(lm)) {
       if (cells && !cells.has(c)) continue;
@@ -905,13 +957,15 @@
     this.roadNames = [''].concat(groups.map(function (g) { return g.name; }));
     this.roadsBuilt = new Uint8Array(groups.length);
   };
-  City.prototype.applyRoads = function (year) {
+  City.prototype.applyRoads = function (year) { const it = this.applyRoadsGen(year); let r = it.next(); while (!r.done) r = it.next(); return r.value; };
+  City.prototype.applyRoadsGen = function* (year) {
     let changed = this.updateRail(year);
     const groups = this.roadGroups, BW = this.BW, BH = this.BH, bm = this.bmask;
     const notWater = function (v) { return v < 3; };
     for (let k = 0; k < groups.length; k++) {
       const g = groups[k];
       if (this.roadsBuilt[k] || g.year > year) continue;
+      if ((k & 127) === 127) yield;
       this.roadsBuilt[k] = 1; changed = true;
       // 建筑避让
       const hw = g.cls === 4 ? 0.1 : (g.cls === 3 ? 0.075 : 0.05);
@@ -939,7 +993,7 @@
       const b = g.bbox;
       if (year > CFG.START.y || this.version > 0) for (let jj = Math.max(0, Math.floor(b[1])); jj <= Math.min(this.H - 1, Math.floor(b[3])); jj++) for (let ii = Math.max(0, Math.floor(b[0])); ii <= Math.min(this.W - 1, Math.floor(b[2])); ii++) this.dirty.add(jj * this.W + ii);
     }
-    if (changed) this.version++;
+    if (changed) { this.version++; this.geoVer++; }
     return changed;
   };
   function Geo2() { return CM.Geo; }
@@ -1014,7 +1068,7 @@
     const on = new Uint8Array(rail.length);
     let changed = !this.railOn || this.railOn.length !== on.length;
     for (let k = 0; k < rail.length; k++) { on[k] = City.railActiveAt(rail[k], year) ? 1 : 0; if (!changed && on[k] !== this.railOn[k]) changed = true; }
-    this.railOn = on; this.railYear = year;
+    this.railOn = on; this.railYear = year; if (changed) this.geoVer++;
     return changed && this.version > 0;
   };
   // 每条格网边的铁路状态：eRail 0 无、1 绕行到附近通道（eRailDet 为附加米数）、2 阻断
@@ -1113,11 +1167,14 @@
   };
 
   // 构建步行图（CSR）与汽车图（收缩后的路段 + 小区连接线）
-  City.prototype.buildGraphs = function () {
+  // 分步执行（v2.5 性能）：月结时每步之间让出主线程；结果与一次算完相同
+  City.prototype.buildGraphs = function () { const it = this.buildGraphsGen(); while (!it.next().done); };
+  City.prototype.buildGraphsGen = function* () {
     const V = this.V, VW = this.VW, nTot = this.eCls.length;
     const vx = this.vx, vy = this.vy, CM_ = CFG.CELL_M;
     // 地面铁路：没有通道处阻断支路与次干道（含步行），有通道时绕行（v1.9）
     this.computeRailBlock();
+    yield;
     const eRail = this.eRail, eDet = this.eRailDet;
     // ---- 步行 ----
     const wDeg = new Int32Array(V + 1);
@@ -1143,6 +1200,7 @@
     }
     this.walk = { start: wStart, to: wTo, len: wLen, deg: wDeg };
 
+    yield;
     // ---- 汽车 ----
     // New pedestrian streets often leave the car graph exactly unchanged. Compare
     // all effective inputs instead of rebuilding contraction, snapping and OD links.
@@ -1183,6 +1241,7 @@
       const e1 = cEdge[cStart[v]], e2 = cEdge[cStart[v] + 1];
       if (this.eCls[e1] !== this.eCls[e2] || this.eName[e1] !== this.eName[e2]) forced[v] = 1;
     }
+    yield;
     // 小区连接点
     const Z = CFG.ZONE, ZW = this.W / Z, ZH = this.H / Z;
     const zoneCand = [];
@@ -1210,6 +1269,7 @@
         zoneCand.push(pick);
       }
     }
+    yield;
     // 收缩路段
     const visited = new Uint8Array(nTot);
     const links = [];
@@ -1378,7 +1438,7 @@
     for (let c = 0; c < this.N; c++) {
       if (this.lu[c] === LU.AIRPORT) { this.lu[c] = LU.RURAL; this.dirty.add(c); n++; }
     }
-    if (n) this.version++;
+    if (n) { this.version++; this.geoVer++; }
   };
 
   City.prototype.totals = function () {
@@ -1388,7 +1448,8 @@
   };
 
   // ---------------- 城市发展（每月） ----------------
-  // ctx: { year, monthIndex, zoneAccess (Float32Array 0..1), cellWalk (Float32Array m), coverage, econ }
+  // ctx: { year, monthIndex, zoneAccess (Float32Array 0..1), cellWalk (Float32Array m), coverage, econ, pull }
+  // pull（v2.3 地铁带动发展，可空）：{ field 每格的车站吸引, M 线网成熟度 0–1, w 车站吸引的权重 }，见 Game.metroPull
   // econ（城市经济，可空）：popGrowth 人口增速系数、jobs 就业水平系数、com 商业发展系数。只调整增速与就业水平，
   // 长期人口仍回到本城的人口曲线；地铁覆盖对人口的吸引（boost）不经过经济系数，避免重复计算
   City.prototype.growMonth = function (ctx) {
@@ -1416,6 +1477,9 @@
       }
       dJ += mJ; dP += mP;
     }
+    // 地铁带动发展（v2.3）：线网越成熟，增长越多地跟着车站与枢纽走（吸引权重 pw），历史阶段预设的片区权重越弱（flat）；
+    // 车站周边可容纳的人口与岗位随之提高。只改变增长落在哪里，全城总量仍按人口曲线
+    const PL = ctx.pull || null, GL = CFG.metroLed, pw = PL ? PL.w : 0, flat = PL ? 1 - GL.flatten * PL.M : 1;
     const wR = new Float32Array(N), wJ = new Float32Array(N), capR = new Float32Array(N), capJ = new Float32Array(N);
     let sR = 0, sJ = 0;
     const mi = ctx.monthIndex;
@@ -1426,7 +1490,8 @@
       const lf = this.landFrac[c] * (1 - this.taken[c]);
       if (lf <= 0.05) continue;
       const P = L === LU.RURAL ? this.plan[c] : L;
-      const cr = resCap(P) * eraMul * lf, cj = jobCap(P, this.regions[this.region[c]].plan) * eraMul * lf;
+      const pf = PL ? PL.field[c] : 0;
+      const cr = resCap(P) * eraMul * lf * (1 + GL.capR * pw * Math.min(1.5, pf)), cj = jobCap(P, this.regions[this.region[c]].plan) * eraMul * lf * (1 + GL.capJ * pw * Math.min(2, pf));
       capR[c] = cr; capJ[c] = cj;
       const i = c % W, j = (c / W) | 0;
       let nb = 0;
@@ -1446,11 +1511,11 @@
       }
       const rnd = 0.6 + 0.8 * U.hash2(c, mi, this.seed + 31);
       const remR = cr - this.pop[c], remJ = cj - this.jobs[c];
-      const kR = EF ? EF.pop[this.region[c]] : 1, kJ = EF ? EF.jobs[this.region[c]] : 1;
-      if (remR > 0) { wR[c] = remR * (0.25 + acc) * (1 + 1.6 * st) * (0.3 + nb) * rnd * seed * kR; sR += wR[c]; }
+      const kR = EF ? Math.pow(EF.pop[this.region[c]], flat) : 1, kJ = EF ? Math.pow(EF.jobs[this.region[c]], flat) : 1;
+      if (remR > 0) { wR[c] = remR * (0.25 + acc) * (1 + 1.6 * st) * (0.3 + nb) * rnd * seed * kR * (1 + GL.res * pw * pf); sR += wR[c]; }
       if (remJ > 0) {
         const comBoost = (P === LU.COM || P === LU.MIX) ? 2.0 * ecom : 1;
-        wJ[c] = remJ * (0.2 + acc * 1.2) * (1 + 1.6 * st * comBoost) * (0.3 + nb) * rnd * seed * kJ; sJ += wJ[c];
+        wJ[c] = remJ * (0.2 + acc * 1.2) * (1 + 1.6 * st * comBoost) * (0.3 + nb) * rnd * seed * kJ * (1 + GL.jobs * pw * pf * (comBoost > 1 ? 1.3 : 1)); sJ += wJ[c];
       }
     }
     const changed = [];
@@ -1562,7 +1627,8 @@
     this.filled = { year: year, cells: n, fP: +fP.toFixed(3), fJ: +fJ.toFixed(3) };
     return n;
   };
-  City.prototype.restore = function (s, year) {
+  City.prototype.restore = function (s, year) { const it = this.restoreGen(s, year); let r = it.next(); while (!r.done) r = it.next(); };
+  City.prototype.restoreGen = function* (s, year) {
     this.lockRuleOld = (s.lockRule || 1) < 2; this.lockVer++; this._lk = null;
     const N = this.N;
     const chk = function (a, n) { if (a.length !== n) throw new Error('城市数据尺寸不符'); return a; };
@@ -1601,8 +1667,13 @@
       this.landmarkOn[k] = 1;
       for (const c of this.landmarkCells(D.landmarks[k])) if (this.lu[c] === LU.LANDMARK || (D.landmarks[k].kind === 'campus' && this.lu[c] !== LU.WATER)) this.protectedId[c] = k + 1;
     }
+    // v2.3 位置校正后，旧存档里地标原址留下的场地格不再属于任何地标：恢复为规划用地，之后照常开发；
+    // 地标新址的格在下一次月度更新时按年份启用并受保护
+    for (let c = 0; c < N; c++) if (this.lu[c] === LU.LANDMARK && !this.protectedId[c]) this.lu[c] = this.plan[c] === LU.LANDMARK ? LU.RES : this.plan[c];
+    for (let k = 0; k < D.landmarks.length; k++) if (this.landmarkOn[k] && !this.landmarkCells(D.landmarks[k]).some((c) => this.protectedId[c] === k + 1)) this.landmarkOn[k] = 0;
     this.applyReclaim(year, true);   // 历史海岸线恢复到存档年份（用地已从存档恢复）
-    // 同范围地形修订：包含填海 / 机场边界校正，以及无填海地图的错误水域修复（武汉河渠宽度）。
+    this.applyReplan(year, true);
+    // 同范围地形修订：填海 / 机场边界校正及武汉河渠异常宽度修复，按当前地理重新核验旧档用地。
     // 旧存档的用地与新地形不一致的格就地修正：陆地上的水域格补成陆地，仍是海面的格改回水域，机场用地按新范围
     if ((s.terrainRevision || 1) < (D.terrainRevision || 1)) {
       const airportOpen = D.airport && year <= D.airport.closeYear && this.lu.indexOf(LU.AIRPORT) >= 0;
@@ -1632,10 +1703,12 @@
     // Newly defined park / protected areas retain their intended land use after upgrade.
     for (let c = 0; c < N; c++) if (this.regions[this.region[c]].park && this.landFrac[c] >= 0.5 && this.lu[c] === LU.RURAL) { this.lu[c] = this.plan[c] = LU.PARK; this.isPark[c] = 1; }
     this.eArt.fill(0); this.eName.fill(0); this.roadsBuilt.fill(0);
-    this.applyRoads(year);
+    yield;
+    yield* this.applyRoadsGen(year);
     this.updateStreets();
-    this.buildGraphs();
-    this.version++;
+    yield;
+    yield* this.buildGraphsGen();
+    this.version++; this.geoVer++;
     for (let c = 0; c < N; c++) this.dirty.add(c);
   };
 })(window.CM);

@@ -30,7 +30,7 @@
     flag: function () { return enabled() ? 'cb' : 'normal'; },
     palette: function () { return (night() ? DARK : PALETTE).slice(); },
     statuses: function () { return STATUS.map(display); },
-    number: function (line) { return String(line.num || line.id || '?'); },
+    number: function (line) { return CM.Metro && line.name ? CM.Metro.lineBadge(line) : String(line.num || line.id || '?'); },
     line: function (line) {
       if (!line) return '#555555';
       if (!enabled()) return line.color;

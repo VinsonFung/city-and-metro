@@ -72,12 +72,14 @@
   // 当前地图的设施表（按地图数据缓存）。lm：引用地标（位置、场地与落成年份取自地标）
   // city：传入时同时生成片区设施（需要城市的片区划分）；不传时沿用最近一次生成的表
   Fac.list = function (city) {
+    // 切换地图后旧城市的迟到调用：不按新地图的设施表生成，也不覆盖缓存（玩家反馈：不同城市的设施与需求混在一起）
+    if (city && city.mapId && city.mapId !== CM.mapId) return [];
     if (D._facSrc === D.facilities && D._fac && (!city || D._facCity === city)) return D._fac;
     const out = [];
     const lms = D.landmarks || [];
     (D.facilities || []).forEach(function (s, i) {
       const T = TYPES[s.t]; if (!T) return;
-      const f = { k: out.length, id: s.id || ('f' + i), name: s.n, t: s.t, T: T, x: 0, y: 0, r: s.r != null ? s.r : T.r, lmK: -1,
+      const f = { k: out.length, id: s.id || ('f' + i), name: s.n, label: s.label || s.n, t: s.t, T: T, x: 0, y: 0, r: s.r != null ? s.r : T.r, lmK: -1,
         open: null, close: yrOf(s.y1), w: s.w != null ? curve(s.w) : null, pax: s.pax || null, p: s.p || T.p, we: s.we || null, note: s.note || '', src: s.src || null,
         ext: s.ext ? { dir: s.ext[0], km: s.ext[1], v: EXT_DIR[s.ext[0]] || [0, 0] } : null, rw: s.rw || null };   // rw：机场自己的跑道（格坐标，v2.2，用于模型选址）
       if (s.lm) {

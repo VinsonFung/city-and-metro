@@ -7,29 +7,40 @@
   const IDX = P + 'index';
 
   // ---------------- 存储后端 ----------------
-  let db = null, dbFailed = false, opening = null;
+  let db = null, opening = null;
+  function closeDB(connection) {
+    // 旧连接的迟到事件不能清掉已经重建的新连接。
+    if (db === connection) db = null;
+    try { connection.close(); } catch (e) { /* 已关闭。 */ }
+  }
+  function unavailableDB() {
+    const e = new Error('IndexedDB 不可用');
+    e.idbUnavailable = true;
+    return e;
+  }
   function openDB() {
-    if (db || dbFailed) return Promise.resolve(db);
+    if (db) return Promise.resolve(db);
     if(opening)return opening;
     opening = new Promise(function (resolve) {
       let settled=false;
-      const fail=function(){if(settled)return;settled=true;dbFailed=true;resolve(null);};
+      // 打开失败只影响本次操作；下次保存 / 读取仍可恢复，不能整场禁用数据库。
+      const fail=function(){if(settled)return;settled=true;resolve(null);};
       let req;
       try { req = indexedDB.open('city-metro', 1); } catch (e) { fail(); return; }
       req.onupgradeneeded = function () { if(!req.result.objectStoreNames.contains('slots'))req.result.createObjectStore('slots'); };
       req.onsuccess = function () {
         if(settled){req.result.close();return;}
         settled=true;db=req.result;const opened=db;
-        opened.onversionchange=function(){opened.close();if(db===opened){db=null;dbFailed=false;}};
+        opened.onversionchange=opened.onclose=function(){closeDB(opened);};
         resolve(db);
       };
       req.onerror = req.onblocked = fail;
     }).finally(function(){opening=null;});
     return opening;
   }
-  function idbOp(mode, fn) {
+  function idbOp(mode, fn, retry = true) {
     return openDB().then(function (d) {
-      if (!d) throw new Error('IndexedDB 不可用');
+      if (!d) throw unavailableDB();
       return new Promise(function (resolve, reject) {
         const tx = d.transaction('slots', mode);
         const st = tx.objectStore('slots');
@@ -39,18 +50,30 @@
         tx.oncomplete = function () { resolve(result); };
         tx.onerror = function () { reject(tx.error || new Error('IndexedDB 写入失败')); };
         tx.onabort = function () { reject(tx.error || new Error('IndexedDB 事务中止')); };
+      }).catch(function (e) {
+        // 关闭中的连接不能再创建事务；异常关闭也可能先中止事务，再派发 close。
+        // 本层只有按键 put/get/delete，重新执行同一次操作不会重复创建存档槽位。
+        if (!e || (e.name !== 'InvalidStateError' && e.name !== 'AbortError')) throw e;
+        closeDB(d);
+        if (retry) return idbOp(mode, fn, false);
+        throw unavailableDB();
       });
     });
   }
   const store = {
     put: function (key, str) {
       return idbOp('readwrite', function (st) { return st.put(str, key); }).then(function () { return 'idb'; })
-        .catch(function (e) { if (db) throw e; localStorage.setItem(key, str); return 'ls'; });
+        .catch(function (e) { if (!e.idbUnavailable) throw e; localStorage.setItem(key, str); return 'ls'; });
     },
     get: function (key, where) {
       if (where === 'ls') return Promise.resolve(localStorage.getItem(key));
       return idbOp('readonly', function (st) { return st.get(key); })
-        .then(function (v) { return v != null ? v : localStorage.getItem(key); }, function () { return localStorage.getItem(key); });
+        .then(function (v) { return v != null ? v : localStorage.getItem(key); }, function (e) {
+          const fallback = localStorage.getItem(key);
+          // 已知在 IDB 中的存档不能因暂时断连就被误报为「数据丢失」。
+          if (fallback == null && where === 'idb') throw e;
+          return fallback;
+        });
     },
     del: function (key, where) {
       try { localStorage.removeItem(key); } catch (e) { /* ignore */ }

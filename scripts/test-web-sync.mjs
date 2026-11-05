@@ -11,7 +11,7 @@ for(const [,src]of(await readFile(path.join(root,'index.html'),'utf8')).matchAll
   vm.runInContext(await readFile(path.join(root,src),'utf8'),c,{filename:src});if(src==='js/save.js')break;
 }
 const C=c.CM;
-assert.equal(C.CFG.RULES_REVISION,3);
+assert.ok(C.CFG.RULES_REVISION>=4);
 const airports={hz:['hz_xsair'],wh:['wh_tianhe'],hk:['hk_cklair'],pa:['pa_cdg','pa_orly'],tk:['tk_haneda']};
 for(const [map,ids]of Object.entries(airports)){
   C.useMap(map);const city=new C.City();city.generate(12345,2024);

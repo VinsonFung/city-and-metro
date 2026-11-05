@@ -2,9 +2,9 @@
 // 全局参数。PRD 中标注"待确认"的数值在此给出可调整的默认值（DEFAULT），评审确认后只需修改本文件。
 (function (CM) {
   CM.CFG = {
-    GAME_VERSION: '2.2.0',
-    TRAFFIC_MODEL: 4,      // 轻量更新与交通任务复核；旧档升级前备份
-    RULES_REVISION: 3,     // 网页版规则修订：设施接驳、按格开放与景区费用；升级前备份，不重算历史
+    GAME_VERSION: '2.5.0',
+    TRAFFIC_MODEL: 4,      // 轻量交通更新；与显示版本独立，确保 v3 存档仍触发安全迁移
+    RULES_REVISION: 6,     // Web v2.5: back up older task rules; preserve settled history.
     SAVE_FORMAT: 'city-metro-save',
     SAVE_VERSION: 2,
     SAVE_MIN_VERSION: 2,   // 1.1 起地图改为真实地理，旧版存档的城市数据与之不兼容
@@ -88,16 +88,23 @@
       vmax: { underground: 22, surface: 19, elevated: 22 },  // m/s
       accel: 0.9, dwell: 30, turnaround: 150,
       latAccel: 0.8,            // 弯道横向加速度上限 → 弯道限速
-      carCap: 240,              // 每节车厢定员
+      carCap: 310,              // 每节车厢定员
       carsBySize: { S: 4, M: 6, L: 8 }, // 列车编组受沿线最小站台限制
       fMin: [8, 6, 8, 4],       // 各时段最低发车频率（列/小时）DEFAULT
       fMax: 30,                 // 最小间隔 2 分钟
       targetLF: 0.85,
-      stationCap: { S: 9000, M: 20000, L: 40000 }, // 车站每小时进出站+换乘能力 DEFAULT
-      minSpacingM: 200,         // 独立车站最小间距；站外换乘仍按实际步行路径上限判断
+      stationCap: { S: 15000, M: 35000, L: 70000 }, // 车站每小时进出站+换乘能力 DEFAULT
+      minSpacingM: 100,         // 独立车站最小间距；站外换乘仍按实际步行路径上限判断
       // 线形约束（参考城市轨道交通设计规范的量级，DEFAULT）
       minRadiusM: 250,          // 正线最小曲线半径：低于此值不允许
       warnRadiusM: 400,         // 低于此值需限速通过
+      speedGrades: [
+        { kmh: 40, minR: 100, warnR: 150, ops: 0.85, track: 0 },
+        { kmh: 60, minR: 150, warnR: 250, ops: 0.92, track: 0 },
+        { kmh: 80, minR: 250, warnR: 400, ops: 1, track: 0 },
+        { kmh: 100, minR: 400, warnR: 650, ops: 1.12, track: 0.15 },
+        { kmh: 120, minR: 600, warnR: 1000, ops: 1.25, track: 0.3 },
+      ],
       maxTurnAtStationDeg: 60,  // 车站前后线路方向最大偏转（站台为直线段）
       platformHalfM: 70,        // 站台直线段半长
       maxGrade: 0.03,           // 最大坡度（地下/地面/高架转换坡道）
@@ -194,6 +201,8 @@
       satFail: 25, satFailMonths: 12,
       startSat: 60,
       failGrantFactor: 0.85, failGrantMonths: 12, failSat: -6,
+      failDynGrantFactor: 0.92, failDynMonths: 6, failDynSat: -3,   // 动态任务未完成（v2.3 平衡）：较历史任务轻
+      grantModFloor: 0.7,   // 多项任务未完成叠加时拨款系数的下限（v2.3 由 0.6 提高）
     },
 
     growth: {
@@ -204,8 +213,17 @@
       metroBoostMax: 0.06,
     },
 
+    // 地铁对城市的反作用（v2.3 玩家反馈，各地图通用，不随地图替换）
+    // habit 出行习惯：车站开通后，周边居民的出行习惯在约 years 年内逐步转向地铁——对地铁的偏好最多相当于 asc 分钟；
+    // 留下的非地铁出行里最多 carLite 改为步行、公交接驳等，不再开车上路。两端都在成熟车站周边时取满值，一端时取一半；
+    // 随每月的交通求解一起更新，不额外计算
+    habit: { years: 4, asc: 8, carLite: 0.15 },
+    // metroLed 地铁带动发展：每座运营车站对半径 radius 格内产生吸引，强度 = base + 每多一条线 xfer + 客流（flowFull 人次/日取满）flow
+    // + 车站商业开发 tod[等级]，开通后约 years 年形成。线网成熟度按地铁覆盖比例（cov0 起、cov1 满）：成熟度越高，车站吸引的权重
+    // 越大（wMin → 1），历史阶段预设的片区增长权重越弱（flatten），车站周边可容纳的人口 / 岗位也提高（capR / capJ）。只重新分配增长，不改变全城总量
+    metroLed: { radius: 4, years: 4, base: 0.3, xfer: 0.5, flow: 0.6, flowFull: 60000, tod: [0, 0.15, 0.4, 0.8], cov0: 0.08, cov1: 0.45, wMin: 0.25, res: 1.0, jobs: 1.8, flatten: 0.6, capR: 0.35, capJ: 0.9 },
     saves: { prefix: 'cm1.', maxManual: 12 },
     // 动态对象上限（代表性展示）：汽车、车站行人、街道行人、列车上下车乘客（每帧）；声音：列车声部与同时播放的环境短音
-    perf: { solverBudgetMs: 5, chunkBudgetMs: 6, sharpBudgetMs: 8, movingBudgetMs: 3, prefetchMs: 2, warmBudgetMs: 10, cacheMaxPx: 24e6, maxCars: 320, maxPeds: 180, maxWalkers: 120, maxRiders: 120, trainVoices: 3, maxOneShots: 6 },
+    perf: { solverBudgetMs: 5, solverBudgetMaxMs: 10, frameTargetMs: 13, jumpSliceMs: 10, jumpRenderMs: 250, chunkBudgetMs: 6, sharpBudgetMs: 8, movingBudgetMs: 3, prefetchMs: 2, warmBudgetMs: 10, cacheMaxPx: 24e6, maxCars: 320, maxPeds: 180, maxWalkers: 120, maxRiders: 120, trainVoices: 3, maxOneShots: 6 },
   };
 })(window.CM);

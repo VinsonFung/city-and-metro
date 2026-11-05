@@ -1,5 +1,5 @@
 'use strict';
-// Web v2.2 presentation; browser chrome, shortcuts and small-screen layout stay in ui.js.
+// Browser presentation and lifecycle; browser chrome, shortcuts and small-screen layout stay in ui.js.
 (function (CM) {
   const UI = CM.UI, U = CM.U, CFG = CM.CFG, D = CM.DATA, h = U.h, ic = CM.icon;
   UI.ERA_COLORS = ['#2f9e8f', '#3a7bd5', '#c2410c', '#7c4dff', '#d6336c', '#0f8a5f', '#b7791f', '#5b6b8c'];
@@ -21,111 +21,6 @@
     const w = Math.round(frac * 1000) / 10;
     if (chip._w !== w) { chip._w = w; chip.querySelector('.ec-prog i').style.width = w + '%'; }
     chip.classList.toggle('on', !!this.topIs(['era']) && !this.right.classList.contains('closed'));
-  };
-
-  UI.prototype.clearHist = function () {
-    this._histQ = []; this._phaseQ = [];
-    if (this.histHost) this.histHost.innerHTML = '';
-  };
-
-  UI.prototype.flushHist = function () {
-    const g = this.g(); if (!g || g.jumping || this.blocking() || this.celebrationBlocked() || !this._histQ) return;
-    if (this._phaseQ.length) { const er = this._phaseQ[this._phaseQ.length - 1]; this._phaseQ.length = 0; this.showPhaseBanner(er); }
-    if (!this._histQ.length) return;
-    // 跳月 / 跳年后一次到来的多条事件合成一张摘要卡片
-    if (this._histQ.length > 2) { this.showHistDigest(this._histQ.splice(0)); return; }
-    while (this._histQ.length && this.histHost.querySelectorAll('.hist-card').length < (this.compact() ? 1 : 2)) this.showHistCard(this._histQ.shift());
-  };
-
-  UI.prototype.histLife = function (box, ms) {
-    const self = this; let left = ms, t0 = performance.now(), timer = null;
-    const close = function () { if (box.classList.contains('out')) return; clearTimeout(timer); box.classList.add('out'); setTimeout(function () { box.remove(); self.flushHist(); }, CM.Settings.reducedMotion() ? 0 : 380); };
-    const run = function () { t0 = performance.now(); timer = setTimeout(close, left); box.style.setProperty('--life-play', 'running'); };
-    box.addEventListener('pointerenter', function () { clearTimeout(timer); left -= performance.now() - t0; box.style.setProperty('--life-play', 'paused'); });
-    box.addEventListener('pointerleave', run);
-    box.style.setProperty('--life', ms + 'ms');
-    run();
-    return close;
-  };
-
-  UI.prototype.showPhaseBanner = function (er) {
-    const self = this, E = CM.Eras; if (!E || !er || !er.era) return;
-    const L = E.list(), k = L.indexOf(er.era), e = er.era, to = E.endOf(k);
-    for (const old of this.histHost.querySelectorAll('.phase-banner')) old.remove();
-    // 展望：背景中「估算 / 模拟」的第一句；上一阶段的结果：人口、岗位、新开发用地与地铁
-    const en = CM.I18n && CM.I18n.get() === 'en';
-    const outlook = en ? (CM.I18n.text(String(e.summary || '')).split(/Estimated: |Simulated: |Fictional: /)[1] || '').split(/\.\s/)[0].replace(/\.$/, '')
-      : (String(e.summary || '').split(/估算：|模拟：|虚构：/)[1] || '').split('。')[0];
-    let prev = null;
-    if (er.prev && er.prev.start && er.prev.end) {
-      const a = er.prev.start, b = er.prev.end, pe = E.byId(er.prev.id), pc = function (x, y) { return x > 0 ? U.fmtSigned(Math.round((y / x - 1) * 100), 0) + '%' : '—'; };
-      const bits = ['人口 ' + pc(a.pop, b.pop), '岗位 ' + pc(a.jobs, b.jobs)];
-      if (a.dev != null && b.dev != null) bits.push('新开发用地 ' + U.fmtSigned(Math.round((b.dev - a.dev) * CFG.CELL_M * CFG.CELL_M / 1e5) / 10, 1) + ' km²');
-      bits.push(b.km > 0 ? '地铁 ' + U.fmtNum(b.km, 0) + ' km' : '尚无地铁');
-      prev = '「' + (pe ? pe.name : '上一阶段') + '」' + bits.join(' · ');
-    }
-    let close = null;
-    const box = h('div', { class: 'phase-banner', style: { '--ec': UI.ERA_COLORS[k % UI.ERA_COLORS.length] }, role: 'status' },
-      h('span', { class: 'pb-line' }),
-      h('div', { class: 'pb-num' }, h('b', null, String(k + 1)), h('small', null, '/ ' + L.length)),
-      h('div', { class: 'pb-body' },
-        h('div', { class: 'pb-kick' }, h('span', null, '新的发展阶段 · ' + e.from + (to ? '–' + to : ' 年起')), h('span', { class: 'pb-tag' }, e.tag)),
-        h('div', { class: 'pb-title' }, e.name),
-        outlook ? h('div', { class: 'pb-sub' }, en ? outlook.charAt(0).toUpperCase() + outlook.slice(1) + '.' : outlook + '。') : null,
-        prev ? h('div', { class: 'pb-prev' }, ic('chart', 13), h('span', null, prev)) : null,
-        h('div', { class: 'pb-dots' }, L.map(function (x, i) { return h('i', { class: i < k ? 'past' : (i === k ? 'cur' : '') }); }))),
-      h('div', { class: 'pb-acts' },
-        h('button', { class: 'btn sm', onclick: function () { if (close) close(); self.openPage('era', null, { root: true }); } }, '查看变化'),
-        h('button', { class: 'iconbtn', 'aria-label': '关闭', onclick: function () { if (close) close(); } }, ic('close'))),
-      h('i', { class: 'pb-life' }));
-    this.histHost.prepend(box);
-    snd('chime');
-    close = this.histLife(box, 11000);
-  };
-
-  UI.prototype.histTarget = function (ev, chips) {
-    const g = this.g(); if (!g) return null;
-    const rid = chips.length && chips[0].region;
-    if (rid) { const k = g.city.regions.findIndex(function (r) { return r.id === rid; }); if (k >= 0) return { region: k }; }
-    const lm = (CM.DATA.landmarks || []).filter(function (x) { return x.name && x.name.length >= 3 && String(ev.title).indexOf(String(x.name).replace(/（.*）/, '')) >= 0; })[0];
-    return lm ? { x: lm.x, y: lm.y, name: lm.name } : null;
-  };
-
-  UI.prototype.showHistCard = function (ev) {
-    const self = this, chips = CM.Eras ? CM.Eras.fxChips(ev.fx) : [], tgt = ev.econ ? null : this.histTarget(ev, chips);
-    const tagCls = { '史实': 'hist', '模拟': 'sim' }[ev.tag] || 'info';
-    let close = null;
-    const box = h('div', { class: 'hist-card' + (ev.econ ? ' econ' + (ev.neg ? ' neg' : '') : '') },
-      h('div', { class: 'hc-date' }, h('b', null, String(ev.y)), h('small', null, (ev.m || 1) + ' 月')),
-      h('div', { class: 'hc-body' },
-        h('div', { class: 'hc-kick' }, h('span', { class: 'tag ' + tagCls }, ev.tag || '史实'), h('span', null, ev.econ ? '城市经济 · 对本城影响' + (ev.lvl || '') : '历史时刻')),
-        h('div', { class: 'hc-title' }, ev.title),
-        ev.desc ? h('div', { class: 'hc-desc' }, ev.desc) : null,
-        chips.length ? h('div', { class: 'hc-chips' }, chips.map(function (c) { return h('span', { class: 'hc-chip ' + (c.up ? 'up' : 'down') }, ic(c.icon, 12), c.text); })) : null),
-      h('div', { class: 'hc-acts' },
-        tgt ? h('button', { class: 'iconbtn', 'data-tip': '在地图上查看', onclick: function () { if (tgt.region != null) self.locateRegion(tgt.region); else self.locatePoint(tgt.x, tgt.y, tgt.name, 2.5); } }, ic('locate')) : null,
-        h('button', { class: 'iconbtn', 'aria-label': '关闭', onclick: function () { if (close) close(); } }, ic('close'))),
-      h('i', { class: 'hc-life' }));
-    this.histHost.appendChild(box);
-    snd('notify');
-    close = this.histLife(box, 9000 + Math.min(4000, String(ev.desc || '').length * 40));
-  };
-
-  UI.prototype.showHistDigest = function (list) {
-    const self = this;
-    let close = null;
-    const rows = list.slice(-5).map(function (ev) { return h('div', { class: 'hd-row' }, h('b', null, ev.y + '.' + (ev.m || 1)), h('span', null, (ev.econ ? '经济：' : '') + ev.title)); });
-    const box = h('div', { class: 'hist-card digest' },
-      h('div', { class: 'hc-date' }, h('b', null, String(list.length)), h('small', null, '件')),
-      h('div', { class: 'hc-body' }, h('div', { class: 'hc-kick' }, h('span', null, '历史时刻 · 这段时间里')), h('div', { class: 'hd-list' }, rows),
-        list.length > 5 ? h('div', { class: 'hc-desc' }, '另有 ' + (list.length - 5) + ' 件，见城市纪事') : null),
-      h('div', { class: 'hc-acts' },
-        h('button', { class: 'iconbtn', 'data-tip': '城市纪事', onclick: function () { if (close) close(); self.openStats('milestones'); } }, ic('book')),
-        h('button', { class: 'iconbtn', 'aria-label': '关闭', onclick: function () { if (close) close(); } }, ic('close'))),
-      h('i', { class: 'hc-life' }));
-    this.histHost.appendChild(box);
-    snd('notify');
-    close = this.histLife(box, 12000);
   };
 
   // 载入动画（v2.2 第三次重做）：严格以 LOGO 原图为准，循环播放、不旋转。画面就是 LOGO 图片本身，由沿笔画走向的遮罩逐段显出——
@@ -298,14 +193,6 @@
     if (this.topIs(['era']) && !this.right.classList.contains('closed')) this.closePanel(true);
     else this.openPage('era', null, { root: true });
   };
-  const legend = UI.prototype.legend;
-  UI.prototype.legend = function (id) {
-    if (id !== 'dev') return legend.call(this, id);
-    const self = this, R = this.R;
-    const options = (key, items) => h('div', { class: 'seg-ctl sm', style: { marginBottom: '8px' } }, items.map(o => h('button', { class: R.layerOpt[key] === o[0] ? 'on' : '', onclick: () => { R.layerOpt[key] = o[0]; R.heatKey = ''; self.renderDock(); } }, o[1])));
-    return h('div', { class: 'legend' }, options('devK', [['pop', '人口'], ['jobs', '岗位'], ['land', '用地']]), options('devB', [['era', '本阶段以来'], ['start', '本局以来']]),
-      h('div', { class: 'note' }, '绿色、蓝色或金色表示增加，红色表示减少；每块约 1 km。旧进度从载入时开始比较。'));
-  };
   const datePage = UI.prototype.page_date;
   UI.prototype.page_date = function () {
     const page = datePage.call(this), self = this, e = CM.Eras.current(this.g().year());
@@ -315,5 +202,9 @@
   UI.settingsExtra.display.push(function () {
     const S=CM.Settings, b=h('button',{class:'switch'+(S.get('lighting')?' on':''),role:'switch','aria-label':'统一光照','aria-checked':String(S.get('lighting')!==false),onclick:function(){const on=S.get('lighting')===false;S.set('lighting',on);b.classList.toggle('on',on);b.setAttribute('aria-checked',String(on));}},h('i'));
     return h('div',{class:'set-row'},h('span',{class:'set-ico'},ic('sun')),h('div',{class:'grow'},h('div',{class:'set-t'},'统一光照'),h('div',{class:'set-d'},'山体与建筑使用同一光向，白天与夜晚随主题切换')),b);
+  });
+  UI.settingsExtra.display.push(function () {
+    const S=CM.Settings, b=h('button',{class:'switch'+(S.get('stationModels')?' on':''),role:'switch','aria-label':'车站模型','aria-checked':String(S.get('stationModels')!==false),onclick:function(){const on=S.get('stationModels')===false;S.set('stationModels',on);b.classList.toggle('on',on);b.setAttribute('aria-checked',String(on));}},h('i'));
+    return h('div',{class:'set-row'},h('span',{class:'set-ico'},ic('station')),h('div',{class:'grow'},h('div',{class:'set-t'},'车站模型'),h('div',{class:'set-d'},'在 2.5D 近景显示站台、出入口与车站装修')),b);
   });
 })(window.CM);
