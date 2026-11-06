@@ -8,7 +8,7 @@ City & Metro is a single-player metro planning and city management game for your
 
 **[Play online](https://city-and-metro.pages.dev)** · [Source repository](https://github.com/VinsonFung/city-and-metro) · [License](./LICENSE.txt)
 
-The web edition **v2.5.0** adds government contracts, commercial profit and loss, fleet purchases and dispatch, line speeds and services, and the Metro Core management system. It also brings compound tasks, construction balancing, analysis tools, tutorial, sound, three-language and performance updates. World-map city selection and city transitions remain exclusive to the standalone edition.
+The web edition **v2.5.1** adds government contracts, commercial profit and loss, fleet purchases and dispatch, line speeds and services, and the Metro Core management system. It also brings compound tasks, construction balancing, analysis tools, tutorial, sound, three-language and performance updates. World-map city selection and city transitions remain exclusive to the standalone edition.
 
 ## Maintenance and community editions
 

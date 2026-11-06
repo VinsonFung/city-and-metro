@@ -123,6 +123,8 @@
     this.layerPanel = h('div', { id: 'layerPanel', class: 'glass hidden', role: 'dialog', 'aria-label': '图层', inert: true });
     window.addEventListener('pointerdown', function (e) { if (!self.layerPanel.classList.contains('hidden') && !self.layerPanel.contains(e.target) && !self.layerBtn.contains(e.target)) self.toggleLayerPanel(false); }, true);
     this.legendCard = h('aside', { id: 'legendCard', class: 'hud glass hidden' });
+    // 地图比例尺（v2.6.1 玩家反馈）：按画面中心的地面距离换算，随缩放变化；显示网格时同时标出一格的大小
+    this.scaleBar = h('div', { id: 'scaleBar', class: 'hud hidden', 'aria-hidden': 'true' }, h('span', { class: 'sb-t' }), h('i', { class: 'sb-b' }), h('small', { class: 'sb-g' }));
     const R = this.R;
     this.zoomCtl = h('div', { id: 'zoomCtl' },
       h('button', { 'data-tip': '放大', 'data-act': 'cam.zoomIn', 'data-side': 'right', onclick: function () { R.zoomAt(R.w / 2, R.h / 2, 1.5); } }, ic('plus')),
@@ -222,7 +224,7 @@
       bs[e.key === 'Home' ? 0 : e.key === 'End' ? bs.length - 1 : (i + (e.key === 'ArrowUp' ? -1 : 1) + bs.length) % bs.length].focus();
     }, true);
     this.brDock = h('div', { class: 'br-dock' }, this.opsDock, this.satDock);
-    app.append(this.top, this.dock, this.layerPanel, this.legendCard, this.right, this.toolbar, this.bstack, this.feed, this.newsHost, this.brDock, this.tip, this.uitip, this.fxLayer, this.statsEl, this.screen);
+    app.append(this.top, this.dock, this.scaleBar, this.layerPanel, this.legendCard, this.right, this.toolbar, this.bstack, this.feed, this.newsHost, this.brDock, this.tip, this.uitip, this.fxLayer, this.statsEl, this.screen);
     this.initTips();
     this.initPress();
     this.renderDock();
@@ -239,7 +241,7 @@
     // 只观察外框尺寸，不在每帧或每次文字更新时重新布局。
     if (window.ResizeObserver) {
       this.layoutObserver = new ResizeObserver(function () { self.queueLayout(); });
-      for (const el of [this.top, this.toolbar, this.bstack, this.right, this.legendCard]) this.layoutObserver.observe(el);
+      for (const el of [this.top, this.toolbar, this.brDock, this.scaleBar, this.bstack, this.right, this.legendCard]) this.layoutObserver.observe(el);
     }
     CM.Settings.on(function (k) {
       if (k === 'immersive') self.applyImmersive();
@@ -305,17 +307,39 @@
     const hud = this.top.getBoundingClientRect(), toolbar = this.toolbar.getBoundingClientRect();
     const visible = function (el) { return el && !el.classList.contains('hidden') && !el.classList.contains('closed') && el.getClientRects().length; };
     px('--mobile-hud-bottom', hud.bottom + 6);
+    // 两组底栏放得下时并排；窄屏或界面放大时将 App 入口放到建设工具上方。
+    // 全部使用实际像素测量，再由 CSS 抵消 zoom，避免固定偏移随语言和缩放失效。
+    if (this.compact()) {
+      const apps = this.brDock.getBoundingClientRect();
+      const inline = toolbar.left - (v.left + 8 + apps.width) >= 8;
+      px('--mobile-app-bottom', inline ? innerHeight - v.bottom + 10 : innerHeight - toolbar.top + 8);
+      const footerTop = Math.min(toolbar.top, visible(this.brDock) && apps.height ? this.brDock.getBoundingClientRect().top : toolbar.top);
+      px('--mobile-build-bottom', innerHeight - footerTop + 8);
+    }
     let controlsTop = toolbar.top;
     const follow = document.getElementById('followCard');
     if (document.body.classList.contains('following') && follow) controlsTop = Math.min(controlsTop, follow.getBoundingClientRect().top);
     if (!document.body.classList.contains('following') && visible(this.bstack) && (visible(this.draftbar) || visible(this.toolopts))) controlsTop = Math.min(controlsTop, this.bstack.getBoundingClientRect().top);
+    if (visible(this.brDock) && this.brDock.getBoundingClientRect().height) controlsTop = Math.min(controlsTop, this.brDock.getBoundingClientRect().top);
     px('--mobile-controls-top', controlsTop);
     px('--mobile-panel-bottom', Math.max(0, innerHeight - controlsTop + 8));
     // 底部抽屉出现后，图层图例与教程只使用上方剩余空间。
     // 使用布局位置，避免抽屉入场动画的临时位移让地图控件占用抽屉空间。
     const panelTop = this.compact() && innerHeight >= innerWidth && visible(this.right) ? this.right.offsetTop * (CM.Settings.get('uiScale') || 1) : controlsTop;
-    px('--mobile-side-bottom', panelTop);
     const sidePanel = this.compact() && innerWidth > innerHeight && visible(this.right) ? this.right.getBoundingClientRect() : null;
+    let sideBottom = panelTop;
+    const z = CM.Settings.get('uiScale') || 1, scaleEdge = Math.min(controlsTop, panelTop);
+    const scaleWidth = Math.max(0, (sidePanel ? sidePanel.left : v.right) - v.left - 68 * z);
+    const scaleTight = this.compact() && (scaleEdge - hud.bottom < 72 || scaleWidth < 80 || (document.getElementById('coach') && scaleEdge - hud.bottom < 220));
+    root.classList.toggle('mobile-scale-tight', scaleTight);
+    if (this.compact()) {
+      px('--mobile-scale-bottom', innerHeight - scaleEdge + 8);
+      px('--mobile-scale-right', sidePanel ? innerWidth - sidePanel.left + 8 : innerWidth - v.right + 8);
+      px('--mobile-scale-width', scaleWidth);
+      this._scaleMaxPx = scaleWidth;
+      if (!scaleTight && CM.Settings.get('scaleBar') !== false && visible(this.scaleBar)) sideBottom = Math.min(sideBottom, this.scaleBar.getBoundingClientRect().top - 8);
+    } else this._scaleMaxPx = null;
+    px('--mobile-side-bottom', sideBottom);
     px('--mobile-left-width', sidePanel ? Math.max(0, sidePanel.left - v.left - 68 * (CM.Settings.get('uiScale') || 1)) : v.right - v.left);
     px('--mobile-feed-right', sidePanel ? innerWidth - sidePanel.left + 8 : innerWidth - v.right + 8);
     const coach = document.getElementById('coach');
@@ -323,7 +347,14 @@
     let feedTop = hud.bottom + 6;
     for (const el of [document.getElementById('coach'), this.legendCard]) if (visible(el)) feedTop = Math.max(feedTop, el.getBoundingClientRect().bottom + 8);
     px('--mobile-feed-top', feedTop);
-    px('--mobile-feed-height', Math.max(0, Math.min(v.h * .35, panelTop - feedTop - 8)));
+    px('--mobile-feed-height', Math.max(0, Math.min(v.h * .35, sideBottom - feedTop - 8)));
+    const noticeLeft = v.left + 60 * (CM.Settings.get('uiScale') || 1), noticeBottom = Math.min(controlsTop, sideBottom);
+    px('--mobile-notice-left', noticeLeft);
+    px('--mobile-notice-width', Math.max(0, (sidePanel ? sidePanel.left : v.right) - noticeLeft - 8));
+    px('--mobile-notice-bottom', innerHeight - noticeBottom + 8);
+    const noticeHeight = Math.max(0, noticeBottom - hud.bottom - 16);
+    px('--mobile-notice-height', noticeHeight);
+    root.classList.toggle('mobile-notice-tight', this.compact() && noticeHeight < 96);
     if (this.dropdown && this.dropdown._place) this.dropdown._place();
     if (this.searchEl && this.searchEl._place) this.searchEl._place();
     if (this.linePicker && this.linePicker.el._place) this.linePicker.el._place();
@@ -371,7 +402,7 @@
     return p.el;
   };
   UI.prototype.showHUD = function (on) {
-    for (const el of [this.top, this.dock, this.right, this.toolbar, this.zoomCtl, this.feed, this.bstack, this.newsHost, this.satDock, this.opsDock]) {
+    for (const el of [this.top, this.dock, this.scaleBar, this.right, this.toolbar, this.zoomCtl, this.feed, this.bstack, this.newsHost, this.satDock, this.opsDock]) {
       const inactive = !on || (el === this.right && el.classList.contains('closed'));
       if (inactive && el.contains(document.activeElement)) document.activeElement.blur();
       el.classList.toggle('hidden', !on);
@@ -529,7 +560,7 @@
     g.on('toast', function (t) {
       const go = function (tab) { return function () { self.taskTab = tab; self.openPage('tasks', tab, { root: true }); }; };
       if (t.ppp && t.kind === 'good') snd('contract');
-      self.toast(t.text, t.kind, t.offer ? { label: '查看挑战', fn: go('active') } : (t.ppp ? { label: '查看合同', fn: go('ppp') } : (t.fleet ? { label: '列车运营', fn: function () { self.openObj('line', t.fleet, 'ops'); } } : (t.models ? { label: '查看车型', fn: function () { self.openPage('fleet', null, { root: true }); } } : undefined))));
+      self.toast(t.text, t.kind, t.offer ? { label: '查看挑战', fn: go('active') } : (t.ppp ? { label: '查看合同', fn: go('ppp') } : (t.fleet ? { label: '列车运营', fn: function () { self.openObj('line', t.fleet, 'ops'); } } : (t.models ? { label: '查看车型', fn: function () { self.openPage('fleet', null, { root: true }); } } : (t.fare ? { label: '调整票价', fn: function () { self.openPage('finance', 'ov', { root: true }); } } : undefined)))));
     });
     // 车队变化（v2.5）：正在看的线路页与车队页随之刷新
     g.on('fleet', function () { const top = self.stack[self.stack.length - 1]; if (top && (top.kind === 'line' || top.kind === 'fleet')) self.rerenderPage(); else if (self.opsApp) self.opsApp.refresh(); });
@@ -615,7 +646,25 @@
       if (ev && ev.changed) g.requestPrediction();
     }
   };
-  UI.prototype.drawOverlay = function (ctx, R) { this.tools.drawOverlay(ctx, R); if (this.tools.tagRect || this.tools.tagPrev) this.placeTip(this.tools.tagRect); if (CM.Corp) CM.Corp.drawOverlay(ctx, R, this); };
+  UI.prototype.drawOverlay = function (ctx, R) { this.tools.drawOverlay(ctx, R); if (this.tools.tagRect || this.tools.tagPrev) this.placeTip(this.tools.tagRect); if (CM.Corp) CM.Corp.drawOverlay(ctx, R, this); this.updateScale(R); };
+  // 比例尺：画面中心横向 100 px 对应的地面距离，长度取 1-2-5 序列里不超过约 120 px 的最大值；只在内容变化时写入
+  const SCALE_M = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000];
+  UI.prototype.updateScale = function (R) {
+    const el = this.scaleBar; if (!el) return;
+    const on = CM.Settings.get('scaleBar') !== false;
+    if (on !== this._sbOn) { this._sbOn = on; el.style.display = on ? '' : 'none'; }
+    if (!on) return;
+    const cx = R.w / 2, cy = R.h / 2, a = R.unproject(cx - 50, cy, 0), b = R.unproject(cx + 50, cy, 0), zm = CM.Settings.get('uiScale') || 1;
+    const mpp = U.dist(a.x, a.y, b.x, b.y) * CFG.CELL_M / 100 * zm;
+    if (!(mpp > 0) || !isFinite(mpp)) return;
+    const maxWidth = this._scaleMaxPx == null ? 120 : Math.min(120, this._scaleMaxPx / zm);
+    let L = SCALE_M[0]; for (const s of SCALE_M) { if (s / mpp <= maxWidth) L = s; else break; }
+    const w = Math.round(L / mpp), txt = L < 1000 ? L + ' m' : (L / 1000) + ' km', grid = CM.Grid && CM.Grid.on() ? '网格一格 ' + CM.Grid.stepText(R) : '';
+    if (w !== this._sbW) { this._sbW = w; el.children[1].style.width = w + 'px'; }
+    if (txt !== this._sbT) { this._sbT = txt; el.children[0].textContent = txt; }
+    if (grid !== this._sbG) { this._sbG = grid; el.children[2].textContent = grid; el.children[2].hidden = !grid; if (CM.I18n) CM.I18n.localize(el.children[2]); }
+  };
+
 
   // 只在内容变化时写入（v2.3）：每帧重写会替换指针下的子节点，悬停提示与样式随之闪烁
   const setH = function (el, html) { if (el._h !== html) { el._h = html; el.innerHTML = html; } };
@@ -1014,7 +1063,7 @@
   UI.prototype.resetView = function () { this.R.fitAllSmooth(); snd('swoosh'); };
   UI.prototype.toggleView = function () { this.setView(this.R.cam.view !== 1); };
   UI.prototype.toggleUnder = function () { snd('swoosh'); this.R.setUnder(this.R.cam.tu !== 1); this.renderToolbar(); };
-  // 经纬网格（视图工具）：开关保存在本机；吸附只在网格显示时生效，默认 G 显示、Shift+G 吸附。
+  // 网格（视图工具）：开关保存在本机；吸附只在网格显示时生效，默认 G 显示、Shift+G 吸附。
   UI.prototype.toggleGrid = function () { if (!CM.Grid) return; CM.Grid.toggle(); snd('toggle'); };
   UI.prototype.toggleGridSnap = function () {
     if (!CM.Grid) return;
@@ -1131,7 +1180,7 @@
       colorGroup.classList.add('to-color');
       colorGroup.setAttribute('data-tip', (colorLine ? '修改当前线路整条线的颜色，立即生效且不产生费用' : '为即将新建的线路选色，预览与建成后的线路使用同一颜色') + (AX.enabled() ? '；色盲辅助已开启，地图使用辅助配色，所选原色会保留' : ''));
       // 线形（v2.1）：平滑曲线把 Shift+点击的转弯点当作控制柄；穿点为原画法，曲线逐点穿过转弯点
-      const curveCtl = grp('线形', segc(T.curveMode, [['smooth', '平滑', '平滑曲线：Shift+点击放置控制柄'], ['pass', '穿点', '穿过转弯点：线路逐点经过，适合贴着道路走线']], function (v) { T.curveMode = v; CM.Settings.set('curveMode', v); }));
+      const curveCtl = grp('线形', segc(T.curveMode, [['smooth', '平滑', '平滑曲线：直线加圆弧，半径自动取最大。Shift+点击放置转弯点，线路切过转弯点；画好后可拖动调弯'], ['pass', '穿点', '穿过转弯点：线路逐点经过，适合贴着道路走线']], function (v) { T.curveMode = v; CM.Settings.set('curveMode', v); }));
       // 运行速度（v2.5）：新线路在这里选；延长既有线路时沿用该线的速度（在线路详情「列车运营」中调整）
       const speedCtl = grp('速度', colorLine
         ? h('span', { class: 'tag', 'data-tip': '本线最小转弯半径 ' + M.minRadius(colorLine) + ' m；可在线路详情「列车运营」中调整' }, M.lineKmh(colorLine) + ' km/h')
@@ -1396,7 +1445,7 @@
     const r = g.edit(function (n) { return M.applyFix(n, fix); });
     if (r && r.error) { this.toast(r.error, 'bad'); return; }
     if (r && r.notes) for (const n of r.notes) this.toast(n, 'info');
-    this.toast('已在草案中应用：' + fix.label, 'good');
+    if (fix.op !== 'autoFit') this.toast('已在草案中应用：' + fix.label, 'good');
   };
 
   // ======================== 图层坞 ========================
@@ -1462,14 +1511,14 @@
       }
       rows.push(row);
     }
-    // 小工具：经纬网格（建站与绘线时可吸附到交叉点）、测距、线路标注、任务标记
+    // 小工具：网格（建站与绘线时可吸附到交叉点）、测距、线路标注、任务标记
     const S = CM.Settings, T = this.tools;
     const opt = function (icon, name, desc, on, act, fn) {
       return h('button', { class: 'lp-btn opt' + (on ? ' on' : ''), 'data-act': act, 'data-silent': '1', role: 'switch', 'aria-label': name, 'aria-checked': on ? 'true' : 'false', 'data-tip': name + ' · ' + desc, onclick: fn }, ic(icon));
     };
     const flip = function (key) { return function () { S.set(key, !S.get(key)); snd('toggle'); self.renderLayerPanel(); }; };
     rows.push(h('div', { class: 'lp-row', role: 'group', 'aria-label': '小工具' },
-      opt('graticule', '经纬网格', '建站与绘线时可吸附', !!CM.Grid.on(), 'view.grid', function () { self.toggleGrid(); self.renderLayerPanel(); }),
+      opt('graticule', '网格', '显示网格一格的实际距离；建站与绘线时可吸附', !!CM.Grid.on(), 'view.grid', function () { self.toggleGrid(); self.renderLayerPanel(); }),
       opt('ruler', '测距', '量距离，估算步行与乘车时间、站数和建设费', !!T && T.tool === 'measure', 'tool.measure', function () { T.setTool(T.tool === 'measure' ? 'select' : 'measure'); self.toggleLayerPanel(false); }),
       opt('lineTag', '线路标注', '在地图的线路上标出线路编号', !!S.get('lineTags'), null, flip('lineTags')),
       opt('flag', '任务标记', '在地图上标出进行中任务的地点，点击查看任务', !!S.get('taskPins'), null, flip('taskPins'))));
@@ -1969,7 +2018,7 @@
       // 支线把既有线路的站台方向拉偏时（v2.4），「保持原站台方向」优先于移动受影响区段的转弯点
       const keepDir = (c.fixes || []).some(function (f) { return f.op === 'platDir'; });
       if (gd && gd.fix) fixes.appendChild(h('button', { class: 'btn sm' + (keepDir ? '' : ' primary'), onclick: function (e) { e.stopPropagation(); self.applyFix(gd.fix); } }, ic('sparkle', 14), gd.fix.label));
-      for (const f of (c.fixes || [])) fixes.appendChild(h('button', { class: 'btn sm' + (f.op === 'platDir' || (!(gd && gd.fix) && (f.op === 'segType' || f.op === 'splitBranch' || f.op === 'normalize' || f.op === 'removeBend')) ? ' primary' : ''), onclick: function (e) { e.stopPropagation(); self.applyFix(f); } }, f.label));
+      for (const f of (c.fixes || [])) fixes.appendChild(h('button', { class: 'btn sm' + (f.op === 'platDir' || f.op === 'autoFit' || (!(gd && gd.fix) && (f.op === 'segType' || f.op === 'splitBranch' || f.op === 'normalize' || f.op === 'removeBend')) ? ' primary' : ''), onclick: function (e) { e.stopPropagation(); self.applyFix(f); } }, f.label));
       const card = h('div', { class: 'cf-card' + (self.hoverConflict === c.n ? ' on' : ''),
         onmouseenter: function () { self.hoverConflict = c.n; },
         onmouseleave: function () { if (self.hoverConflict === c.n) self.hoverConflict = null; },
@@ -2375,7 +2424,9 @@
           row('clock', '停运时段快速掠过', toggle('nightFast'), '地铁停运的 00:00–06:00 按所选速度的 ' + CFG.time.nightFast + ' 倍推进，一天更快过去；结算与客流不受影响'),
           row('hourglass', '高峰慢放', toggle('peakSlow'),'工作日早高峰（7–9 时）与晚高峰（17–19 时）自动按 1× 运行，高峰结束后恢复所选速度；也可在顶栏的更多倍速中' + (CM.Keys.hint('time.peakSlow') ? '（' + CM.Keys.hint('time.peakSlow') + '）' : '') + '切换'),
           group('建设'),
-          row('graticule', '网格吸附', toggle('gridSnap'), '显示经纬网格' + (CM.Keys.hint('view.grid') ? '（' + CM.Keys.hint('view.grid') + '）' : '') + '时，新车站、线路与转弯点落在网格交叉点')];
+          row('graticule', '网格吸附', toggle('gridSnap'), '显示网格' + (CM.Keys.hint('view.grid') ? '（' + CM.Keys.hint('view.grid') + '）' : '') + '时，新车站、线路与转弯点落在网格交叉点'),
+          row('graticule', '网格单位', seg('gridUnit', [['km', '公里网格'], ['deg', '经纬度网格']]), '公里网格是正方形，一格多远一目了然；经纬度网格按度数划分'),
+          row('ruler', '地图比例尺', toggle('scaleBar'), '在地图边缘显示比例尺，随缩放变化')];
       },
       // 键位（v2.1）：点击按键框后按下新按键或组合键；右键清除；冲突时从原操作上移除并提示
       keys: function () {

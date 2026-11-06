@@ -49,9 +49,20 @@
     let dx = own[0] - S.x, dy = own[1] - S.y;
     const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
     const pd = S.pd && S.pd[seg.line];
-    if (pd != null && isFinite(pd)) { const c = Math.cos(pd), s = Math.sin(pd); return c * dx + s * dy >= 0 ? [c, s] : [-c, -s]; }
-    let best = null, bestDot = 2;
     const near = M.segsAt(net, sid), cand = near || net.segments;
+    if (pd != null && isFinite(pd)) {
+      const c = Math.cos(pd), s = Math.sin(pd), md = c * dx + s * dy;
+      let sg = md >= 0 ? 1 : -1;
+      // 本站只有另一段同线区段时，两段要从站台两端分别出去（v2.6.1）：转向超过 90° 时按方向判断会选到同一端，新线会沿着旧线折返。与站台夹角大的一段让到另一端
+      let other = null, n = 0;
+      for (const id in cand) { const o = cand[id]; if (o !== seg && o.line === seg.line && (o.a === sid || o.b === sid)) { other = o; n++; } }
+      if (n === 1) {
+        const p = M.adjCtrl(net, other, sid), ol = Math.hypot(p[0] - S.x, p[1] - S.y) || 1, od = (c * (p[0] - S.x) + s * (p[1] - S.y)) / ol;
+        if ((od >= 0) === (md >= 0) && (Math.abs(md) < Math.abs(od) || (Math.abs(md) === Math.abs(od) && String(seg.id) > String(other.id)))) sg = -sg;
+      }
+      return [c * sg, s * sg];
+    }
+    let best = null, bestDot = 2;
     for (const id in cand) {
       const o = cand[id];
       if (o === seg || o.line !== seg.line || (o.a !== sid && o.b !== sid)) continue;
@@ -78,6 +89,7 @@
     const ctrl = [A, [A[0] + tA[0] * Lp, A[1] + tA[1] * Lp]].concat(seg.pts || [], [[B[0] + tB[0] * Lp, B[1] + tB[1] * Lp], B]);
     ctrl.plat = true;
     if (seg.curve === 'smooth') ctrl.smooth = true;
+    else if (seg.curve === 'arc') ctrl.arc = true;
     return ctrl;
   };
   // 平滑曲线（v2.1 玩家反馈）：转弯点作为控制柄（夹紧的均匀三次 B 样条），曲线不必逐点穿过转弯点，一个控制柄即可画出圆顺的大半径弯道；
@@ -155,12 +167,93 @@
     return out;
   }
   M.trackCurve = trackCurve;
+  // 圆弧线形（v2.6.1 玩家反馈：曲线容易冲突、很难调整）：轨道只由直线和圆弧组成，转弯点是相邻两段直线的交点，曲线切过它而不穿过它，半径自动取放得下的最大值；
+  // 没有转弯点时用两段相切的圆弧连接两端站台。同样的车站和转弯点，半径约为原来的 1.2–3 倍（实测：三站转向 1.2–1.6 倍，单个转弯点 2.2–3 倍）。返回的采样点带 spanStart 与 arcs（各段圆弧的中点与半径）
+  const arcUnit = function (x, y) { const l = Math.hypot(x, y) || 1; return [x / l, y / l]; };
+  const arcLine = function (out, A, B, step) { const L = U.dist(A[0], A[1], B[0], B[1]); if (L < 1e-6) return; const k = Math.max(1, Math.ceil(L / step)); for (let j = 1; j <= k; j++) out.push([A[0] + (B[0] - A[0]) * j / k, A[1] + (B[1] - A[1]) * j / k]); };
+  // 从 A 沿切线 tA 走圆弧到 B，返回终点切线
+  function arcTo(out, A, tA, B, step, arcs) {
+    const cx = B[0] - A[0], cy = B[1] - A[1], c2 = cx * cx + cy * cy;
+    if (c2 < 1e-12) return tA;
+    const cr = tA[0] * cy - tA[1] * cx, dot = tA[0] * cx + tA[1] * cy, L = Math.sqrt(c2);
+    if (Math.abs(cr) < 1e-4 * L) { arcLine(out, A, B, step); return arcUnit(cx, cy); }
+    const R = c2 / (2 * Math.abs(cr)), sg = cr > 0 ? 1 : -1, ox = A[0] - tA[1] * sg * R, oy = A[1] + tA[0] * sg * R;
+    const sweep = 2 * Math.atan2(Math.abs(cr), dot), k = Math.max(2, Math.ceil(R * sweep / step)), a0 = Math.atan2(A[1] - oy, A[0] - ox);
+    for (let j = 1; j <= k; j++) { const a = a0 + sg * sweep * j / k; out.push([ox + R * Math.cos(a), oy + R * Math.sin(a)]); }
+    if (arcs) { const am = a0 + sg * sweep / 2; arcs.push({ x: ox + R * Math.cos(am), y: oy + R * Math.sin(am), r: R }); }
+    const ae = a0 + sg * sweep;
+    return [-Math.sin(ae) * sg, Math.cos(ae) * sg];
+  }
+  // 两段相切的圆弧连接两个位姿，取两段中较小半径最大的方案；放不下时返回 null
+  function biarc(Ps, ts, Pe, te) {
+    const vx = Pe[0] - Ps[0], vy = Pe[1] - Ps[1], v2 = vx * vx + vy * vy, L = Math.sqrt(v2);
+    if (L < 1e-6) return null;
+    const dts = vx * ts[0] + vy * ts[1], dte = vx * te[0] + vy * te[1], tt = ts[0] * te[0] + ts[1] * te[1];
+    const ang = function (a, b) { return Math.atan2(Math.abs(a[0] * b[1] - a[1] * b[0]), a[0] * b[0] + a[1] * b[1]); };
+    let best = null;
+    const tryD = function (d1) {
+      const den = 2 * (dte + d1 * (1 - tt)); if (Math.abs(den) < 1e-9) return;
+      const d2 = (v2 - 2 * d1 * dts) / den; if (!(d2 > 1e-4)) return;
+      const ux = vx - d1 * ts[0] - d2 * te[0], uy = vy - d1 * ts[1] - d2 * te[1], ul = Math.hypot(ux, uy); if (ul < 1e-6) return;
+      const a = [ux / ul, uy / ul], th1 = ang(ts, a), th2 = ang(a, te); if (th1 > 2.6 || th2 > 2.6) return;
+      const r = Math.min(th1 < 1e-3 ? 1e9 : d1 / Math.tan(th1 / 2), th2 < 1e-3 ? 1e9 : d2 / Math.tan(th2 / 2));
+      if (!best || r > best.r) best = { r: r, d1: d1, J: [Ps[0] + ts[0] * d1 + a[0] * d1, Ps[1] + ts[1] * d1 + a[1] * d1] };
+    };
+    for (const f of [0.04, 0.07, 0.1, 0.14, 0.18, 0.23, 0.28, 0.34, 0.4, 0.5, 0.62, 0.78, 1, 1.3]) tryD(f * L);
+    if (best) { let w = best.d1 * 0.2; for (let i = 0; i < 6; i++) { const c = best.d1; tryD(c - w); tryD(c + w); w *= 0.55; } }
+    return best;
+  }
+  // 连接两个位姿：同向共线时为直线，否则两段圆弧；返回终点切线，放不下时返回 null
+  function connectPose(out, Ps, ts, Pe, te, step, arcs) {
+    const vx = Pe[0] - Ps[0], vy = Pe[1] - Ps[1], L = Math.hypot(vx, vy);
+    if (L < 1e-6) return ts;
+    if (ts[0] * te[0] + ts[1] * te[1] > 0.99999 && Math.abs(vx * ts[1] - vy * ts[0]) < 1e-3 * L && vx * ts[0] + vy * ts[1] > 0) { arcLine(out, Ps, Pe, step); return te; }
+    const b = biarc(Ps, ts, Pe, te); if (!b) return null;
+    const tJ = arcTo(out, Ps, ts, b.J, step, arcs);
+    arcTo(out, b.J, tJ, Pe, step, arcs);
+    return te;
+  }
+  function arcCurve(ctrl, step) {
+    const n = ctrl.length, P1 = ctrl[1], Pe = ctrl[n - 2], inner = ctrl.slice(2, n - 2), ts = arcUnit(P1[0] - ctrl[0][0], P1[1] - ctrl[0][1]), te = arcUnit(ctrl[n - 1][0] - Pe[0], ctrl[n - 1][1] - Pe[1]);
+    const out = [[ctrl[0][0], ctrl[0][1]]], arcs = [], spanStart = [0];
+    arcLine(out, ctrl[0], P1, step); spanStart.push(out.length - 1);
+    if (!inner.length) { if (!connectPose(out, P1, ts, Pe, te, step, arcs)) return null; }
+    else {
+      // 折线（站台端 → 转弯点 → 站台端）逐点倒圆角：先按统一半径分配各段直线，再让每个转弯点取到放得下的最大半径
+      const V = [P1].concat(inner, [Pe]), m = inner.length, dir = [], Ln = [], tanH = [0];
+      for (let i = 0; i + 1 < V.length; i++) { const dx = V[i + 1][0] - V[i][0], dy = V[i + 1][1] - V[i][1]; Ln.push(Math.hypot(dx, dy)); dir.push(arcUnit(dx, dy)); }
+      for (let k = 1; k <= m; k++) tanH.push(Math.tan(Math.atan2(Math.abs(dir[k - 1][0] * dir[k][1] - dir[k - 1][1] * dir[k][0]), dir[k - 1][0] * dir[k][0] + dir[k - 1][1] * dir[k][1]) / 2));
+      tanH.push(0);
+      const misS = ts[0] * dir[0][0] + ts[1] * dir[0][1] < 0.9988, misE = te[0] * dir[m][0] + te[1] * dir[m][1] < 0.9988;   // 站台方向与第一、最后一段不同向（约 2.8° 以上）：留出过渡
+      const cap0 = misS ? 0.55 : 1, cap1 = misE ? 0.55 : 1;
+      let R = Infinity;
+      for (let i = 0; i <= m; i++) { const a = tanH[i], b = tanH[i + 1], L = Ln[i] * (i === 0 ? cap0 : i === m ? cap1 : 1); if (a + b > 1e-6) R = Math.min(R, L / (a + b)); }
+      if (!isFinite(R)) R = 0;
+      const T = tanH.map(function (t) { return t * R; });
+      for (let k = 1; k <= m; k++) if (tanH[k] > 1e-4) T[k] = Math.max(T[k], Math.min(k === 1 ? Ln[0] * cap0 : Ln[k - 1] - T[k - 1], k === m ? Ln[m] * cap1 : Ln[k] - T[k + 1]));
+      let cur = P1, curT = ts;
+      for (let k = 1; k <= m; k++) {
+        const H = inner[k - 1], d0 = dir[k - 1], d1 = dir[k], a = [H[0] - d0[0] * T[k], H[1] - d0[1] * T[k]], b = [H[0] + d1[0] * T[k], H[1] + d1[1] * T[k]];
+        if (k === 1 && misS) { if (!connectPose(out, cur, curT, a, d0, step, arcs)) arcLine(out, cur, a, step); } else arcLine(out, cur, a, step);
+        const i0 = out.length - 1;
+        if (T[k] > 1e-5) arcTo(out, a, d0, b, step, arcs);
+        spanStart.push(Math.round((i0 + out.length - 1) / 2));
+        cur = b; curT = d1;
+      }
+      if (misE) { if (!connectPose(out, cur, curT, Pe, te, step, arcs)) arcLine(out, cur, Pe, step); } else arcLine(out, cur, Pe, step);
+    }
+    spanStart.push(out.length - 1);
+    arcLine(out, Pe, ctrl[n - 1], step);
+    spanStart.push(out.length - 1);
+    out.spanStart = spanStart; out.arcs = arcs;
+    return out;
+  }
   M.geomFromControl = function (ctrl, type, city) {
     // 缓存键含城市实例（地图）、几何相关数据的版本、地形阶段（填海）与可建设范围（区域开放、全图解锁）；月度增长不改变线路几何，不必每月重算
-    const key = type + '|' + (city.uid || 0) + ':' + (city.geoVer || 0) + ':' + (city.terrainVer || 0) + ':' + (city.lockVer || 0) + (city.unlockAll ? 'u' : '') + '|' + (ctrl.plat ? 'p|' : '') + (ctrl.smooth ? 's|' : '') + ctrl.map(function (p) { return p[0].toFixed(3) + ',' + p[1].toFixed(3); }).join(';');
+    const key = type + '|' + (city.uid || 0) + ':' + (city.geoVer || 0) + ':' + (city.terrainVer || 0) + ':' + (city.lockVer || 0) + (city.unlockAll ? 'u' : '') + '|' + (ctrl.plat ? 'p|' : '') + (ctrl.smooth ? 's|' : '') + (ctrl.arc ? 'a|' : '') + ctrl.map(function (p) { return p[0].toFixed(3) + ',' + p[1].toFixed(3); }).join(';');
     const hit = geomCache.get(key);
     if (hit) return hit;
-    const pts = ctrl.smooth && ctrl.length > 2 ? splineCurve(ctrl, !!ctrl.plat, STEP) : trackCurve(ctrl, !!ctrl.plat, STEP);
+    const pts = (ctrl.arc && ctrl.plat && arcCurve(ctrl, STEP)) || (ctrl.smooth && ctrl.length > 2 ? splineCurve(ctrl, !!ctrl.plat, STEP) : trackCurve(ctrl, !!ctrl.plat, STEP));
     let spanStart = pts.spanStart;
     if (!spanStart || spanStart.length !== ctrl.length) {
       spanStart = [0];
@@ -213,7 +306,7 @@
       pts: pts, cum: cum, lenC: lenC, lenM: lenC * CFG.CELL_M, waterM: waterC * CFG.CELL_M, hillM: hillC * CFG.CELL_M, protM: protC * CFG.CELL_M, herM: herC * CFG.CELL_M, guardM: guardC * CFG.CELL_M, herHit: herHit,
       protNames: Array.from(protNames), locked: locked, outside: outside, cellLen: cellLen, minRadiusM: minR * CFG.CELL_M,
       minRxy: minRi >= 0 ? pts[minRi] : null, minRi: minRi,
-      spanStart: spanStart, hillHit: hillHit, protHit: protHit, waterHit: waterHit,
+      spanStart: spanStart, arcs: pts.arcs || null, hillHit: hillHit, protHit: protHit, waterHit: waterHit,
       airM: airC * CFG.CELL_M, airHit: airHit, railSurf: rx.surf, railVia: rx.via, railS: rx.surf.length, railV: rx.via.length,
     };
     if (geomCache.size > 3000) geomCache.clear();
@@ -302,6 +395,19 @@
     for (const id in net.segments) { const s = net.segments[id]; if (s.line === lid && (s.a === sid || s.b === sid)) { const t = M.stationTangent(net, s, sid); let a = Math.atan2(t[1], t[0]) % Math.PI; if (a < 0) a += Math.PI; return a; } }
     return null;
   };
+  // 站台方向相对已建是否有实质变化（v2.6.1）：接新区段时自动锁定的方向等于原来的方向，不算改动，也不算既有区段改线
+  M.platDirChanged = function (off, draft, sid, lid) {
+    const a0 = draft.stations[sid], b0 = off.stations[sid], a = a0 && a0.pd && a0.pd[lid], b = b0 && b0.pd && b0.pd[lid];
+    if (a === b || (a == null && b == null)) return false;
+    if (a == null || b != null || !b0) return true;
+    const cur = M.platformDir(off, sid, lid); if (cur == null) return true;
+    const d = Math.abs(a - cur) % Math.PI;
+    return Math.min(d, Math.PI - d) > 0.002;
+  };
+  M.platDirsChanged = function (off, draft, sid) {
+    const a = draft.stations[sid], b = off.stations[sid];
+    return Object.keys(Object.assign({}, a && a.pd, b && b.pd)).some(function (lid) { return M.platDirChanged(off, draft, sid, lid); });
+  };
   // 设置某条线路在本站的站台层；只有这一条线路时直接改变车站形式
   M.setPlatform = function (net, sid, lid, type) {
     const st = net.stations[sid]; if (!st) return;
@@ -317,7 +423,7 @@
   M.trackKey = function (s) {
     const fwd = M.idNum(s.a) <= M.idNum(s.b), pts = (s.pts || []).slice();
     if (!fwd) pts.reverse();
-    return (fwd ? s.a + '|' + s.b : s.b + '|' + s.a) + '|' + s.type + (s.curve === 'smooth' ? '|s' : '') + '|' + pts.map(function (p) { return p[0].toFixed(3) + ',' + p[1].toFixed(3); }).join(';');
+    return (fwd ? s.a + '|' + s.b : s.b + '|' + s.a) + '|' + s.type + (s.curve === 'smooth' ? '|s' : s.curve === 'arc' ? '|a' : '') + '|' + pts.map(function (p) { return p[0].toFixed(3) + ',' + p[1].toFixed(3); }).join(';');
   };
   // 与 seg 共用轨道的其他线路区段；rev 表示其方向与 seg 相反
   M.coTrackSegs = function (net, seg) {
@@ -352,7 +458,7 @@
       const hp = (host.pts || []).map(function (p) { return [p[0], p[1]]; });
       const r = M.addSegment(net, lid, a, b, host.a === a ? hp : hp.reverse(), host.type);
       if (r.error) return r;
-      if (host.curve === 'smooth') net.segments[r.id].curve = 'smooth';
+      if (host.curve) net.segments[r.id].curve = host.curve;
       for (const sid of [a, b]) { const s0 = net.stations[sid]; if (!served.has(sid) && s0 && s0.type !== host.type) { s0.lv = Object.assign({}, s0.lv || {}); s0.lv[lid] = host.type; } served.add(sid); }
       added++;
     }
@@ -674,7 +780,7 @@
             notes.push((ln ? ln.name + ' ' : '') + A.name + '—' + B.name + ' 两侧建设方式不同，合并后统一为' + CFG.metro.typeName[type] + '，原' + CFG.metro.typeName[other] + '部分按改建计费');
           }
           net.segments[id] = { id: id, line: lid, a: o1, b: o2, pts: p1.concat([[st.x, st.y]], p2), type: type, base: Array.from(new Set(base)) };
-          if (s1.curve === 'smooth' && s2.curve === 'smooth') net.segments[id].curve = 'smooth';
+          if (s1.curve && s1.curve === s2.curve) net.segments[id].curve = s1.curve;
         }
       } else {
         for (const s of segs) delete net.segments[s.id];
@@ -1031,7 +1137,7 @@
           res.changes.mod.push('车站「' + s.name + '」缩减为' + CFG.metro.sizeName[s.size] + '（不退款）');
         }
         if (s.name !== o.name) res.changes.mod.push('车站更名：' + o.name + ' → ' + s.name);
-        if (JSON.stringify(o.pd || null) !== JSON.stringify(s.pd || null)) { res.changes.mod.push('车站「' + s.name + '」调整站台方向'); touchedSt.add(id); }
+        if (M.platDirsChanged(off, draft, id)) { res.changes.mod.push('车站「' + s.name + '」调整站台方向'); touchedSt.add(id); }
         // 已有站台之间调换线路也属于草案变化，即使车站仍保留相同的站台层集合。
         const oldLines = M.stationLines(off, id);
         for (const lid of M.stationLines(draft, id)) if (oldLines.indexOf(lid) >= 0 && M.platType(s, lid) !== M.platType(o, lid)) {
@@ -1133,7 +1239,7 @@
           const gr = groups.get(key);
           gr.segs.push({ s: s, g: g });
           // 车站移动或本线站台方向改变、线形模式（平滑 / 穿点）改变，都会改变区段线形
-          const stMoved = function (sid) { const a = draft.stations[sid], b = off.stations[sid]; return !b || a.x !== b.x || a.y !== b.y || (a.pd && a.pd[s.line]) !== (b.pd && b.pd[s.line]); };
+          const stMoved = function (sid) { const a = draft.stations[sid], b = off.stations[sid]; return !b || a.x !== b.x || a.y !== b.y || M.platDirChanged(off, draft, sid, s.line); };
           const changed = !o || o.a !== s.a || o.b !== s.b || JSON.stringify(o.pts) !== JSON.stringify(s.pts) || (o.curve || '') !== (s.curve || '') || stMoved(s.a) || stMoved(s.b);
           if (changed) { res.affectedLines.add(s.line); touched.add(id); gr.changed = true; }
           // 只改变所属线路（贯通、拆出支线）：不算线形调整，但仍检查相接处的转角与半径
@@ -1182,12 +1288,12 @@
       if ((touched.has(id) || respeed.has(s.line)) && isFinite(g.minRadiusM)) {
         const R = Math.round(g.minRadiusM), p = g.minRxy || [A.x, A.y], minR = M.minRadius(line), warnR = M.warnRadius(line), kmhTxt = M.lineKmh(line) !== 80 ? '（' + M.lineKmh(line) + ' km/h 线路）' : '';
         if (R < minR) {
-          const fixes = [editSeg];
+          const fixes = [{ label: '自动调顺', op: 'autoFit', seg: id }, editSeg];
           const pts = s.pts || [];
           let nearK = -1, nd = 0.8;
           for (let k = 0; k < pts.length; k++) { const d = U.dist(pts[k][0], pts[k][1], p[0], p[1]); if (d < nd) { nd = d; nearK = k; } }
-          if (nearK >= 0) fixes.unshift({ label: '删除此处转弯点', op: 'removeBend', seg: id, k: nearK });
-          conflict({ type: 'radius', kind: 'seg', ref: id, x: p[0], y: p[1], msg: lbl + '：转弯半径约 ' + R + ' m，小于最小半径 ' + minR + ' m' + kmhTxt, how: '加转弯点（Shift+点击）放缓弯道，或拉开车站距离；车站两侧约 ' + CFG.metro.platformHalfM + ' m 必须是直线站台。', fixes: fixes });
+          if (nearK >= 0) fixes.splice(1, 0, { label: '删除此处转弯点', op: 'removeBend', seg: id, k: nearK });
+          conflict({ type: 'radius', kind: 'seg', ref: id, x: p[0], y: p[1], msg: lbl + '：转弯半径约 ' + R + ' m，小于最小半径 ' + minR + ' m' + kmhTxt, how: '点「自动调顺」让系统重新找线形；也可以加转弯点（Shift+点击）放缓弯道，或拉开车站距离。车站两侧约 ' + CFG.metro.platformHalfM + ' m 必须是直线站台。', fixes: fixes });
         } else if (R < warnR) warn(lbl + '：转弯半径约 ' + R + ' m，列车需限速通过', p[0], p[1], id);
       }
       // 坡道：地下、地面、高架之间转换需要足够长度
@@ -1229,9 +1335,10 @@
           }
           worst = Math.max(worst, best);
         }
-        if (worst > CFG.metro.maxTurnAtStationDeg) {
+        const turnMax = ls.every(function (s) { return s.curve === 'arc'; }) ? CFG.metro.maxTurnArcDeg : CFG.metro.maxTurnAtStationDeg;
+        if (worst > turnMax) {
           const ln = draft.lines[lid];
-          conflict({ type: 'turn', kind: 'station', ref: sid, x: S.x, y: S.y, msg: (ln ? ln.name : '') + ' 在车站「' + S.name + '」前后转向约 ' + Math.round(worst) + '°（最大 ' + CFG.metro.maxTurnAtStationDeg + '°）', how: '站台是一段直线，列车不能在车站处急转。把车站移到转弯之前或之后，或在车站两侧增加转弯点，让线路先直行进出车站再转弯。', fixes: [{ label: '移动车站', op: 'editStation', station: sid }].concat(ls.filter(function (s) { return (s.pts || []).length; }).slice(0, 1).map(function (s) { return { label: '调整线形', op: 'editSeg', seg: s.id }; })) });
+          conflict({ type: 'turn', kind: 'station', ref: sid, x: S.x, y: S.y, msg: (ln ? ln.name : '') + ' 在车站「' + S.name + '」前后转向约 ' + Math.round(worst) + '°（最大 ' + turnMax + '°）', how: '站台是一段直线，列车不能在车站处急转。把车站移到转弯之前或之后，或在车站两侧增加转弯点，让线路先直行进出车站再转弯。', fixes: [{ label: '移动车站', op: 'editStation', station: sid }].concat(ls.filter(function (s) { return (s.pts || []).length; }).slice(0, 1).map(function (s) { return { label: '调整线形', op: 'editSeg', seg: s.id }; })) });
         }
       });
     });
@@ -1317,6 +1424,7 @@
           }
           fixes.push({ label: '调整新区段线形', op: 'editSeg', seg: cause.id });
         }
+        fixes.push({ label: '自动调顺', op: 'autoFit', seg: id });
         fixes.push({ label: cause ? '调整本区段线形' : '调整线形', op: 'editSeg', seg: id });
         conflict({ type: 'radius', kind: 'seg', ref: id, x: p[0], y: p[1], msg: lbl + '：' + msg + '，转弯半径降至约 ' + Math.round(g.minRadiusM) + ' m（最小 ' + M.minRadius(draft.lines[s.line]) + ' m）', how: how, fixes: fixes });
       }
@@ -1505,6 +1613,48 @@
     if (M.moveLevels) M.moveLevels(net, lid, nl, moved);
     return { line: nl, junction: cur, n: moved.length };
   };
+  // 已建车站锁定站台方向（v2.6.1）：在既有车站接新区段时，本线站台保持原来的方向，新线从站台末端再转出，既有线路不会被带歪
+  M.lockPlatform = function (net, off, sid, lid) {
+    const s = net.stations[sid]; if (!s || !off.stations[sid] || (s.pd && s.pd[lid] != null)) return;
+    let os = null; for (const id in off.segments) { const o = off.segments[id]; if (o.line === lid && (o.a === sid || o.b === sid)) { os = o; break; } }
+    if (!os) return;
+    const t = M.stationTangent(off, os, sid);
+    M.setPlatformDir(net, sid, lid, Math.atan2(t[1], t[0]));
+  };
+  // 一键调顺（v2.6.1）：依次尝试 ①改用圆弧线形 ②去掉转弯点 ③加一个转弯点 ④转动还没建成的车站的站台方向；都放不下时恢复原样并说明原因
+  M.autoFit = function (net, segId, city, off) {
+    const s = net.segments[segId]; if (!s || !city) return { error: '区段已不存在' };
+    const L0 = net.lines[s.line], minR = M.minRadius(L0), need = minR * 1.02, co = M.coTrackSegs(net, s), oldCurve = s.curve, oldPts = s.pts;
+    const rad = function (x) { const r = M.segGeom(net, x, city).minRadiusM; return isFinite(r) ? r : 1e9; };
+    const done = function (text) { M.syncCoTrack(net, s, co); return { notes: [text] }; };
+    s.curve = 'arc';
+    if (rad(s) >= need) return done('已改用圆弧线形，最小半径约 ' + Math.round(rad(s)) + ' m');
+    const A = net.stations[s.a], B = net.stations[s.b], Lc = U.dist(A.x, A.y, B.x, B.y) || 1, nx = -(B.y - A.y) / Lc, ny = (B.x - A.x) / Lc;
+    if ((oldPts || []).length) { s.pts = []; if (rad(s) >= need) return done('已去掉转弯点并改用圆弧线形，最小半径约 ' + Math.round(rad(s)) + ' m'); }
+    let best = null;
+    for (const f of [0.04, 0.08, 0.12, 0.18, 0.25, 0.33, 0.42]) { for (const sg of [1, -1]) for (const t of [0.5, 0.35, 0.65, 0.22, 0.78]) {
+      const p = [A.x + (B.x - A.x) * t + nx * Lc * f * sg, A.y + (B.y - A.y) * t + ny * Lc * f * sg];
+      if (city.cellAt(p[0], p[1]) < 0) continue;
+      s.pts = [p]; const r = rad(s);
+      if (r >= need && (!best || r > best.r)) best = { p: p, r: r };
+    } if (best) break; }
+    if (best) { s.pts = [best.p]; return done('已加一个转弯点并改用圆弧线形，最小半径约 ' + Math.round(best.r) + ' m'); }
+    // 转动还没建成的车站的站台方向（已建车站不动）；相邻区段也要满足半径
+    s.pts = [];
+    for (const sid of [s.a, s.b]) {
+      const st = net.stations[sid]; if ((off && off.stations[sid]) || (st.pd && st.pd[s.line] != null)) continue;
+      const t = M.stationTangent(net, s, sid), a0 = Math.atan2(t[1], t[0]), near = []; for (const id in net.segments) { const o = net.segments[id]; if (o !== s && o.line === s.line && (o.a === sid || o.b === sid)) near.push(o); }
+      for (const da of [10, -10, 20, -20, 30, -30, 45, -45]) {
+        M.setPlatformDir(net, sid, s.line, a0 + da * Math.PI / 180);
+        if (rad(s) >= need && near.every(function (o) { return rad(o) >= M.minRadius(L0); })) return done('已调整「' + st.name + '」的站台方向并改用圆弧线形，最小半径约 ' + Math.round(rad(s)) + ' m');
+      }
+      M.setPlatformDir(net, sid, s.line, null);
+    }
+    if (oldCurve) s.curve = oldCurve; else delete s.curve;
+    s.pts = oldPts;
+    const G = CFG.metro.speedGrades, lower = G.filter(function (x) { return x.minR < minR; }).pop();
+    return { error: '这段轨道太短或转角太大，放不下半径 ' + minR + ' m 的弯道：拉开站距、把车站移出弯道' + (lower ? '，或把本线运行速度降到 ' + lower.kmh + ' km/h（最小半径 ' + lower.minR + ' m）' : '') + '。' };
+  };
   // 执行一键修复（在草案中）
   M.applyFix = function (net, fix) {
     switch (fix.op) {
@@ -1518,6 +1668,7 @@
       case 'moveBend': { const s = net.segments[fix.seg]; if (s && s.pts && s.pts[fix.k]) { const co = M.coTrackSegs(net, s); s.pts[fix.k] = [fix.to[0], fix.to[1]]; M.syncCoTrack(net, s, co); } return {}; }
       case 'moveStation': { const s = net.stations[fix.station]; if (s) { s.x = fix.to[0]; s.y = fix.to[1]; } return {}; }
       case 'platDir': M.setPlatformDir(net, fix.station, fix.line, fix.value); return {};
+      case 'autoFit': return M.autoFit(net, fix.seg, CM.game && CM.game.city, CM.game && CM.game.net);
       case 'splitBranch': return M.splitBranch(net, fix.line);
       case 'normalize': return { notes: M.normalizeLines(net) };
       default: return { error: '无法自动处理' };

@@ -231,7 +231,7 @@
   const OD_FIXED = ['Z', 'NZ', 'B', 'odStart', 'odDest', 't0', 't1', 't2', 't3', 't4', 't5', 'hostZ', 'nx', 'ny', 'kmPerCell', 'blocks'];
   const OD_MOVE = { gtS: 1, tmS: 1, kmS: 1 };
   const OD_INPUT = ['N', 'co', 'cr', 'facW', 'facWe', 'odOk', 'skT', 'skK', 'zJ', 'cpk', 'park', 'vot', 'carAccess',
-    'walkW', 'occ', 'theta', 'fareFlat', 'fareKm0', 'fareStep', 'fareInc', 'fareCap', 'bgShare', 'bgSpeed', 'bgWait', 'bgFare', 'roadKeep', 'accOk', 'gtS', 'tmS', 'kmS', 'perMin', 'capSh', 'capLz', 'habit', 'habAsc', 'habLite'];
+    'walkW', 'occ', 'theta', 'fareFlat', 'fareKm0', 'fareStep', 'fareInc', 'fareCap', 'fareTab', 'bgShare', 'bgSpeed', 'bgWait', 'bgFare', 'roadKeep', 'accOk', 'gtS', 'tmS', 'kmS', 'perMin', 'capSh', 'capLz', 'habit', 'habAsc', 'habLite'];
   function odWorkerMain() {
     let basis = null, id = 0, work = {};
     onmessage = function (e) {
@@ -393,6 +393,7 @@
           const w = new Worker(url), slot = { w: w, netId: 0, job: null };
           w.onmessage = e => this.done(slot, e.data);
           w.onerror = e => { if (e && e.preventDefault) e.preventDefault(); this.fail((e && e.message) || '工作线程出错'); };
+          w.onmessageerror = () => this.fail('地铁最短路消息无法读取');
           this.list.push(slot);
         }
         return true;
@@ -406,6 +407,7 @@
       for (const j of this.queue) j.req.failed = true;
       this.list = null; this.queue = [];
       if (typeof console !== 'undefined') console.warn('地铁最短路改为主线程计算：' + why);
+      CarPool.notify();
     },
     // 提交一次全网最短路：起点固定分成 SKIM_BLOCKS 段（与线程数无关，结果逐位一致）；req.done 后 req.parts 为各段结果。
     // reuse：上一轮这份存储的各段缓冲区，交给线程继续用
@@ -452,11 +454,11 @@
     },
     done: function (s, m) {
       const j = s.job; s.job = null;
-      if (j && j.req.id === m.req) {
-        if (m.stale) j.req.failed = true;
-        else { j.req.parts[m.part] = m; if (--j.req.left <= 0) j.req.done = true; }
-      }
+      if (!j || j.req.id !== m.req) { if (j) j.req.failed = true; this.fail('地铁最短路请求不匹配'); return; }
+      if (m.stale) j.req.failed = true;
+      else { j.req.parts[m.part] = m; if (--j.req.left <= 0) j.req.done = true; }
       this.pump();
+      if (j.req.done || j.req.failed) CarPool.notify();
     },
   };
   CM.SkimPool = SkimPool;
@@ -470,7 +472,7 @@
     const co = K.co, cr = K.cr, cO = K.cO, cR = K.cR, facW = K.facW, facWe = K.facWe, odOk = K.odOk;
     const hostZ = K.hostZ, nx = K.nx, ny = K.ny, skT = K.skT, skK = K.skK, kmPerCell = K.kmPerCell;
     const cpk = K.cpk, park = K.park, vot = K.vot, carAccess = K.carAccess, walkW = K.walkW, occ = K.occ, theta = K.theta, fareFlat = K.fareFlat;
-    const fareKm0 = K.fareKm0, fareStep = K.fareStep, fareInc = K.fareInc, fareCap = K.fareCap;
+    const fareKm0 = K.fareKm0, fareStep = K.fareStep, fareInc = K.fareInc, fareCap = K.fareCap, fareTab = K.fareTab, fareTabN = fareTab.length - 1;
     const bgShare = K.bgShare || 0, bgSpeed = K.bgSpeed, bgWait = K.bgWait, bgFare = K.bgFare, roadKeep = K.roadKeep || 0;
     const acc = K.acc, accOk = K.accOk, zCov = acc ? acc.zCov : null, zl = acc ? acc.zl : null, choices = K.choices;
     const gtS = K.gtS, tmS = K.tmS, kmS = K.kmS, DS = K.DS, perMin = K.perMin, capSh = K.capSh, capLz = K.capLz;
@@ -534,8 +536,9 @@
             if (bs >= 0) {
               mKm = kmS[bs * N + bt];
               fare = fareFlat;
-              if (fareInc > 0 && mKm > fareKm0) { fare += Math.ceil((mKm - fareKm0) / fareStep - 1e-9) * fareInc; if (fareCap > 0 && fare > fareCap) fare = fareCap; }
-              const gtM = best + fare / vot * 60;
+              let fareN = 0;
+              if (fareInc > 0 && mKm > fareKm0) { fareN = Math.ceil((mKm - fareKm0) / fareStep - 1e-9); fare += fareN * fareInc; if (fareCap > 0 && fare > fareCap) fare = fareCap; }
+              const gtM = best + fareTab[fareN > fareTabN ? fareTabN : fareN];
               pMc = 1 / (1 + Math.exp(theta * (gtM - gtCar - habAsc * hb)));
               q = fo * fd * pMc;
               mTime = bw + tmS[bs * N + bt];
@@ -805,6 +808,29 @@
     if (f.mode === 'dist' && f.inc > 0 && km > f.km0) { v += Math.ceil((km - f.km0) / f.step - 1e-9) * f.inc; if (f.cap > 0 && v > f.cap) v = f.cap; }
     return v;
   };
+  // 物价参考票价（v2.6.1）：开局票价按本图造价指数折算到当年
+  Model.fareRef = function (y) { const f0 = CFG.fareDefault.flat, inf = CFG.cost.inflation, b = CFG.econBase || 1990; return f0 * U.priceIndex(y, inf, b) / U.priceIndex(CFG.START.y, inf, b); };
+  // 票价折合多少分钟（v2.6.1 玩家反馈）。原来直接按「票价 ÷ 时间价值」：早期时间价值很低，票价 2 元相当于 48 分钟，涨 25% 客流掉三成多、票款反而减少；
+  // 后期相当于 3 分钟，涨一倍也几乎没影响。现在以物价参考票价为锚：跟着物价涨不会被额外惩罚，超过参考票价越多越难接受，各年代的涨价反应接近
+  Model.fareMinutes = function (fare, ref, vot) {
+    if (!(fare > 0)) return 0;
+    const c = CFG.choice, mRef = ref / vot * 60, r = fare / ref, L = Math.log(r), S = c.fareSens || 0;
+    if (!S) return fare / vot * 60;
+    if (r >= 1) return mRef + S * L + (c.fareOver || 0) * L * L;
+    return Math.max(mRef + S * L, mRef * r);
+  };
+  // 某乘距的票价折合分钟：长途的参考票价按开局的里程阶梯放大（统一票价的地图不放大）
+  Model.fareMinAt = function (f, km, y, vot) {
+    const D = CFG.fareDist; let k = 1;
+    if (CFG.fareDefault.dist !== false && D && km > D.km0) k = Math.min(1 + Math.ceil((km - D.km0) / D.step - 1e-9) * D.inc, D.cap);
+    return Model.fareMinutes(Model.fareAt(f, km), Model.fareRef(y) * k, vot);
+  };
+  // 方式选择用的查表（逐 OD 不做对数运算）：下标为起步里程之外的计费段数
+  Model.fareTab = function (f, y, vot) {
+    const fp = Model.fareParams(f), out = [], nMax = fp.inc > 0 ? Math.min(63, fp.cap > 0 ? Math.max(1, Math.ceil((fp.cap - f.flat) / fp.inc)) : 63) : 0;
+    for (let n = 0; n <= nMax; n++) out.push(Model.fareMinAt(f, n ? fp.km0 + (n - 0.5) * fp.step : Math.min(fp.km0, CFG.fareDist ? CFG.fareDist.km0 : 0), y, vot));
+    return out;
+  };
   // 输入签名用的票价键：统一票价仍是数值本身（与旧版缓存、签名一致），按里程时为参数串
   Model.fareKey = function (f) { return f.mode === 'dist' ? 'd' + [f.flat, f.km0, f.step, f.inc, f.cap].join(',') : f.flat; };
 
@@ -815,9 +841,11 @@
     const all = Fac ? Fac.list(city) : [];
     const list = all.filter(function (f) { return Fac.active(f, this.year, city); }, this);
     const F = list.length, NZ = Z + F;
-    const hostZ = new Int32Array(NZ), nx = new Float32Array(NZ), ny = new Float32Array(NZ);
+    const hostZ = new Int32Array(NZ), nx = new Float32Array(NZ), ny = new Float32Array(NZ), reach = new Float32Array(F);
     for (let z = 0; z < Z; z++) hostZ[z] = z;
     const cells = [], cellFac = new Map(), ringFac = new Map(), inner = new Float32Array(F), excl = new Uint8Array(city.N), we = new Float32Array(F);
+    const walk = city.walk, VW = city.VW;
+    const onRoad = function (cc) { if (!walk) return true; const v = ((cc / city.W) | 0) * VW + cc % city.W; return walk.deg[v] > 0 || walk.deg[v + 1] > 0 || walk.deg[v + VW] > 0 || walk.deg[v + VW + 1] > 0; };
     list.forEach(function (f, k) {
       const c0 = city.cellAt(f.x, f.y);
       hostZ[Z + k] = c0 >= 0 ? city.zoneOf(c0) : 0; nx[Z + k] = f.x; ny[Z + k] = f.y;
@@ -826,18 +854,35 @@
       // 出入口（v2.2 修正）：场地格及其外围一圈的陆地格。公园、宫苑、填海地等场地内部没有可步行的街道时，
       // 车站只要能步行到达场地边缘即可服务整个设施（另计场内步行时间），不再因场内不可步行而永远无法接驳
       const seen = new Set();
+      let linked = false;
+      const addRing = function (cc) { let a = ringFac.get(cc); if (!a) { a = []; ringFac.set(cc, a); } a.push(k); if (onRoad(cc)) linked = true; };
       for (const c of cs) { const i = c % city.W, j = (c / city.W) | 0;
         for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
           const ii = i + di, jj = j + dj; if (ii < 0 || jj < 0 || ii >= city.W || jj >= city.H) continue;
           const cc = jj * city.W + ii; if (seen.has(cc) || city.landFrac[cc] < 0.3) continue; seen.add(cc);
-          let a = ringFac.get(cc); if (!a) { a = []; ringFac.set(cc, a); } a.push(k);
+          addRing(cc);
         } }
+      // 场地周围没有路（v2.6.1）：入口向外延伸到最近的路（最多约 1 km、不跨水面），这段路程计入场内步行
+      if (!linked && walk && !f.ext) {
+        let x0 = city.W, x1 = 0, y0 = city.H, y1 = 0;
+        seen.forEach(function (c) { const i = c % city.W, j = (c / city.W) | 0; if (i < x0) x0 = i; if (i > x1) x1 = i; if (j < y0) y0 = j; if (j > y1) y1 = j; });
+        for (let r = 1; r <= 4 && !linked; r++) {
+          for (let jj = y0 - r; jj <= y1 + r; jj++) for (let ii = x0 - r; ii <= x1 + r; ii++) {
+            if ((jj !== y0 - r && jj !== y1 + r && ii !== x0 - r && ii !== x1 + r) || ii < 0 || jj < 0 || ii >= city.W || jj >= city.H) continue;
+            const cc = jj * city.W + ii; if (seen.has(cc) || city.landFrac[cc] < 0.3 || !onRoad(cc)) continue;
+            let wet = false;
+            for (let t = 0.1; t < 0.95 && !wet; t += 0.1) if (city.waterDistAt(f.x + (ii + 0.5 - f.x) * t, f.y + (jj + 0.5 - f.y) * t) < 0) wet = true;
+            if (wet) continue;
+            seen.add(cc); addRing(cc); reach[k] = r * CFG.CELL_M;
+          }
+        }
+      }
       inner[k] = Math.min(600, Math.sqrt(cs.length) * CFG.CELL_M * 0.4);   // 场内步行（米），大型公园与会展场馆约数分钟
       we[k] = f.we || f.T.we || 1;   // 单个设施可覆盖周末倍数（如主题乐园，v2.2）
     });
     const key = list.map(function (f) { return f.id; }).join(',');
     if (this.fn && this.fn.key !== key) this.facDaily = null;
-    this.fn = { F: F, NZ: NZ, list: list, ids: list.map(function (f) { return f.id; }), key: key, hostZ: hostZ, nx: nx, ny: ny, cells: cells, cellFac: cellFac, ringFac: ringFac, inner: inner, excl: excl, we: we };
+    this.fn = { F: F, NZ: NZ, list: list, ids: list.map(function (f) { return f.id; }), key: key, hostZ: hostZ, nx: nx, ny: ny, cells: cells, cellFac: cellFac, ringFac: ringFac, inner: inner, reach: reach, excl: excl, we: we };
     return this.fn;
   };
   Model.prototype.facIndex = function (id) { return this.fn ? this.fn.ids.indexOf(id) : -1; };
@@ -1226,7 +1271,7 @@
         }
       }
       if (em && em.size) {
-        const arr = [], inn = fn.inner[k];
+        const arr = [], inn = fn.inner[k] + fn.reach[k];
         em.forEach(function (d, s) { arr.push({ s: s, w: (d + inn) / mpm, share: 1 }); });
         arr.sort(function (a, b) { return a.w - b.w; });
         zl[Z + k] = arr.slice(0, 4); zCov[Z + k] = 1; zWalk[Z + k] = arr[0].w;
@@ -1532,7 +1577,7 @@
       co: co, cr: cr, cO: new Float64Array(NPK), cR: new Float64Array(NPK), facW: facW, facWe: facWe, odOk: od.F === F && od.key === fn.key,
       hostZ: hostZ, nx: nx, ny: ny, skT: skT, skK: skK, kmPerCell: kmPerCell,
       cpk: prm.cpk, park: prm.park, vot: prm.vot, carAccess: prm.carAccess, walkW: prm.walkW, occ: prm.occ, theta: prm.theta, fareFlat: this.fareFor(0),
-      fareKm0: fp.km0, fareStep: fp.step, fareInc: fp.inc, fareCap: fp.cap,
+      fareKm0: fp.km0, fareStep: fp.step, fareInc: fp.inc, fareCap: fp.cap, fareTab: Model.fareTab(this.fare, this.year, prm.vot),
       bgShare: bg ? bg.share : 0, bgSpeed: bg ? bg.speed : 1, bgWait: bg ? bg.wait : 0, bgFare: bg ? bg.fare : 0, roadKeep: bg ? bg.keep : 0,
       acc: acc, accOk: !!accOk, choices: choices, skimStore: store, gtS: store ? store.gt : null, tmS: store ? store.tm : null, kmS: store ? store.km : null, DS: store ? store.D : null,
       perMin: IND.perMin, capSh: IND.cap.sh, capLz: IND.cap.lz,

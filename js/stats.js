@@ -1,5 +1,5 @@
 'use strict';
-// 统计面板：概览指标卡 + 交通 / 城市 / 财政 / 线路图表（SVG，悬停十字线与提示、图例、表格视图）
+// 统计面板：概览指标卡 + 交通 / 城市 / 财政 / 线路图表（SVG，悬停十字线与提示、图例）
 (function (CM) {
   const AX = CM.Accessibility;
   const U = CM.U;
@@ -10,7 +10,6 @@
     dark: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'],
   };
   const TABS = [['overview', '概览', 'chart'], ['traffic', '交通', 'metro'], ['econ', '经济', 'trend'], ['finance', '财政', 'wallet'], ['milestones', '城市纪事', 'book']];
-  let patternSerial = 0;
   let ui = null, tab = 'overview', range = 'all', isOpen = false, charts = [], body = null, sig = '';
 
   function pal() { return AX.enabled() ? AX.palette() : PALETTE[document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light']; }
@@ -45,18 +44,15 @@
     return { lo: a, hi: b, ticks: t };
   }
 
-  // ---------- 图表外壳：标题、副标题、图例、表格切换、提示框 ----------
+  // ---------- 图表外壳：标题、副标题、图例、提示框 ----------
   function shell(o, legendItems) {
     const card = h('div', { class: 'chart-card' + (o.wide ? ' wide' : '') });
     const plot = h('div', { class: 'ch-plot' });
     const tip = h('div', { class: 'ch-tip' });
-    const tbl = h('div', { class: 'ch-tbl', style: { display: 'none' } });
-    let tableOn = false;
-    const tBtn = null;
-    card.append(h('div', { class: 'ch-head' }, o.icon ? CM.icon(o.icon, 16, 'muted') : null, h('div', { class: 'ch-title' }, o.title), tBtn));
+    card.append(h('div', { class: 'ch-head' }, o.icon ? CM.icon(o.icon, 16, 'muted') : null, h('div', { class: 'ch-title' }, o.title)));
     if (o.sub) card.appendChild(h('div', { class: 'ch-sub' }, o.sub));
     if (legendItems && legendItems.length >= 2) card.appendChild(h('div', { class: 'ch-legend' }, legendItems.map(function (it, k) { return h('span', null, AX.enabled() && !it.sq ? h('span', { html: '<svg width="28" height="12" aria-hidden="true"><path d="M1 6H27" stroke="' + it.color + '" stroke-width="2.5" stroke-dasharray="' + AX.dash(k) + '"/></svg>' }) : h('i', { class: it.sq ? 'sq' : '', style: { background: it.color, backgroundImage: AX.enabled() && it.sq ? AX.patternCSS(k) : '', backgroundSize: '8px 8px' } }), it.name + (AX.enabled() && !it.sq ? '（' + AX.dashName(k) + '）' : '')); })));
-    card.append(plot, tbl);
+    card.append(plot);
     return { card: card, plot: plot, tip: tip };
   }
   function showTip(sh, html, x, y) {
@@ -74,7 +70,7 @@
 
   // ---------- 折线 / 面积图（单一纵轴） ----------
   function lineChart(o) {
-    const sh = shell(Object.assign({}, o, { table: function () { return seriesTable(o); } }), o.series.map(function (s) { return { name: s.name, color: s.color }; }));
+    const sh = shell(o, o.series.map(function (s) { return { name: s.name, color: s.color }; }));
     const draw = function () {
       const n = o.labels.length;
       let cnt = 0, lo = Infinity, hi = -Infinity;
@@ -147,65 +143,6 @@
     sh.card._draw = draw;
     return sh.card;
   }
-  function seriesTable(o) {
-    const t = h('table', { class: 'tbl' }, h('tr', null, h('th', null, '时间'), o.series.map(function (s) { return h('th', null, s.name); })));
-    for (let i = o.labels.length - 1, c = 0; i >= 0 && c < 240; i--, c++) t.appendChild(h('tr', null, h('td', null, o.tips[i]), o.series.map(function (s) { return h('td', null, s.vals[i] == null ? '—' : o.fmt(s.vals[i])); })));
-    return t;
-  }
-
-  // ---------- 堆叠柱状图（正值；段间留 2px 间隙） ----------
-  function stackChart(o) {
-    const sh = shell(Object.assign({}, o, { table: function () {
-      const t = h('table', { class: 'tbl' }, h('tr', null, h('th', null, o.periodName || '时间'), o.series.map(function (s) { return h('th', null, s.name); }), h('th', null, '合计')));
-      for (let i = o.labels.length - 1; i >= 0; i--) { let tot = 0; for (const s of o.series) tot += s.vals[i] || 0; t.appendChild(h('tr', null, h('td', null, o.labels[i]), o.series.map(function (s) { return h('td', null, o.fmt(s.vals[i] || 0)); }), h('td', null, o.fmt(tot)))); }
-      return t;
-    } }), o.series.map(function (s) { return { name: s.name, color: s.color, sq: true }; }));
-    const draw = function () {
-      const n = o.labels.length;
-      if (!n) { emptyState(sh, o.empty || '尚无完整月份的记录。'); return; }
-      const tots = o.labels.map(function (_, i) { let t = 0; for (const s of o.series) t += Math.max(0, s.vals[i] || 0); return t; });
-      const hi = Math.max.apply(null, tots);
-      const W = Math.max(260, sh.plot.clientWidth || 420), Hh = o.height || 180;
-      const pl = 48, pr = 10, pt = 10, pb = 22;
-      const patternPrefix = 'cb-stack-' + (++patternSerial);
-      const nt = niceTicks(0, hi > 0 ? hi : 1, 4);
-      const Y = function (v) { return pt + (1 - v / nt.hi) * (Hh - pt - pb); };
-      const slot = (W - pl - pr) / n, bw = Math.max(2, Math.min(26, slot * 0.68));
-      const X = function (i) { return pl + slot * (i + 0.5); };
-      let s = '<svg viewBox="0 0 ' + W + ' ' + Hh + '" height="' + Hh + '" font-size="10.5">';
-      if (AX.enabled()) s += '<defs>' + o.series.map(function (sr, k) { const shapes = ['<path d="M-2 2L2-2M0 8L8 0M6 10L10 6"/>', '<path d="M-2 6L2 10M0 0L8 8M6-2L10 2"/>', '<path d="M0 4H8"/>', '<circle cx="4" cy="4" r="1" fill="#fff"/>']; return '<pattern id="' + patternPrefix + '-' + k + '" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="' + sr.color + '"/><g stroke="#fff" stroke-opacity=".7" stroke-width="1">' + shapes[k % 4] + '</g></pattern>'; }).join('') + '</defs>';
-      for (const t of nt.ticks) { const y = Y(t).toFixed(1); s += '<line x1="' + pl + '" x2="' + (W - pr) + '" y1="' + y + '" y2="' + y + '" style="stroke:var(' + (t === 0 ? '--line-strong' : '--line') + ')"/><text x="' + (pl - 6) + '" y="' + y + '" dy="3.5" text-anchor="end" style="fill:var(--muted)">' + esc(o.axisFmt(t)) + '</text>'; }
-      const nx = Math.min(n, Math.max(2, Math.floor((W - pl) / 64))), seen = {};
-      for (let q = 0; q < nx; q++) { const i = nx === 1 ? 0 : Math.round(q / (nx - 1) * (n - 1)); if (seen[i]) continue; seen[i] = 1; s += '<text x="' + X(i).toFixed(1) + '" y="' + (Hh - 5) + '" text-anchor="middle" style="fill:var(--muted)">' + esc(o.xs[i]) + '</text>'; }
-      for (let i = 0; i < n; i++) {
-        let acc = 0;
-        s += '<g class="col" data-i="' + i + '">';
-        o.series.forEach(function (sr, k) {
-          const v = Math.max(0, sr.vals[i] || 0); if (v <= 0) return;
-          const y1 = Y(acc), y2 = Y(acc + v); acc += v;
-          let top = y2, hh = y1 - y2;
-          if (acc < tots[i] - 1e-9 && hh > 3) { top += 2; hh -= 2; }
-          s += '<rect x="' + (X(i) - bw / 2).toFixed(1) + '" y="' + top.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + Math.max(0.8, hh).toFixed(1) + '" rx="' + Math.min(3, bw / 4) + '" fill="' + (AX.enabled() ? 'url(#' + patternPrefix + '-' + k + ')' : sr.color) + '"/>';
-        });
-        s += '</g>';
-      }
-      s += '<rect class="hit" x="' + pl + '" y="0" width="' + (W - pl - pr) + '" height="' + Hh + '" fill="transparent"/></svg>';
-      sh.plot.innerHTML = s; sh.plot.appendChild(sh.tip);
-      const cols = sh.plot.querySelectorAll('.col');
-      sh.plot.onmousemove = function (e) {
-        const r = sh.plot.getBoundingClientRect(), sx = (e.clientX - r.left) * W / r.width;
-        const i = U.clamp(Math.floor((sx - pl) / slot), 0, n - 1);
-        cols.forEach(function (c, k) { c.style.opacity = k === i ? '1' : '0.45'; });
-        const rows = o.series.map(function (sr) { return { name: sr.name, color: sr.color, v: o.fmt(sr.vals[i] || 0) }; });
-        rows.push({ name: '合计', v: o.fmt(tots[i]) });
-        showTip(sh, tipRows(o.labels[i], rows), X(i) * r.width / W, 4);
-      };
-      sh.plot.onmouseleave = function () { cols.forEach(function (c) { c.style.opacity = '1'; }); hideTip(sh); };
-    };
-    charts.push(draw);
-    return sh.card;
-  }
-
   // ---------- 增长率柱状图（正负柱；游戏结果、预测与史实参考分开标识） ----------
   // o.items: [{ lab, x, v（游戏结果或预测）, fc（是否预测）, ref: { v, kind } }]
   function growthChart(o) {
@@ -261,11 +198,7 @@
 
   // ---------- 横向条形图（排名；线路用线路自身颜色） ----------
   function hbarChart(o) {
-    const sh = shell(Object.assign({}, o, { table: function () {
-      const t = h('table', { class: 'tbl' }, h('tr', null, h('th', null, o.nameCol || '名称'), h('th', null, o.valCol || '数值'), o.extraCol ? h('th', null, o.extraCol) : null));
-      for (const it of o.items) t.appendChild(h('tr', null, h('td', null, it.name), h('td', null, o.fmt(it.v)), o.extraCol ? h('td', null, it.extra || '') : null));
-      return t;
-    } }), null);
+    const sh = shell(o, null);
     const draw = function () {
       sh.plot.innerHTML = '';
       if (!o.items.length) { emptyState(sh, o.empty || '暂无数据'); return; }
@@ -364,7 +297,7 @@
     grid.append(
       kpi({ icon: 'train', badge: 'b-teal', label: '地铁日客运量', value: U.fmtPeople(cur.riders), unit: '人次', vals: last36('riders'), delta: delta(H, 'riders', 'up', U.fmtPeople), onclick: function () { go('traffic'); } }),
       kpi({ icon: 'metro', badge: 'b-teal', label: '地铁分担率', value: U.fmtPct(cur.share, 1), vals: last36('share'), delta: delta(H, 'share', 'up', function (v) { return (v * 100).toFixed(1) + ' 个百分点'; }), onclick: function () { go('traffic'); } }),
-      kpi({ icon: 'car', badge: cur.cong < 1.25 ? 'b-green' : (cur.cong < 1.6 ? 'b-orange' : 'b-red'), label: '道路拥堵指数', value: cur.cong.toFixed(2), vals: last36('cong'), delta: delta(H, 'cong', 'down', function (v) { return v.toFixed(2); }), onclick: function () { go('traffic'); } }),
+      kpi({ icon: 'car', badge: cur.cong < 1.15 ? 'b-green' : (cur.cong < 1.6 ? 'b-orange' : 'b-red'), label: '道路拥堵指数', value: cur.cong.toFixed(2), vals: last36('cong'), delta: delta(H, 'cong', 'down', function (v) { return v.toFixed(2); }), onclick: function () { go('traffic'); } }),
       kpi({ icon: cur.sat >= 60 ? 'smile' : (cur.sat >= 40 ? 'meh' : 'frown'), badge: cur.sat >= 60 ? 'b-green' : (cur.sat >= 40 ? 'b-orange' : 'b-red'), label: '市民满意度', value: Math.round(cur.sat), unit: '/ 100', vals: last36('sat'), delta: delta(H, 'sat', 'up', function (v) { return v.toFixed(1); }) }),
       kpi({ icon: 'people', badge: 'b-blue', label: '城市人口', value: U.fmtPeople(cur.pop), vals: last36('pop'), delta: delta(H, 'pop', 'up', U.fmtPeople) }),
       free ? kpi({ icon: 'station', badge: 'b-slate', label: '车站 · 覆盖人口', value: String(cur.stations), unit: '站 · ' + U.fmtPct(cur.coverage, 0), vals: last36('coverage'), delta: delta(H, 'coverage', 'up', function (v) { return (v * 100).toFixed(1) + ' 个百分点'; }) })
@@ -382,7 +315,7 @@
     const cg = h('div', { class: 'chart-grid' });
     cg.append(
       ts(H, '地铁分担率与覆盖率', '分担率：地铁出行占全部出行；覆盖率：步行 15 分钟可达车站的人口', [{ name: '分担率', color: P[0], vals: pick(H, 'share') }, { name: '覆盖率', color: P[2], vals: pick(H, 'coverage') }], { fmt: function (v) { return U.fmtPct(v, 1); }, axisFmt: axisPct, icon: 'metro' }),
-      ts(H, '道路拥堵指数', '1.00 为畅通；高于 1.25 拥堵，高于 1.60 严重拥堵', [{ name: '拥堵指数', color: P[1], vals: pick(H, 'cong') }], { fmt: function (v) { return v.toFixed(2); }, axisFmt: function (v) { return v.toFixed(1); }, min0: false, icon: 'traffic', refs: [{ v: 1.25, label: '拥堵' }, { v: 1.6, label: '严重' }] }),
+      ts(H, '道路拥堵指数', '1.15 起缓行，1.35 起拥堵，1.60 起严重拥堵', [{ name: '拥堵指数', color: P[1], vals: pick(H, 'cong') }], { fmt: function (v) { return v.toFixed(2); }, axisFmt: function (v) { return v.toFixed(1); }, min0: false, icon: 'traffic', refs: [{ v: 1.35, label: '拥堵' }, { v: 1.6, label: '严重' }] }),
       ts(H, '平均通勤时间', '家到工作地的门到门时间', [{ name: '平均通勤', color: P[6], vals: pick(H, 'commute') }], { fmt: function (v) { return v.toFixed(1) + ' 分钟'; }, axisFmt: function (v) { return Math.round(v) + '分'; }, min0: false, icon: 'timer' }),
       hbarChart({ title: '客流最高的车站', sub: '进站 + 出站 + 换乘，前 8 名', icon: 'station', items: stationItems(g), fmt: function (v) { return U.fmtPeople(v); }, empty: '车站客流计算中…' }));
     el.appendChild(cg);

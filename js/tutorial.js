@@ -421,6 +421,11 @@
     }
     const l = U.clamp(x, 8, W - tw - 8), t = U.clamp(y, 8, H - th - 8);
     tip.className = side;
+    // 小屏上卡片已经列出当前动作；气泡与卡片相撞时让出正文和按钮，目标描边仍保留。
+    if (ui.compact() && el) {
+      const c = el.getBoundingClientRect();
+      tip.classList.toggle('crowded', l < c.right + 8 && l + tw > c.left - 8 && t < c.bottom + 8 && t + th > c.top - 8);
+    }
     tip.style.left = l + 'px'; tip.style.top = t + 'px';
     tip.style.setProperty('--ax', U.clamp(ax - l, 14, tw - 14) + 'px'); tip.style.setProperty('--ay', U.clamp(ay - t, 12, th - 12) + 'px');
   }

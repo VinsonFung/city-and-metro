@@ -358,6 +358,7 @@
   "跟随系统": "System",
   "界面大小": "Interface Size",
   "小": "Small",
+  "中": "Medium",
   "标准": "Standard",
   "大": "Large",
   "地图": "Map",
@@ -6239,7 +6240,7 @@
   "{v0} 节": "{v0} cars",
   "本线站台最长 {v0} 节，{v1} 没有合适的编组。": "Platforms take up to {v0} cars; {v1} has no length that fits.",
   "购买": "Buy",
-  "已购买 {v0} {v1} 节 × {v2} 列，配属{v3}": "Bought {v0}, {v1} cars × {v2}, assigned to {v3}",
+  "已购买 {v0} 节 × {v1} 列，配属{v2}": "Bought {v0} cars × {v1}, assigned to {v2}",
   "调入列车 · {v0}": "Bring In Trains · {v0}",
   "把车辆段的闲置列车或其他线路富余的列车调到这个交路，立即生效、不收费。": "Move idle depot trains or spare trains from other lines to this service. It takes effect at once and is free.",
   "没有其他列车可以调入。": "No other trains are available.",
@@ -6269,7 +6270,7 @@
   "超龄列车的运营与维护费用 ×1.25。可以出售旧车（按残值），换购新车型。": "Trains past their design life cost ×1.25 to run and maintain. Sell old trains at residual value and buy newer models.",
   "{v0} 列列车回到车辆段": "{v0} trains returned to the depot",
   "线路调整后没有归属的列车停入车辆段，可以调往其他线路或出售。": "Trains left without a line after the change are kept in the depot. Move them to another line or sell them.",
-  "随线配属列车 · {v0}：{v1} 列（{v2} {v3} 节）": "Trains for {v0}: {v1} ({v2}, {v3} cars)",
+  "随线配属列车 · {v0}：{v1} 列（{v2} 节）": "Trains for {v0}: {v1} ({v2} cars)",
   "调用闲置列车 {v0} 列给 {v1}": "{v0} idle trains assigned to {v1}",
   "购置列车：{v0} × {v1}": "Trains bought: {v0} × {v1}",
   "出售列车 {v0} 列": "{v0} trains sold",
@@ -7330,3 +7331,53 @@
   "经营挑战里，政府会发布任务和招标项目。任务可能同时考核多项条件，合同则按建设进度与运营表现支付。": "In financial challenges, the government issues tasks and tenders. Tasks may combine several conditions; contracts pay according to construction progress and service performance.",
   "正式城市要自己管钱。11 页小图告诉你：钱从哪里来、花在哪里、票价怎么定、缺钱怎么借。": "Manage your own finances in real cities. Eleven illustrated pages explain revenue, spending, fares and borrowing."
 };})(window.CM);
+
+
+// v2.6.1：车辆段、比例尺、设施接驳说明、票价与圆弧线形
+Object.assign(window.CM.I18N_EN, {
+  // 列车
+  "数量（列）": "Quantity (trains)", "共 {v0} 列": "{v0} in total", "补足缺口 {v0}": "Fill gap of {v0}", "最多 {v0}": "Max {v0}",
+  "这个交路高峰还差的列车数": "Trains this service is short of at peak", "全网分配完闲置列车后还差的列车数": "Trains the network is still short of after allocating idle ones",
+  "调回车辆段 · {v0}": "Return to Depot · {v0}", "{v0} 列调回车辆段，之后可配给其他线路。": "{v0} trains return to the depot and can be assigned to other lines later.", "已调回车辆段 {v0} 列": "{v0} trains returned to the depot",
+  "按残值出售，每列约 {v0}": "Sell at residual value, about {v0} per train", "出售列车 · {v0} 节": "Sell Trains · {v0} cars", "先卖最旧的 {v0} 列，按残值回收约 {v1}。": "Sells the oldest {v0} first, recovering about {v1} at residual value.",
+  "智能分配列车": "Smart Train Allocation", "把车辆段的闲置列车分给高峰缺口最大的线路，手动调度的线路不参与。": "Assigns idle depot trains to the lines with the largest peak shortage. Manually scheduled lines are left out.",
+  "各线高峰运力都够，不需要调车。": "Every line has enough peak capacity. No trains need to move.", "车辆段的 {v0} 列继续闲置。": "{v0} trains stay idle in the depot.",
+  "车辆段可分配 {v0} 列。": "{v0} depot trains can be assigned.", "车辆段可分配 {v0} 列，剩 {v1} 列。": "{v0} depot trains can be assigned, leaving {v1}.", "分配后还差 {v0} 列。": "Still {v0} short afterwards.", "分配后高峰运力够用。": "Peak capacity is sufficient afterwards.", "剩下的列车编组超过站台长度或速度不够，不能上线。": "The remaining trains are too long for the platforms or too slow to run.",
+  "交路": "Service", "调入": "Bring in", "缺的列车按推荐车型购买并配属": "Buys the missing trains in the recommended model and assigns them", "分配并买够缺口（约 {v0}）": "Assign and Buy the Rest (about {v0})", "已分配并买够缺口，约 {v0}": "Assigned and bought the rest, about {v0}", "按此分配": "Assign", "已分配 {v0} 列到缺车的线路": "{v0} trains assigned to lines that were short",
+  "已购买 {v0} 节 × {v1} 列，停入车辆段": "Bought {v0} cars × {v1}, kept in the depot", "购买列车 · 车辆段": "Buy Trains · Depot",
+  "买入后停在车辆段，可以按客流智能分配到缺车的线路。编组超过站台长度的列车不能上线，先看线路允许的编组；车型按城市与年代开放。": "Trains wait in the depot and can be allocated to lines that are short. Trains too long for a line's platforms cannot run there, so check the lengths your lines allow. Models become available by city and era.",
+  "购买入库": "Buy to Depot", "智能分配": "Smart Allocate", "每月自动分配闲置列车": "Allocate idle trains monthly", "每月初把车辆段的列车分给缺车的线路，不会自动买车": "Assigns depot trains to lines that are short at the start of each month. It never buys trains.",
+  "没有闲置列车。线路调整后没有归属的列车、从线路调回的列车和买入车辆段的列车停在这里。": "No idle trains. Trains left without a line, returned from lines or bought to the depot are kept here.",
+  "在线路的「列车运营」分页也可以调入车辆段的列车，或为单个交路买车。": "A line's Train Operations tab can also bring in depot trains or buy for a single service.", "车辆段分配列车 {v0} 列": "{v0} depot trains assigned",
+  // 比例尺与网格
+  "网格": "Grid", "网格一格 {v0}": "Grid square {v0}", "间隔 {v0}": "Spacing {v0}", "显示网格一格的实际距离；建站与绘线时可吸附": "Shows the distance per grid square; stations and lines can snap to it",
+  "网格单位": "Grid units", "公里网格": "Kilometres", "经纬度网格": "Lat/lon", "公里网格是正方形，一格多远一目了然；经纬度网格按度数划分": "Kilometre squares show distance at a glance; the lat/lon grid divides by degrees",
+  "地图比例尺": "Map scale bar", "在地图边缘显示比例尺，随缩放变化": "Shows a scale bar along the map edge that follows the zoom", "网格 / 网格吸附": "Grid / Grid Snap",
+  "显示网格（{v0}）时，新车站、线路与转弯点落在网格交叉点": "While the grid is shown ({v0}), new stations, lines and turning points snap to its intersections", "显示网格时，新车站、线路与转弯点落在网格交叉点": "While the grid is shown, new stations, lines and turning points snap to its intersections",
+  // 设施
+  "最近的运营车站「{v0}」直线约 {v1}，但沿道路走不到这里：步行按道路计算，要绕过水面、铁路和没有路的地方，上限 15 分钟。在设施 400 m 内设站并接入线网后，旅客才能乘地铁前往。": "The nearest operating station, {v0}, is about {v1} away in a straight line, but it cannot be reached on foot. Walking follows roads, goes around water, railways and roadless land, and is limited to 15 minutes. Build a connected station within 400 m so passengers can take the metro here.",
+  "最近的运营车站「{v0}」直线约 {v1}，但沿道路走不到这里：步行按道路计算，要绕过水面、铁路和没有路的地方，上限 15 分钟。在设施 400 m 内设站并接入线网后，到访者才能乘地铁前往。": "The nearest operating station, {v0}, is about {v1} away in a straight line, but it cannot be reached on foot. Walking follows roads, goes around water, railways and roadless land, and is limited to 15 minutes. Build a connected station within 400 m so visitors can take the metro here.",
+  "地图上圆环的颜色": "Ring colour on the map", "表示乘地铁的比例：红色是比例低（0% 左右），绿色是 60% 以上。接通地铁后比例要等客流算完才上升，也可能因为到访者多来自没通地铁的地方而一直偏低。": "It shows the share arriving by metro: red is near 0%, green is 60% or more. After a connection opens, the share rises once ridership is recalculated. It can stay low if most visitors come from places without the metro.",
+  // 票价
+  "物价参考票价": "Inflation-adjusted fare", "{v0}（开局票价按物价折算）": "{v0} (starting fare adjusted for prices)", "票价实际水平": "Real fare level", "开局时的 {v0}%": "{v0}% of the start",
+  "客流约 {v0}，票款约 {v1}（约 {v2} / 日）": "Ridership about {v0}, fare income about {v1} (about {v2}/day)", "调价影响": "Fare change effect", "满意度约 {v0} 分，持续 6 个月（涨幅超过物价越多越重）": "Satisfaction about {v0} for 6 months (worse the more it outpaces prices)",
+  "随物价自动调价": "Index fares to prices", "每年 1 月按物价涨幅调整票价，满意度每次略降。客流也会跟着变，不是白赚": "Raises fares with prices each January, lowering satisfaction slightly each time. Ridership responds too, so it is not free money.",
+  "跟着物价调价时客流下降有限；超过参考票价越多，乘客流失越快，超过约 1.3 倍后多收的钱抵不上流失的客流。按里程计费时长途乘客付得更多。{v0} 年居民时间价值约 {v1} {v2}/小时（估算）。应用后居民出行选择将在数秒内重新计算。": "Keeping up with prices costs few riders. The further fares go above the inflation-adjusted level, the faster riders leave, and past about 1.3 times it the extra money no longer makes up for them. Long trips pay more under distance fares. Residents' time value in {v0} is about {v1} {v2}/hour (estimate). Travel choices are recalculated within seconds after applying.",
+  "票价已调整：{v0}。居民出行选择正在重新计算；涨幅明显高于物价，满意度下降 {v1} 分，持续 6 个月": "Fare changed: {v0}. Travel choices are being recalculated. The rise clearly outpaces prices, so satisfaction falls by {v1} for 6 months",
+  "票价上调": "Fare increase", "票价随物价调整": "Fares indexed to prices", "票价实际水平只有开局时的 {v0}%": "Real fare level is only {v0}% of the start", "物价上涨后，票价一直没有调整。可以在财政页调价，或开启随物价自动调价。": "Prices have risen but fares have not. Adjust fares on the finance page, or turn on price indexing.", "票价实际水平只有开局时的 {v0}%，运营成本却一直在涨": "Real fare level is only {v0}% of the start while operating costs keep rising",
+  // 线形
+  "自动调顺": "Auto-Smooth", "点「自动调顺」让系统重新找线形；也可以加转弯点（Shift+点击）放缓弯道，或拉开车站距离。车站两侧约 {v0} m 必须是直线站台。": "Click Auto-Smooth to let the game find a route. You can also add a turning point (Shift+click) to ease the curve or move stations apart. About {v0} m on each side of a station must be straight platform.",
+  "已改用圆弧线形，最小半径约 {v0} m": "Switched to arc alignment; minimum radius about {v0} m", "已去掉转弯点并改用圆弧线形，最小半径约 {v0} m": "Removed turning points and switched to arc alignment; minimum radius about {v0} m", "已加一个转弯点并改用圆弧线形，最小半径约 {v0} m": "Added a turning point and switched to arc alignment; minimum radius about {v0} m", "已调整「{v0}」的站台方向并改用圆弧线形，最小半径约 {v1} m": "Turned the platform at {v0} and switched to arc alignment; minimum radius about {v1} m",
+  "这段轨道太短或转角太大，放不下半径 {v0} m 的弯道：拉开站距、把车站移出弯道，或把本线运行速度降到 {v1} km/h（最小半径 {v2} m）。": "This section is too short or turns too sharply for a {v0} m curve. Move stations apart or out of the curve, or lower the line speed to {v1} km/h (minimum radius {v2} m).", "这段轨道太短或转角太大，放不下半径 {v0} m 的弯道：拉开站距、把车站移出弯道。": "This section is too short or turns too sharply for a {v0} m curve. Move stations apart or out of the curve.",
+  "平滑曲线：直线加圆弧，半径自动取最大。Shift+点击放置转弯点，线路切过转弯点；画好后可拖动调弯": "Smooth: straight track and arcs with the largest radius that fits. Shift+click places a turning point the line curves past; drag afterwards to adjust",
+  "{key} 显示界面 · Esc 暂停并打开菜单": "{key} shows the interface · Esc pauses and opens the menu",
+  "恢复居民出行": "Restoring residents' travel",
+  "共 {steps} 步 · 约 {minutes} 分钟": "{steps} steps · about {minutes} min",
+});
+
+// v2.6.1：成田机场
+Object.assign(window.CM.I18N_EN, {
+  "成田机场": "Narita Airport", "成田机场（东向接驳）": "Narita Airport (eastern connection)",
+  "成田国际机场 1978 年 5 月启用，在地图东缘以东约 42 km。": "Narita International Airport opened in May 1978, about 42 km east of the map edge.",
+  "成田国际机场 1978 年 5 月启用，在地图东缘以东约 42 km。此处为京成线、成田特快与东关东高速方向出图的接驳点，机场启用后产生往返机场的出行。": "Narita International Airport opened in May 1978, about 42 km east of the map. This access point represents the Keisei line, Narita Express and Higashi-Kanto Expressway leaving the map, and generates trips to and from the airport once it opens.",
+});

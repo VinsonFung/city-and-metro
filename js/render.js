@@ -4902,7 +4902,7 @@
     const changed = function (id, kind) {
       if (kind === 'seg') { const a = d.net.segments[id], b = off.segments[id]; return !b || a.type !== b.type || a.curve !== b.curve || MT.trackKey(a) !== MT.trackKey(b); }
       const a = d.net.stations[id], b = off.stations[id];
-      return !b || a.x !== b.x || a.y !== b.y || a.type !== b.type || a.size !== b.size || JSON.stringify(a.lv || null) !== JSON.stringify(b.lv || null) || JSON.stringify(a.pd || null) !== JSON.stringify(b.pd || null);
+      return !b || a.x !== b.x || a.y !== b.y || a.type !== b.type || a.size !== b.size || JSON.stringify(a.lv || null) !== JSON.stringify(b.lv || null) || MT.platDirsChanged(off, d.net, id);
     };
     const dm = this.metroMaskOf(d.net, changed), cur = this._mt ? this._mt.mask : new Map(), boxes = [];
     dm.forEach(function (bits, c) {

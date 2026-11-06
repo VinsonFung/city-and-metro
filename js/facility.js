@@ -69,6 +69,19 @@
   const yrOf = function (v) { return v == null ? null : (Array.isArray(v) ? v[0] + ((v[1] || 1) - 1) / 12 : v); };
   const curve = function (v) { return typeof v === 'number' ? [[0, v]] : v; };
 
+  // 设施中心落在水面上（如公园的中心是湖）时移到最近的陆地（v2.6.1）：中心不在陆地的设施永远不会启用，玩家也看不出原因。按现代陆地判断，填海地不受影响
+  function snapToLand(f, city) {
+    const LM = city.landMax, c0 = city.cellAt(f.x, f.y);
+    if (!LM || c0 < 0 || LM[c0] >= 0.5) return;
+    const i0 = Math.floor(f.x), j0 = Math.floor(f.y);
+    let best = null, bd = 1e9;
+    for (let j = j0 - 8; j <= j0 + 8; j++) for (let i = i0 - 8; i <= i0 + 8; i++) {
+      if (i < 0 || j < 0 || i >= city.W || j >= city.H || LM[j * city.W + i] < 0.5) continue;
+      const d = U.dist(i + 0.5, j + 0.5, f.x, f.y);
+      if (d < bd) { bd = d; best = [i + 0.5, j + 0.5]; }
+    }
+    if (best) { f.x = best[0]; f.y = best[1]; }
+  }
   // 当前地图的设施表（按地图数据缓存）。lm：引用地标（位置、场地与落成年份取自地标）
   // city：传入时同时生成片区设施（需要城市的片区划分）；不传时沿用最近一次生成的表
   Fac.list = function (city) {
@@ -90,6 +103,7 @@
       } else if (s.at) { f.x = s.at[0]; f.y = s.at[1]; f.open = s.y0 != null ? yrOf(s.y0) : -1e9; }
       else return;
       if (f.open == null) f.open = -1e9;
+      if (city && f.lmK < 0 && !f.ext) snapToLand(f, city);
       out.push(f);
     });
     if (city) genDistrict(out, city);
@@ -104,18 +118,55 @@
     { t: 'hosp', suf: '区域医院', w: 0.015, min: 0.02, near: 4, like: ['hosp'] },
     { t: 'park', suf: '文体公园', w: 0.008, min: 0.015, near: 3, like: ['park', 'scenic', 'stadium'] },
   ];
+  // 路网密度（5×5 格内的道路与街道总长，单位格）：只看地图数据、不看年份，片区设施的位置不随存档进度变化。快速路不能步行，桥隧不算
+  function roadField(city) {
+    if (city._roadField) return city._roadField;
+    const W = city.W, H = city.H, raw = new Float32Array(W * H), F = new Float32Array(W * H);
+    const add = function (p) { for (let q = 0; q + 3 < p.length; q += 2) { const i = Math.floor((p[q] + p[q + 2]) / 2), j = Math.floor((p[q + 1] + p[q + 3]) / 2); if (i >= 0 && j >= 0 && i < W && j < H) raw[j * W + i] += U.dist(p[q], p[q + 1], p[q + 2], p[q + 3]); } };
+    for (const w of city.roadWays || []) { const g = city.roadGroups[w.g]; if (g.cls !== 4 && !(g.flags & 3)) add(w.p); }
+    for (const s of (CM.Geo && CM.Geo.streets) || []) add(s.p);
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+      let v = 0;
+      for (let b = Math.max(0, j - 2); b <= Math.min(H - 1, j + 2); b++) for (let a = Math.max(0, i - 2); a <= Math.min(W - 1, i + 2); a++) v += raw[b * W + a];
+      F[j * W + i] = v;
+    }
+    return (city._roadField = F);
+  }
+  // 片区设施的位置（v2.6.1 玩家反馈：蔡甸商业中心落在湖边没有路的洼地上，周围修了 4 座站也走不到）：
+  // 有发展中心且周围路够密时用发展中心；否则取片区里路最密、又靠近片区路网重心的地方。路太少（不足约 1.5 km）的片区不生成
+  const GEN_MIN_ROAD = 6;
+  function genSite(city, k, ct) {
+    const W = city.W, F = roadField(city), reg = city.region, LM = city.landMax;
+    let mx = 0, sx = 0, sy = 0, sw = 0, n = 0;
+    for (let c = 0; c < city.N; c++) {
+      if (reg[c] !== k || LM[c] < 0.5) continue;
+      const v = F[c], i = c % W + 0.5, j = ((c / W) | 0) + 0.5; n++;
+      if (v > mx) mx = v;
+      sx += i * v; sy += j * v; sw += v;
+    }
+    if (mx < GEN_MIN_ROAD) return null;
+    if (ct) { const c0 = city.cellAt(ct[0], ct[1]); if (c0 >= 0 && F[c0] >= mx * 0.4 && LM[c0] >= 0.5) return ct; }
+    const rx = ct ? ct[0] : sx / sw, ry = ct ? ct[1] : sy / sw, sig = ct ? 8 : Math.max(8, Math.sqrt(n) * 0.6);
+    let best = -1, at = null;
+    for (let c = 0; c < city.N; c++) {
+      if (reg[c] !== k || LM[c] < 0.5) continue;
+      const i = c % W + 0.5, j = ((c / W) | 0) + 0.5, s = F[c] * Math.exp(-U.dist(i, j, rx, ry) / sig);
+      if (s > best) { best = s; at = [i, j]; }
+    }
+    return at;
+  }
   function genDistrict(out, city) {
     const CFG = CM.CFG, regs = city.regions || [];
     if (D.fictional || !city.region) return;
     const km = CFG.CELL_M / 1000, popRef = U.interp(CFG.growth.popCurve, CFG.growth.histEnd);
     regs.forEach(function (rg, k) {
-      if (rg.scenic || !rg.cells || rg.cx == null || rg === D.defaultRegion) return;   // 不含风景区与「外围地区」
-      let at = null, best = -1;
+      if (rg.scenic || rg.hub || rg.open == null || !rg.cells || rg.cx == null || rg === D.defaultRegion) return;   // 不含风景区、机场等枢纽、永久不开放的片区与「外围地区」
+      let ctAt = null, best = -1;
       for (const ct of D.centers || []) {
         const c = city.cellAt(ct.x, ct.y);
-        if (c >= 0 && city.region[c] === k && ct.pop + ct.jobs > best) { best = ct.pop + ct.jobs; at = [ct.x, ct.y]; }
+        if (c >= 0 && city.region[c] === k && ct.pop + ct.jobs > best) { best = ct.pop + ct.jobs; ctAt = [ct.x, ct.y]; }
       }
-      if (!at && rg.cx != null) at = [rg.cx, rg.cy];
+      const at = genSite(city, k, ctAt);
       if (!at) return;
       // 名称取片区名去掉括注；机场旧址片区以括注中的新城名命名（如「白云新城」）
       const nm = String(rg.name), paren = /（([^（）·]+)）/.exec(nm), short = rg.id === 'airport' && paren ? paren[1] : nm.replace(/（.*）/, '');

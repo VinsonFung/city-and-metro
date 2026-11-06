@@ -18,6 +18,7 @@
     autosave: true,
     nightFast: true, peakSlow: false, curveMode: 'smooth',
     grid: false, gridSnap: true,  // 视图工具及设置「游戏」页中的网格吸附
+    gridUnit: 'km', scaleBar: true,
     keys: {},             // 自定义物理键位
     recentColors: [],      // 最近使用的自定义线路颜色
     lineTags: false, taskPins: false,
@@ -37,6 +38,7 @@
   cur.colorBlind = cur.colorBlind === true;
   if (!['auto','standard','high'].includes(cur.gfx)) cur.gfx='auto';
   cur.immersive = cur.immersive === true;
+  if (!['km', 'deg'].includes(cur.gridUnit)) cur.gridUnit = 'km';
   if (!['zh-CN', 'zh-TW', 'en'].includes(cur.language)) cur.language = 'zh-CN';
   const recent = function (v) { return Array.isArray(v) ? v.filter(function (c) { return typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c); }).map(function (c) { return c.toLowerCase(); }).filter(function (c, i, a) { return a.indexOf(c) === i; }).slice(0, 8) : []; };
   cur.recentColors = recent(cur.recentColors);

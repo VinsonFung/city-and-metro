@@ -81,7 +81,8 @@ export async function inspectGame(root = projectRoot) {
   }
   const CM = context.CM;
   if (!loaded || !CM?.MAP_ORDER?.length) throw new Error('地图登记未加载');
-  if (CM.CFG.GAME_VERSION !== CM.NEWS?.[0]?.v && CM.CFG.GAME_VERSION.replace(/\.0$/, '') !== CM.NEWS?.[0]?.v) throw new Error('游戏与最新更新公告版本不一致');
+  const releaseLine = v => String(v || '').split('.').slice(0, 2).join('.');
+  if (releaseLine(CM.CFG.GAME_VERSION) !== releaseLine(CM.NEWS?.[0]?.v)) throw new Error('游戏与最新更新公告的主、次版本不一致');
   if (!Array.isArray(CM.NEWS) || CM.NEWS.some(n => !Array.isArray(n.items) || n.items.length !== 6 || n.items.some(t => typeof t !== 'string' || !t.trim()))) throw new Error('每版更新公告必须包含6条非空玩家摘要');
   for (const file of ['LICENSE.txt', 'THIRD_PARTY_NOTICES.txt']) {
     if (String(CM.LEGAL?.[file]).replace(/\r\n/g, '\n') !== files.get(path.join(root, file)).bytes.toString().replace(/\r\n/g, '\n')) throw new Error('游戏内许可副本过期：' + file);

@@ -216,12 +216,48 @@
     const E = CFG.economy, out = [];
     if (this.negMonths > 0) out.push({ level: this.negMonths >= E.negMonthsLimit * 0.6 ? 'danger' : 'warn', text: '财政预警：已连续 ' + this.negMonths + ' 个月负余额（满 ' + E.negMonthsLimit + ' 个月挑战失败）' });
     if (this.lowSatMonths > 0) out.push({ level: this.lowSatMonths >= E.satFailMonths * 0.6 ? 'danger' : 'warn', text: '交通预警：满意度已连续 ' + this.lowSatMonths + ' 个月低于 ' + E.satFail + '（满 ' + E.satFailMonths + ' 个月挑战失败）' });
-    // 票价不会自动随物价调整：实际价值（按造价指数折回价格基年）跌破开局默认票价的一半时提醒（长时间跨度、物价变化大的地图，如巴黎）
-    const f0 = CFG.fareDefault && CFG.fareDefault.flat, y = this.cur && this.cur.y;
-    if (CFG.fareRange && CFG.fareRange.scale && f0 > 0 && y && this.fare.flat > 0) {
-      const real = this.fare.flat / this.costIndex(y) / f0;
-      if (real < 0.5) out.push({ level: 'warn', text: '票价预警：票价没有随物价调整，实际价值只剩开局时的 ' + Math.round(real * 100) + '%，可在财政页调整票价' });
+    // 票价不会自动随物价调整：实际水平跌到开局时的四成以下才常驻提醒；七成以下每三年在 1 月提醒一次（见 fareYearly）
+    const y = this.cur && this.cur.y;
+    if (y && this.fare.flat > 0) {
+      const real = this.fareReal(y);
+      if (real < 0.4) out.push({ level: 'warn', text: '票价预警：票价没有随物价调整，实际价值只剩开局时的 ' + Math.round(real * 100) + '%，可在财政页调整票价' });
     }
+    return out;
+  };
+  // 票价实际水平：起步价 ÷ 物价参考票价（开局票价按物价折算到当年）
+  Economy.prototype.fareReal = function (y) { return this.fare.flat / CM.Model.fareRef(y); };
+  // 调价对满意度的影响（v2.6.1）：涨幅超过上次调价以来的物价涨幅越多，市民越不满，持续 6 个月；不超过物价涨幅的上调只有轻微影响，降价没有影响
+  Economy.prototype.fareHikeEffect = function (f, y) {
+    const a = Tasks.fareLevel(this.fare), b = Tasks.fareLevel(f);
+    if (!(a > 0) || !(b > a * 1.001)) return 0;
+    const y0 = this.fareMark != null ? this.fareMark : CFG.START.y, allowed = this.costIndex(y) / this.costIndex(y0) - 1, over = Math.max(0, b / a - 1 - allowed);
+    return -U.clamp(0.5 + over * 20, 0.5, 8);
+  };
+  // 应用新票价。auto：随物价自动调价，不改变自动调价的基准
+  Economy.prototype.setFare = function (f, y, m, auto) {
+    const fx = this.fareHikeEffect(f, y), ym = U.ymIndex(y, m);
+    if (fx < 0) {
+      const md = this.mods.find(function (x) { return x.fareHike && x.until >= ym; });
+      if (md) { md.delta = Math.max(-10, md.delta + fx); md.until = ym + 5; }
+      else this.mods.push({ kind: 'sat', delta: fx, until: ym + 5, reason: '票价上调', fareHike: true });
+    }
+    this.fare = f; this.fareMark = y + (m - 1) / 12;
+    if (this.fareAuto && !auto) this.setFareAuto(true, y);
+    return fx;
+  };
+  // 随物价自动调价（v2.6.1）：记下开启时的票价与物价，每年 1 月按物价涨幅调整
+  Economy.prototype.setFareAuto = function (on, y) {
+    this.fareAuto = on ? { flat: this.fare.flat, inc: this.fare.inc || 0, cap: this.fare.cap || 0, idx: this.costIndex(y) } : null;
+  };
+  // 每年 1 月：自动调价；没开时票价实际水平低于七成，每三年提醒一次（资金不限时不提醒）。返回 { changed, real, remind }
+  Economy.prototype.fareYearly = function (y, m) {
+    const out = { changed: false, real: this.fareReal(y), remind: false }, A = this.fareAuto;
+    if (A) {
+      const k = this.costIndex(y) / A.idx, st = CFG.fareRange.step, q = function (v) { return +(Math.round(v / st) * st).toFixed(6); }, f = Object.assign({}, this.fare);
+      f.flat = q(A.flat * k);
+      if (f.mode === 'dist') { f.inc = q(A.inc * k); if (A.cap > 0) f.cap = q(A.cap * k); }
+      if (f.flat > this.fare.flat || (f.inc || 0) > (this.fare.inc || 0)) { this.setFare(f, y, m, true); out.changed = true; out.real = this.fareReal(y); }
+    } else if (!this.isFree() && out.real < 0.7 && !(this.fareNote > y)) { this.fareNote = y + 3; out.remind = true; }
     return out;
   };
 
@@ -403,13 +439,17 @@
   Economy.prototype.serialize = function () {
     return { mode: this.mode, funds: this.funds, fare: this.fare, cur: this.cur, ledger: this.ledger, sat: this.sat, mods: this.mods, negMonths: this.negMonths, lowSatMonths: this.lowSatMonths, failed: this.failed, satFactors: this.satFactors, lastDay: this.lastDay,
       capex: this.capex, bonds: this.bonds, bondIssued: this.bondIssued, overdue: this.overdue, overdueParts: this.overdueParts || null, overdueMonths: this.overdueMonths, flow: this.flow, bondSeq: this.bondSeq, svc: this._svc == null ? null : this._svc,
-      fisc: this.fisc || null, built: this.built || 0, rate: this.rate || undefined };
+      fisc: this.fisc || null, built: this.built || 0, rate: this.rate || undefined, fareMark: this.fareMark != null ? this.fareMark : undefined, fareAuto: this.fareAuto || undefined, fareNote: this.fareNote || undefined };
   };
   Economy.restore = function (s) {
     const e = new Economy(s.mode, s.cur.y, s.cur.m);
     Object.assign(e, { funds: s.funds, fare: Economy.normFare(s.fare), cur: s.cur, ledger: s.ledger || [], sat: s.sat, mods: s.mods || [], negMonths: s.negMonths || 0, lowSatMonths: s.lowSatMonths || 0, failed: s.failed || null, satFactors: s.satFactors || null, lastDay: s.lastDay || null,
       capex: s.capex || 0, bonds: s.bonds || [], bondIssued: s.bondIssued || {}, overdue: s.overdue || 0, overdueParts: s.overdueParts || null, overdueMonths: s.overdueMonths || 0, flow: s.flow || [], bondSeq: s.bondSeq || 1, built: s.built || 0 });
     e._svc = s.svc == null ? null : s.svc;
+    e.fareMark = Number.isFinite(s.fareMark) ? s.fareMark : null;   // 没调过价（含旧存档）：物价涨幅从开局算起，读档不改变
+    const fa = s.fareAuto;
+    e.fareAuto = fa && Number.isFinite(fa.idx) && fa.idx > 0 && ['flat', 'inc', 'cap'].every(function (k) { return Number.isFinite(fa[k]) && fa[k] >= 0; }) ? { flat: fa.flat, inc: fa.inc, cap: fa.cap, idx: fa.idx } : null;
+    e.fareNote = Number.isFinite(s.fareNote) ? s.fareNote : 0;
     e.fisc = s.fisc && isFinite(s.fisc.f) ? { y: s.fisc.y, f: s.fisc.f } : null;   // 1.7 及更早的存档没有财力系数，按 1 处理
     e.rate = s.rate && isFinite(s.rate.f) ? { score: s.rate.score, grade: s.rate.grade, f: s.rate.f } : null;   // 2.4 及更早没有政府合同
     // 1.6 及更早的正式存档没有债券，默认债务为零。早期 1.7 开发档可能只保存逾期总账，

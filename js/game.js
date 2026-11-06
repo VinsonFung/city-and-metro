@@ -349,6 +349,15 @@
     const oldFacKey = model.fn.key;
     const yr = y + (m - 1) / 12;
     if (CM.applyMoneyEra && CM.applyMoneyEra(y, m)) this.emit('money');   // 货币改革（巴黎 1960、2002）：只改变显示货币，内部记账单位不变
+    // 票价随物价（v2.6.1）：1 月自动调价或提醒
+    if (m === 1) {
+      const fy = this.econ.fareYearly(y, m);
+      if (fy.changed) { model.fare = this.econ.fare; model.wake(2); this.logEvent({ tag: '经营', title: '票价随物价调整', desc: CM.UI.fareText(this.econ.fare, true) }); }
+      else if (fy.remind) {
+        this.logEvent({ tag: '经营', title: '票价实际水平只有开局时的 ' + Math.round(fy.real * 100) + '%', desc: '物价上涨后，票价一直没有调整。可以在财政页调价，或开启随物价自动调价。' });
+        this.emit('toast', { kind: 'info', text: '票价实际水平只有开局时的 ' + Math.round(fy.real * 100) + '%，运营成本却一直在涨', fare: true });
+      }
+    }
     // 历史事件
     D.events.forEach((e, k) => {
       if (this.firedEvents[k]) return;
@@ -731,8 +740,10 @@
     const x = m.zCx[z], y = m.zCy[z];
     let best = null, bd = 1e9;
     for (const p of D.places) { const d = U.dist(x, y, p[1], p[2]); if (d < bd) { bd = d; best = p[0]; } }
+    // 附近有地名时只说地名（v2.6.1 玩家反馈）：片区按街道划分、范围很大，「石榴岗一带（官洲·生物岛）」读起来像在岛上
+    if (bd < 5) return best + '一带';
     const rg = this.city.regionAt(x, y);
-    return (bd < 5 ? best + '一带' : '片区') + (rg ? '（' + rg.name.replace(/（.*）/, '') + '）' : '');
+    return '片区' + (rg ? '（' + rg.name.replace(/（.*）/, '') + '）' : '');
   };
   // 片区早高峰拥堵：默认工作日（通勤口径）
   Game.prototype.zoneCong = function (z, dt) {

@@ -73,7 +73,9 @@
       const railNames = function (s) { s = strip(s); return [s, s.replace(/火车站$|站$/, ''), s.replace(/站$/, '')]; };
       for (const lm of m.data.landmarks || []) if (lm.kind === 'rail') { const b = near(railNames(lm.name), 1, lm.x, lm.y, 3.2); if (b && b.d > 0.4) { lm.x = b.x; lm.y = b.y; } }
       for (const f of m.data.facilities || []) if (f.at && f.t === 'rail') { const b = near(railNames(f.n), 1, f.at[0], f.at[1], 3.6); if (b && b.d > 0.4) f.at = [b.x, b.y]; }
-      const anchors = function (list) { for (const a of list || []) { const b = near([strip(a.name), strip(a.name).replace(/一带$/, '')], 0, a.x, a.y, 3) || near(railNames(a.name), 1, a.x, a.y, 3); if (b && b.d > 0.4) { a.x = b.x; a.y = b.y; } } };
+      // v2.6.1 玩家反馈（任务地点标错）：半径放宽到 3 km，括号里写的地名也算（如「老城（公园前）」）
+      const inner = function (s) { const q = /（([^（）·、—]+)）/.exec(String(s)); return q ? [q[1].replace(/一带$/, '')] : []; };
+      const anchors = function (list) { for (const a of list || []) { const names = [strip(a.name), strip(a.name).replace(/一带$/, '')].concat(inner(a.name)), b = near(names, 0, a.x, a.y, 12) || near(railNames(a.name), 1, a.x, a.y, 12); if (b && b.d > 0.4) { a.x = b.x; a.y = b.y; } } };
       for (const t of (m.data.histTasks || []).concat(m.data.dynTasks || [])) anchors(t.anchors);
       for (const e of m.data.eras || []) for (const t of e.goals || []) anchors(t.anchors);
     }

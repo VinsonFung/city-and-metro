@@ -221,6 +221,7 @@
     pop.addEventListener('pointerleave', function () { hold(false); });
     this._opsPop = pop;
     document.getElementById('app').appendChild(pop);
+    this.queueLayout();
     hold(false);
     sfx('opsAlert');
   };

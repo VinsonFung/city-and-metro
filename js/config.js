@@ -2,9 +2,9 @@
 // 全局参数。PRD 中标注"待确认"的数值在此给出可调整的默认值（DEFAULT），评审确认后只需修改本文件。
 (function (CM) {
   CM.CFG = {
-    GAME_VERSION: '2.5.0',
+    GAME_VERSION: '2.5.1',
     TRAFFIC_MODEL: 4,      // 轻量交通更新；与显示版本独立，确保 v3 存档仍触发安全迁移
-    RULES_REVISION: 6,     // Web v2.5: back up older task rules; preserve settled history.
+    RULES_REVISION: 7,     // Web v2.5.1: fare and alignment fixes; protect original saves before upgrade.
     SAVE_FORMAT: 'city-metro-save',
     SAVE_VERSION: 2,
     SAVE_MIN_VERSION: 2,   // 1.1 起地图改为真实地理，旧版存档的城市数据与之不兼容
@@ -106,6 +106,7 @@
         { kmh: 120, minR: 600, warnR: 1000, ops: 1.25, track: 0.3 },
       ],
       maxTurnAtStationDeg: 60,  // 车站前后线路方向最大偏转（站台为直线段）
+      maxTurnArcDeg: 120,       // 圆弧线形（v2.6.1）的上限：弯道都在站台之外，能否通过由半径决定
       platformHalfM: 70,        // 站台直线段半长
       maxGrade: 0.03,           // 最大坡度（地下/地面/高架转换坡道）
       levelM: { underground: -15, surface: 0, elevated: 12 }, // 轨面高程（米）
@@ -153,10 +154,13 @@
     fareDefault: { mode: 'flat', flat: 2 },
     // 按里程计费的默认参数（新开局）：起步价含 km0 公里，之后每 step 公里加价 inc（起步价的倍数），封顶 cap（起步价的倍数）
     fareDist: { km0: 6, step: 6, inc: 0.5, cap: 2.5 },
-    fareRange: { min: 0, max: 10, step: 0.5 },
+    // scale：滑块上限与步长随物价放大（v2.6.1 起各图都有，否则票价跟不上物价）
+    fareRange: { min: 0, max: 10, step: 0.1, scale: true },
 
     choice: {
       theta: 0.065,             // Logit 灵敏度（1/分钟）
+      // 票价敏感度（v2.6.1，见 Model.fareMinutes）：票价与「物价参考票价」之比每翻一倍约多 fareSens × 0.69 分钟；超过参考票价后再加 fareOver × ln²，越贵越难接受
+      fareSens: 10.8, fareOver: 25,
       walkW: 1.6, waitW: 1.5,
       transferPen: 4, outTransferPen: 6,
       carAccess: 4,             // 停车与取车附加分钟
@@ -224,6 +228,6 @@
     metroLed: { radius: 4, years: 4, base: 0.3, xfer: 0.5, flow: 0.6, flowFull: 60000, tod: [0, 0.15, 0.4, 0.8], cov0: 0.08, cov1: 0.45, wMin: 0.25, res: 1.0, jobs: 1.8, flatten: 0.6, capR: 0.35, capJ: 0.9 },
     saves: { prefix: 'cm1.', maxManual: 12 },
     // 动态对象上限（代表性展示）：汽车、车站行人、街道行人、列车上下车乘客（每帧）；声音：列车声部与同时播放的环境短音
-    perf: { solverBudgetMs: 5, solverBudgetMaxMs: 10, frameTargetMs: 13, jumpSliceMs: 10, jumpRenderMs: 250, chunkBudgetMs: 6, sharpBudgetMs: 8, movingBudgetMs: 3, prefetchMs: 2, warmBudgetMs: 10, cacheMaxPx: 24e6, maxCars: 320, maxPeds: 180, maxWalkers: 120, maxRiders: 120, trainVoices: 3, maxOneShots: 6 },
+    perf: { solverInputMs: 1.5, solverBudgetMs: 5, solverBudgetMaxMs: 10, frameTargetMs: 13, jumpSliceMs: 10, jumpRenderMs: 250, chunkBudgetMs: 6, sharpBudgetMs: 8, movingBudgetMs: 3, prefetchMs: 2, warmBudgetMs: 10, cacheMaxPx: 24e6, maxCars: 320, maxPeds: 180, maxWalkers: 120, maxRiders: 120, trainVoices: 3, maxOneShots: 6 },
   };
 })(window.CM);

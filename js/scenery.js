@@ -79,7 +79,6 @@
     };
     // 机场用地：运营中的机场格，或交通枢纽区域（如香港国际机场）内的陆地
     const isAirC = function (c) { return c >= 0 && (city.lu[c] === LU.AIRPORT || (city.regions[city.region[c]].hub && city.landFrac[c] >= 0.5)); };
-    const isAir = function (x, y) { return isAirC(city.cellAt(x, y)); };
     for (const f of Fac.list(city)) {
       if ((f.t !== 'rail' && f.t !== 'air') || f.lmK >= 0 || f.ext || !Fac.active(f, yr, city)) continue;
       if (f.t === 'rail') {
@@ -91,15 +90,19 @@
         continue;
       }
       // 机场（v2.2 按实际体量）：航站楼长约跑道的 1/6（320–560 m），前方约 280 m 深的停机坪与滑行道，停机坪外缘距跑道中线约 110 m
-      let rw = f.rw || this.runwaySeg(city), x, y, rot, rwLen, rwOff;   // 有自己跑道数据的机场（香港国际机场）用自己的跑道
+      // 跑道：设施自带的（香港国际机场）→ 本图跑道表里离设施最近、已启用的（v2.6.1 玩家反馈：首都机场、希思罗没写 rw，跑道画了却没有航站楼）→ 旧机场的主跑道；
+      // 都没有时（早年的草地机场）以设施为中心取一条约 1.5 km 的东西向跑道
+      let rwT = null, rwD = 4;
+      for (const r of D.runways || []) { if (yr < r.from) continue; const d = U.distToSeg(f.x, f.y, r.a[0], r.a[1], r.b[0], r.b[1]); if (d <= rwD) { rwD = d; rwT = [r.a, r.b]; } }
+      let rw = f.rw || rwT || this.runwaySeg(city), x, y, rot, rwLen, rwOff;
+      if (!rw || U.distToSeg(f.x, f.y, rw[0][0], rw[0][1], rw[1][0], rw[1][1]) > 4) rw = [[f.x - 3, f.y], [f.x + 3, f.y]];
       const CMM = CFG.CELL_M, apD = 280;
-      if (rw) {
-        if (U.distToSeg(f.x, f.y, rw[0][0], rw[0][1], rw[1][0], rw[1][1]) > 4) continue;
-        const ux = rw[1][0] - rw[0][0], uy = rw[1][1] - rw[0][1], ul = Math.hypot(ux, uy) || 1, tx = ux / ul, ty = uy / ul, nx = -ty, ny = tx;
-        rwLen = ul * CMM;
-        // 选址：在跑道两侧、沿跑道的不同位置试放，取占地内机场陆地最多、离设施最近的一处（不压到水面与城区）
-        // 机场用地不足（如早年的启德只有跑道北端一小片）时依次缩小航站楼与停机坪
-        let sg = 1, fit = false;
+      const ux = rw[1][0] - rw[0][0], uy = rw[1][1] - rw[0][1], ul = Math.hypot(ux, uy) || 1, tx = ux / ul, ty = uy / ul, nx = -ty, ny = tx;
+      rwLen = ul * CMM;
+      // 选址：在跑道两侧、沿跑道的不同位置试放，取占地内机场陆地最多、离设施最近的一处（不压到水面与城区）
+      // 机场用地不足（如早年的启德只有跑道北端一小片）时依次缩小航站楼与停机坪；图内运营中的机场都要有模型，机场用地放不下时放在普通陆地上
+      let sg = 1, fit = false;
+      for (const strict of [true, false]) {
         for (const k of [1, 0.78, 0.6, 0.45]) {
           const Tm = U.clamp(rwLen / 6, 320, 640) * k, dd = apD * Math.max(0.7, k), hw = Tm * 1.7 / 2 / CMM, hd = dd / 2 / CMM;
           let best = -Infinity, cov = 0;
@@ -108,18 +111,18 @@
             let good = 0, tot = 0;
             for (let p = -1; p <= 1.001; p += 0.25) for (let q = -1; q <= 1.001; q += 0.5) {
               const px = cxp + tx * p * hw + nx * s * q * hd, py = cyp + ty * p * hw + ny * s * q * hd, c = city.cellAt(px, py); tot++;
-              if (isAirC(c) && city.waterDistAt(px, py) > 0.05) good++;
+              if ((strict ? isAirC(c) : c >= 0 && city.landFrac[c] >= 0.5) && city.waterDistAt(px, py) > 0.05) good++;
             }
             const sc = good / tot - U.dist(cxp, cyp, f.x, f.y) * 0.01;
             if (sc > best) { best = sc; cov = good / tot; x = cxp; y = cyp; rwOff = off; sg = s; this._apK = k; this._apD = dd; }
           }
           if (cov >= 0.6) { fit = true; break; }
         }
-        if (!fit) continue;
-        // u 沿跑道，+v（停机坪一侧）指向跑道
-        rot = Math.atan2(ty, tx) * 180 / Math.PI; if (sg > 0) rot += 180;
-      } else continue;
-      if (!isAir(x, y)) continue;   // 地面图上这里没有机场：不画模型
+        if (fit) break;
+      }
+      if (!fit) continue;
+      // u 沿跑道，+v（停机坪一侧）指向跑道
+      rot = Math.atan2(ty, tx) * 180 / Math.PI; if (sg > 0) rot += 180;
       const T = U.clamp(rwLen / 6, 320, 640) * this._apK;
       out.push({ id: 'h' + f.id, x: x, y: y, lm: { id: 'air_' + f.id, kind: 'airport', x: x, y: y, w: T * 1.7, d: this._apD, T: T, rwOff: rwOff, rot: rot, h: 46, name: f.name } });
     }

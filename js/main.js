@@ -187,7 +187,7 @@
     } else if (isNew) {
       ui.doAutosave();
       // 开局简报：这座城市当时的交通格局（东京为接管银座线）；关闭后打开任务面板
-      const tip = function () { ui.toast('游戏已暂停：先规划线路，再按' + (CM.Keys.hint('pause') ? ' ' + CM.Keys.hint('pause') + ' 或' : '') + ' ▶ 开始。', 'info'); ui.openPage('tasks', null, { root: true }); };
+      const tip = function () { ui.toast('游戏已暂停：先规划线路，再按' + (CM.Keys.hint('pause') ? ' ' + CM.Keys.hint('pause') + ' 或' : '') + ' ▶ 开始。', 'info', { label: '怎么玩？', fn: function () { ui.openPage('guide', 'start', { root: true }); } }); ui.openPage('tasks', null, { root: true }); };
       if (CM.DATA.briefing && ui.showBriefing) ui.showBriefing(tip); else tip();
     } else {
       ui.markSaved(g, Date.now());

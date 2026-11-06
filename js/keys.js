@@ -38,7 +38,7 @@
     ['view.netmap', '线路示意图', 'view', ['KeyK']],
     ['view.layer', '下一个分析图层', 'view', ['KeyC']],
     ['view.layerPrev', '上一个分析图层', 'view', ['Shift+KeyC']],
-    ['view.grid', '经纬网格', 'view', ['KeyR']],
+    ['view.grid', '网格', 'view', ['KeyR']],
     ['view.gridSnap', '网格吸附', 'view', ['Shift+KeyR']],
     ['ui.search', '搜索', 'ui', ['Slash']],
     ['ui.tasks', '任务', 'ui', ['KeyJ']],

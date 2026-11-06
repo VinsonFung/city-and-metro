@@ -61,7 +61,7 @@
       if(end>=0){out+=' '+value+' ';i=end;}else{const n=/[0-9-]/.test(s[i])?numbered(s.slice(i)):null;if(n){out+=' '+n[1]+' ';i+=n[0];}else out+=s[i++];}
     }
     if(hasHan(out)&&missing.size<128)missing.add(s);
-    const result=out.replace(/[ \t]+/g,' ').replace(/\s+([.,:;!?%\)\]])/g,'$1').replace(/([\(\[])\s+/g,'$1').replace(/，/g,', ').replace(/。/g,'. ').replace(/：/g,': ').replace(/；/g,'; ').replace(/[「『]/g,'“').replace(/[」』]/g,'”').replace(/（/g,' (').replace(/）/g,') ').trim();
+    const result=out.replace(/，/g,', ').replace(/、/g,', ').replace(/。/g,'. ').replace(/：/g,': ').replace(/；/g,'; ').replace(/[「『]/g,'“').replace(/[」』]/g,'”').replace(/（/g,' (').replace(/）/g,') ').replace(/[ \t]+/g,' ').replace(/\s+([.,:;!?%)\]”])/g,'$1').replace(/([([“])\s+/g,'$1').trim();
     return (/^\s/.test(s)?' ':'')+result+(/\s$/.test(s)?' ':'');
   }
   function text(value){

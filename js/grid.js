@@ -1,7 +1,8 @@
 'use strict';
-// 经纬网格（视图工具）：按当前地图的经纬度投影在地面上画淡色网格，并可让建站、绘线与拖动控制点吸附到网格交叉点。
-// 间隔随缩放在 1-2-5 序列中自动选择（屏幕间距约 26 px 以上），更细一级的网格线随放大淡入；每隔几条画一条稍深的主线并在画面边缘标注度数。
-// 虚构地图（青湾）没有经纬度，改为以地图左上角为原点的公里网格。只影响画面与落点，不进入存档、不改变任何模拟。
+// 网格（视图工具）：在地面上画淡色网格，并可让建站、绘线与拖动控制点吸附到网格交叉点。默认为公里网格（正方形，以地图左上角为原点，v2.6.1 玩家反馈：
+// 经纬度网格看不出一格有多远），设置里可改为经纬度网格；虚构地图（青湾）没有经纬度，只有公里网格。
+// 间隔随缩放在 1-2-5 序列中自动选择（屏幕间距约 26 px 以上），更细一级的网格线随放大淡入；每隔几条画一条稍深的主线并在画面边缘标注。
+// 只影响画面与落点，不进入存档、不改变任何模拟。
 (function (CM) {
   const U = CM.U;
   const DEG = [0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1];
@@ -13,7 +14,7 @@
   // 坐标系：真实城市为经纬度（G.proj：x = (lon − lon0)·kx，y = (lat0 − lat)·ky，格），虚构地图为公里
   function frame() {
     const G = CM.GEO, p = G && G.proj;
-    if (p && p.kx && p.ky) return { geo: true, kx: p.kx, ky: p.ky, x0: p.lon0, y0: p.lat0, steps: DEG };
+    if (p && p.kx && p.ky && S && S.get('gridUnit') === 'deg') return { geo: true, kx: p.kx, ky: p.ky, x0: p.lon0, y0: p.lat0, steps: DEG };
     const k = 1000 / CM.CFG.CELL_M;   // 每公里格数
     return { geo: false, kx: k, ky: k, x0: 0, y0: 0, steps: KM };
   }
@@ -23,8 +24,8 @@
   const xu = function (f, x) { return f.x0 + x / f.kx; };
   const yv = function (f, y) { return f.geo ? f.y0 - y / f.ky : f.y0 + y / f.ky; };
   // 主线间隔：1、2 开头的间隔 ×5，5 开头的 ×2（如 0.002° → 0.01°，0.005° → 0.01°）
-  const majorOf = function (s) { const m = Math.round(s / Math.pow(10, Math.floor(Math.log10(s) + 1e-9))); return s * (m === 5 ? 2 : 5); };
-  const decimals = function (s) { return Math.max(0, -Math.floor(Math.log10(s) + 1e-9)); };
+  const majorOf = function (s) { if (s === 0.25) return 1; const m = Math.round(s / Math.pow(10, Math.floor(Math.log10(s) + 1e-9))); return s * (m === 5 ? 2 : 5); };
+  const decimals = function (s) { return s === 0.25 ? 2 : Math.max(0, -Math.floor(Math.log10(s) + 1e-9)); };
 
   // 当前缩放下的间隔：最细一级（屏幕间距 ≥ 26 px）及其淡入程度；吸附使用清楚可见的那一级
   function levels(R) {
@@ -57,11 +58,15 @@
       if (!f.geo) return (+t).toString() + ' km';
       return t + '°' + (axis === 'u' ? (val >= 0 ? 'E' : 'W') : (val >= 0 ? 'N' : 'S'));
     },
-    // 当前间隔的说明（工具提示与消息用）
-    describe: function (R) {
-      const L = levels(R);
-      return L.f.geo ? '间隔 ' + this.label(L.snap, 'u', L.snap).replace(/[EW]$/, '') : '间隔 ' + this.label(L.snap, 'u', L.snap);
+    // 一格的实际大小：公里网格为边长，经纬度网格为约合的东西 × 南北距离
+    stepText: function (R) {
+      const L = levels(R), s = L.snap, f = L.f, m = function (v) { return v < 1000 ? Math.round(v) + ' m' : +(v / 1000).toFixed(2) + ' km'; };
+      if (!f.geo) return m(s * 1000);
+      const cm = CM.CFG.CELL_M;
+      return s + '° ≈ ' + m(s * f.kx * cm) + ' × ' + m(s * f.ky * cm);
     },
+    // 当前间隔的说明（工具提示与消息用）
+    describe: function (R) { return '间隔 ' + this.stepText(R); },
 
     // 地面网格：在地面之后、建筑之前绘制（2.5D 中被楼宇遮挡，保持低调）
     draw: function (ctx, R) {
