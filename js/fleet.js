@@ -41,6 +41,9 @@
     // 武汉
     M({ id: 'wh-b1', maps: ['wh'], name: '武汉轨道交通 1 号线 B 型', short: '1 号线 B 型', from: 2003, to: 2014, cap: 250, price: 360, ops: 0.98, max: 6, look: 'steel', desc: '高架轻轨线的首批车辆' }),
     M({ id: 'wh-a', maps: ['wh'], name: '武汉地铁 A 型', short: '武汉 A 型', from: 2012, to: 9999, cap: 310, price: 410, ops: 0.88, look: 'whiteNew', desc: '大运量线路车型' }),
+    // 深圳
+    M({ id: 'sz-a1', maps: ['sz'], name: '深圳地铁 A 型（一期引进）', short: '一期 A 型', from: 2004, to: 2014, cap: 310, price: 540, ops: 0.97, max: 6, look: 'white', desc: '一期工程引进的 A 型车，6 节编组' }),
+    M({ id: 'sz-a8', maps: ['sz'], name: '深圳地铁 11 号线 A 型（8 节）', short: '11 号线 A 型', from: 2016, to: 9999, cap: 310, price: 450, ops: 0.86, kmh: 120, look: 'whiteNew', desc: '机场快线用的 8 节编组快车，时速 120 km' }),
     // 香港
     M({ id: 'hk-m', maps: ['hk'], name: '港铁 M-Train（都城嘉慕）', short: 'M-Train', from: 1977, to: 1995, cap: 330, price: 520, ops: 1, life: 40, look: 'steel', lookX: { band: '#c8102e' }, desc: '修正早期系统的不锈钢车，红色色带' }),
     M({ id: 'hk-k', maps: ['hk'], name: '港铁 K-Stock（现代 Rotem）', short: 'K-Stock', from: 2001, to: 2012, cap: 330, price: 560, ops: 0.93, look: 'whiteNew', desc: '将军澳线与东涌线的新车' }),
@@ -58,6 +61,18 @@
     M({ id: 'pa-mp89', maps: ['pa'], name: '巴黎地铁 MP 89（胶轮）', short: 'MP 89', from: 1995, to: 2007, cap: 230, price: 320, ops: 0.9, max: 6, look: 'whiteNew', desc: '贯通客室的胶轮车，14 号线无人驾驶' }),
     M({ id: 'pa-mf01', maps: ['pa'], name: '巴黎地铁 MF 01', short: 'MF 01', from: 2008, to: 2018, cap: 240, price: 340, ops: 0.86, max: 6, look: 'whiteNew', desc: '钢轮线路的新一代车' }),
     M({ id: 'pa-mp14', maps: ['pa'], name: '巴黎地铁 MP 14', short: 'MP 14', from: 2019, to: 9999, cap: 240, price: 380, ops: 0.78, max: 8, look: 'future', desc: '全自动运行的胶轮车' }),
+    // 伦敦
+    M({ id: 'ld-steam', maps: ['ld'], name: '大都会铁路蒸汽列车', short: '蒸汽列车', from: 1860, to: 1906, cap: 150, price: 90, ops: 1.25, life: 20, max: 6, kmh: 40, look: 'wood', lookX: { body: '#6b3a2a' }, desc: '煤烟弥漫的隧道里跑的木质车厢，1905 年起被电气列车取代' }),
+    M({ id: 'ld-padded', maps: ['ld'], name: '深层地铁“软包车厢”', short: '软包车厢', from: 1890, to: 1910, cap: 110, price: 80, ops: 1.1, life: 25, max: 4, kmh: 40, look: 'wood', desc: '世界第一批深层地铁电动车，窗户极小，乘客戏称为软包病房' }),
+    M({ id: 'ld-gate', maps: ['ld'], name: '门式车厢（1906 型）', short: '门式车厢', from: 1906, to: 1924, cap: 150, price: 100, ops: 1.05, life: 30, max: 6, kmh: 50, look: 'wood', lookX: { body: '#7a2e2a' }, desc: '车厢两端的铁栅门由专人开关，每站要花很长时间' }),
+    M({ id: 'ld-std', maps: ['ld'], name: '标准型车（1923 型）', short: '标准型', from: 1923, to: 1938, cap: 170, price: 120, ops: 1, life: 35, max: 7, kmh: 60, look: 'classicLine', lookX: { body: '#a11e22', band: '#e7dcc4' }, desc: '气动车门的深红色车厢，服役到 1960 年代' }),
+    M({ id: 'ld-38', maps: ['ld'], name: '1938 型车', short: '1938 型', from: 1938, to: 1959, cap: 190, price: 150, ops: 0.98, life: 40, max: 7, kmh: 70, look: 'classicLine', lookX: { body: '#a11e22', band: '#e7dcc4' }, desc: '流线型车头，电机藏在地板下，被视为深层地铁的经典' }),
+    M({ id: 'ld-59', maps: ['ld'], name: '1959 / 1967 型铝合金车', short: '铝合金车', from: 1959, to: 1983, cap: 200, price: 230, ops: 0.96, life: 40, max: 8, kmh: 70, look: 'steel', lookX: { band: '#c8102e' }, desc: '银色车身；1967 型用于维多利亚线，是世界最早的自动驾驶地铁之一' }),
+    M({ id: 'ld-s60', maps: ['ld'], name: '大都会线 A60 型', short: 'A60', from: 1960, to: 1990, cap: 240, price: 260, ops: 0.96, life: 50, max: 8, kmh: 80, look: 'steel', desc: '地下浅埋线路用的大断面车，车内可以站很多人' }),
+    M({ id: 'ld-92', maps: ['ld'], name: '1992 / 1996 型车', short: '1996 型', from: 1992, to: 2008, cap: 220, price: 340, ops: 0.9, life: 35, max: 8, kmh: 90, look: 'whiteNew', lookX: { band: '#c8102e' }, desc: '红白蓝涂装，朱比利线延伸段用的是自动驾驶版本' }),
+    M({ id: 'ld-dlr', maps: ['ld'], name: '码头区轻轨 B 型', short: '轻轨 B 型', from: 1991, to: 9999, cap: 180, price: 260, ops: 0.82, life: 30, max: 4, kmh: 80, look: 'paint', desc: '无人驾驶的小型轻轨车，便宜，但运力有限' }),
+    M({ id: 'ld-s', maps: ['ld'], name: 'S 型车（S Stock）', short: 'S 型车', from: 2009, to: 9999, cap: 270, price: 420, ops: 0.84, life: 35, max: 8, kmh: 100, look: 'whiteNew', lookX: { band: '#c8102e' }, desc: '贯通客室、空调，用于大都会线、区域线与内环线' }),
+    M({ id: 'ld-345', maps: ['ld'], name: '伊丽莎白线 345 型', short: '345 型', from: 2017, to: 9999, cap: 340, price: 520, ops: 0.84, life: 35, max: 8, kmh: 140, look: 'paint', lookX: { band: '#6950a1' }, desc: '200 米长的大容量列车，时速 140 公里' }),
     // 上海
     M({ id: 'sh-ac01', maps: ['sh'], name: '上海地铁 AC01 型（德国制造）', short: 'AC01', from: 1993, to: 1999, cap: 310, price: 600, ops: 0.98, look: 'white', lookX: { band: '#d52b1e' }, desc: '1 号线首批引进车' }),
     M({ id: 'sh-a', maps: ['sh'], name: '上海地铁 A 型（国产化）', short: '上海 A 型', from: 2003, to: 9999, cap: 310, price: 420, ops: 0.9, look: 'whiteNew', desc: '国产化后的大运量车' }),
@@ -163,6 +178,8 @@
       if (tooSlow(t, rt)) { fp.slow++; continue; }
       fp.units[pos.d].push({ id: t.id, m: F.model(t.model), cars: t.cars, cap: F.capOf(t), ops: F.opsF(g, t) });
     }
+    const onSvc = new Set();   // 有列车跑在加开交路上的线路：随线配车不补全程交路（见 F.draftExtra），预测里全程交路也保持停运
+    C.routes.forEach(function (rt, r) { if (rt.svc && (plan[r].units[0].length || plan[r].units[1].length)) onSvc.add(rt.lineId); });
     C.routes.forEach(function (rt, r) {
       const fp = plan[r], nd = rt.loop ? 2 : 1;
       let n = 0, cap = 0, cars = 0, ops = 0;
@@ -172,7 +189,7 @@
         for (const u of fp.units[d]) { n++; cap += u.cap; cars += u.cars; ops += u.ops; }
       }
       if (nd === 1) { fp.avail[1] = fp.avail[0]; fp.units[1] = fp.units[0]; }
-      if (draft && !rt.svc) {   // 预测：随线配车会把全程交路的列车补到最低需要（用推荐车型）；加开的交路由玩家配车
+      if (draft && !rt.svc && !onSvc.has(rt.lineId)) {   // 预测：随线配车会把全程交路的列车补到最低需要（用推荐车型）；加开的交路由玩家配车
         const m = F.recommend(g.mapId, y, rt.kmh), c = Math.min(rt.cars, m.max);
         for (let d = 0; d < nd; d++) { const add = Math.max(0, fp.floor - fp.avail[d]); fp.avail[d] += add; n += add; cap += add * m.cap * c; cars += add * c; ops += add * m.ops; }
         if (nd === 1) fp.avail[1] = fp.avail[0];

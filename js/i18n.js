@@ -20,7 +20,7 @@
       const list=[...(m.geo.names||[]),...(m.data.landmarks||[]).map(x=>x.name),...(m.data.regions||[]).flatMap(x=>[x.name,...(x.streets||[]),...(x.district||[])]),...(m.data.facilities||[]).flatMap(x=>[x.n,x.label]),...((m.data.bgViz&&m.data.bgViz.ferries)||[]).map(x=>x.name),...(m.data.districtLabels||[]).map(x=>x[0]),...Object.keys(m.data.roadYears||{}),...Object.keys(m.data.bridgeYears||{}),...(m.data.places||[]).map(x=>Array.isArray(x)?x[0]:x.name)];
       if(m.data.defaultRegion)list.push(m.data.defaultRegion.name);
       for(const task of m.data.histTasks||[])for(const anchor of task.anchors||[])list.push(anchor.name);
-      for(const raw of list)if(typeof raw==='string')for(const s of new Set([raw,raw.replace(/（.*?）/g,'').trim()]))if(s.length>1&&s.length<80&&!en[s]){
+      for(const raw of list)if(typeof raw==='string')for(const s of new Set([raw,raw.replace(/（.*?）/g,'').trim()]))if(hasHan(s)&&s.length>1&&s.length<80&&!en[s]){
         names.set(s,null);nameLengths.set(s[0],Math.max(nameLengths.get(s[0])||0,s.length));
       }
     }
@@ -34,7 +34,7 @@
     // Leading or trailing spaces (text joined to a following tag or number) must not stop whole-sentence templates from matching.
     const core=s.trim();if(core&&core!==s)return (/^\s/.test(s)?' ':'')+english(core)+(/\s$/.test(s)?' ':'');
     initNames();if(names.has(s)){let v=names.get(s);if(!v){v=nameEnglish(s);names.set(s,v);}return v;}initTrie();
-    if(!templates)templates=Object.entries(en).filter(([k])=>/\{[\w.]+\}/.test(k)).map(([key,target])=>{const keys=[];let last=0,pattern='^';for(const m of key.matchAll(/\{([\w.]+)\}/g)){pattern+=key.slice(last,m.index).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(.+?)';keys.push(m[1]);last=m.index+m[0].length;}pattern+=key.slice(last).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$';return {re:new RegExp(pattern),keys,target,weight:key.replace(/\{[\w.]+\}/g,'').length};}).sort((a,b)=>b.weight-a.weight);
+    if(!templates)templates=Object.entries(en).filter(([k])=>/\{[\w.]+\}/.test(k)).map(([key,target])=>{const core=key.trim();if(core!==key){key=core;target=target.trim();}const keys=[];let last=0,pattern='^';for(const m of key.matchAll(/\{([\w.]+)\}/g)){pattern+=key.slice(last,m.index).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(.+?)';keys.push(m[1]);last=m.index+m[0].length;}pattern+=key.slice(last).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$';return {re:new RegExp(pattern),keys,target,weight:key.replace(/\{[\w.]+\}/g,'').length};}).sort((a,b)=>b.weight-a.weight);
     for(const t of templates){const m=t.re.exec(s);if(m)return t.target.replace(/\{([\w.]+)\}/g,(_,k)=>text(m[t.keys.indexOf(k)+1]));}
     // 不先改写整句中的数字，否则会破坏含线路号 / 日期的完整短语。仅在没有更长译文时处理数字前缀。
     const numbered=function(t){let m;

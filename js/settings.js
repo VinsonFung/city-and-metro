@@ -47,10 +47,13 @@
   function save() { try { localStorage.setItem(KEY, JSON.stringify(cur)); } catch (e) { /* ignore */ } }
   const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
   const mqRM = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  const mqCompact = window.matchMedia ? window.matchMedia('(max-width: 760px), (max-width: 1024px) and (max-height: 520px) and (pointer: coarse)') : null;
 
   const Settings = {
     DEF: DEF,
     get: function (k) { return cur[k]; },
+    // 手机采用更紧凑的基准；设置中保存的大小偏好不改写，几何定位共用实际缩放值。
+    scale: function () { const value = Number(cur.uiScale), base = Number.isFinite(value) && value > 0 ? value : 1; return mqCompact && mqCompact.matches ? Math.max(0.85, base * 0.9) : base; },
     all: function () { return Object.assign({}, cur); },
     set: function (k, v) {
       if (k === 'language' && !['zh-CN', 'zh-TW', 'en'].includes(v)) v = 'zh-CN';
@@ -75,7 +78,7 @@
       if (CM.I18n && (!k || k === 'language')) CM.I18n.apply(cur.language);
       if (!k || k === 'theme') { if (CM.setTheme) CM.setTheme(Settings.resolvedTheme()); else root.dataset.theme = Settings.resolvedTheme(); }
       if (CM.R && (!k || k === 'lighting')) { CM.R.clearImages(); CM.R.dropThemeStash(); CM.R.clearFacilitySprites(); CM.R.overviewStale = true; }
-      if (!k || k === 'uiScale') root.style.setProperty('--uiz', String(cur.uiScale));
+      if (!k || k === 'uiScale') root.style.setProperty('--uiz', String(Settings.scale()));
       if (!k || k === 'colorBlind') {
         root.dataset.colorBlind = String(cur.colorBlind);
         if (CM.R) { CM.R.heatKey = ''; CM.R.heatLayers.clear(); CM.R._cgBmp = null; CM.R.labelImage = null; }
@@ -92,5 +95,6 @@
     },
   };
   if (mq && mq.addEventListener) mq.addEventListener('change', function () { if (cur.theme === 'auto') Settings.apply('theme'); });
+  if (mqCompact && mqCompact.addEventListener) mqCompact.addEventListener('change', function () { Settings.apply('uiScale'); if (CM.ui) { CM.ui.layoutHud(); CM.ui.renderToolbar(); } });
   CM.Settings = Settings;
 })(window.CM);

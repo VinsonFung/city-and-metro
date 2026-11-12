@@ -5,7 +5,7 @@
   const h = U.h, ic = CM.icon;
   const snd = function (name) { if (CM.Sound) CM.Sound.play(name); };
   const LEVEL = ['入门', '普通', '进阶', '挑战'];
-  const REGION_ORDER = ['中国内地', '中国香港', '中国台湾', '日本', '法国', '虚构'];
+  const REGION_ORDER = ['中国内地', '中国香港', '中国台湾', '日本', '法国', '英国', '虚构'];
 
   // 公告是否已读（本机记录；无法访问本地存储时视为已读，不打扰）
   const NEWS_KEY = 'cm1.newsSeen';
@@ -243,7 +243,7 @@
           h('div', { class: 'ms2-tagline' }, mp.tagline || mp.sub),
           h('div', { class: 'msel-chips' }, levelEl(mp.difficulty || 2), (mp.tags || []).map(function (t) { return h('span', { class: 'tag glass-tag' }, t); }))),
         h('div', { class: 'ms2-facts' }, fl.map(function (f) { return h('div', null, h('span', null, f[0]), h('b', { title: f[1] }, f[1])); })));
-      const feats = h('div', { class: 'ms2-feats' }, (mp.features || []).map(function (f, k) {
+      const feats = h('div', { class: 'ms2-feats' }, (CM.Traits.cards(mp).concat(mp.features || []).slice(0, 4)).map(function (f, k) {
         return h('div', { class: 'ms2-feat', style: { animationDelay: (0.04 * k) + 's' } }, h('span', { class: 'badge ' + ['b-blue', 'b-teal', 'b-orange', 'b-violet'][k % 4] }, ic(f[0], 15)), h('div', null, h('b', null, f[1]), h('small', null, f[2])));
       }));
       // 大事年表：开局 + 关键历史节点，按历史阶段（与游戏内阶段同色）分组；没有大事的阶段补一个「阶段开始」节点
@@ -333,12 +333,16 @@
     const hero = h('div', { class: 'brief-hero' }, CM.thumbInto(h('img', { alt: '' }), mp.id, theme),
       h('div', { class: 'brief-hero-tx' }, h('div', { class: 'msel-kicker' }, h('span', null, '开局简报'), h('i'), h('span', null, y0 + ' 年 1 月')), h('h2', null, (D.city || mp.name) + ' · ' + y0), h('div', { class: 'msel-tagline' }, mp.tagline || '')));
     const parts = [hero];
-    // 东京等：开局接管既有地铁
-    if (B.inherit && g.mapInit && g.mapInit.metro) {
-      const n = CM.Milestones ? CM.Milestones.netInfo(g) : null, lines = Object.values(g.net.lines), L = lines[0];
-      parts.push(h('div', { class: 'brief-inherit', style: { '--lc': L ? CM.Accessibility.line(L) : 'var(--accent)' } },
-        h('span', { class: 'bi-line' }), h('span', { class: 'badge' }, ic('train')),
-        h('div', { class: 'grow' }, h('b', null, '你接管了' + (lines.length ? lines.map(l => l.name).join('与') : '既有地铁')), h('small', null, g.mapInit.metro)),
+    // 开局接管既有地铁（东京银座线、北京 1 号线与环线）：有开局线路的地图都显示；多条线时左侧色条按线路分段
+    if (g.mapInit && g.mapInit.metro) {
+      const n = CM.Milestones ? CM.Milestones.netInfo(g) : null, Ls = Object.values(g.net.lines), cols = Ls.map(function (l) { return CM.Accessibility.line(l); });
+      // 线路名以数字开头时前面留空格（「你接管了 1 号线与 2 号线」，与界面其他处的数字排版一致）
+      const sp = function (s) { return (/^\d/.test(s) ? ' ' : '') + s; }, names = Ls.map(function (l) { return l.name; });
+      const title = names.length > 1 ? names.slice(0, -1).map(sp).join('、') + '与' + sp(names[names.length - 1]) : sp(names[0] || '既有地铁');
+      const stripe = cols.length > 1 ? { background: 'linear-gradient(180deg, ' + cols.map(function (c, k) { return c + ' ' + (100 * k / cols.length) + '% ' + (100 * (k + 1) / cols.length) + '%'; }).join(', ') + ')' } : null;
+      parts.push(h('div', { class: 'brief-inherit', style: { '--lc': cols[0] || 'var(--accent)' } },
+        h('span', { class: 'bi-line', style: stripe }), h('span', { class: 'badge' }, ic('train')),
+        h('div', { class: 'grow' }, h('b', null, '你接管了' + title), h('small', null, g.mapInit.metro)),
         h('div', { class: 'bi-stats' },
           h('div', null, h('b', null, String(Object.keys(g.net.stations).length)), h('span', null, '座车站')),
           n ? h('div', null, h('b', null, U.fmtNum(n.km, 1)), h('span', null, '公里')) : null,

@@ -20,6 +20,21 @@
   const hqcbd = poly([[31.2100, 121.3100], [31.2100, 121.3280], [31.1830, 121.3280], [31.1830, 121.3100]]);
 
   const data = {
+    // 城市特色（traits.js，规则见《地图设计与城市特色机制.md》）。新条目加在末尾，已触发事件按序号记录
+    traits: [
+      { use: 'crossing', star: true, icon: 'bridge', label: '黄浦江与浦东', text: '1990 年江上还没有桥，越江线路造价最高，却连着全城发展最快的地方', why: '1990 年 4 月浦东开发开放，南浦大桥 1991 年底才通车。' },
+      { use: 'megaEvent', level: 'mid', star: true, icon: 'flag', label: '2010 世博会', text: '获得主办权后拨款增加，园区一带可以提前布局',
+        bid: { y: 2002, m: 12 }, open: [2010, 5],
+        foresight: { id: 'sh-expo', level: 'mid', at: 'sh_cnpav', ym: [2002, 12], before: 2000, r: 7, region: 'pdriver', title: '世博园区选址浦江两岸',
+          hit: '世博园区选在黄浦江两岸的老工业带，早已通车的{st}站让这里抢先有了依托。', miss: '世博园区选在黄浦江两岸的老工业带，这里的地铁还不够，几年内要补上。' },
+        why: '2002 年 12 月上海获得 2010 年世博会主办权，世博前上海地铁进入大规模建设期。' },
+      { use: 'carLimit', level: 'mid', star: true, icon: 'car', label: '车牌拍卖', text: '1994 年起私车牌照要靠拍卖取得，开车更贵，地铁更有吸引力', on: { y: 1994, m: 1, title: '私车牌照开始拍卖', desc: '上海从 1994 年起对新增私车牌照实行拍卖，控制中心城区的汽车增长。' }, why: '上海 1994 年起实行新增机动车额度拍卖。' },
+      { use: 'guard', level: 'mid', label: '外滩与老城古建', guards: ['sh_bund', 'sh_yuyuan', 'sh_xjh', 'sh_longhua', 'sh_jingan'], why: '外滩建筑群、豫园、徐家汇天主堂、龙华寺和静安寺都是上海的历史名胜，地铁要小心避让。' },
+      { use: 'transition', level: 'light', label: '世博园区工厂搬迁', region: 'pdriver', close: { y: 2004, m: 1, title: '世博园区工厂开始搬迁', desc: '为建设世博园区，上钢三厂、江南造船厂等沿江工厂陆续搬迁。' }, replan: [{ year: 2005, region: 'pdriver', plan: 'mix' }], why: '世博园区选址在浦江两岸的老工业带，沿江工厂在 2000 年代中期陆续搬迁。' },
+      { use: 'transition', level: 'light', label: '杨浦转型', region: 'yangpu', close: { y: 1995, m: 1, title: '杨浦老工厂陆续关停', desc: '1990 年代起，杨浦的纺织、机械和钢铁企业陆续转移、关停，大批工人下岗。' }, renew: { y: 2003, m: 1, title: '杨浦知识创新区', desc: '上海决定建设杨浦知识创新区，推动大学校区、科技园区和公共社区融合发展。' }, replan: [{ year: 2004, region: 'yangpu', plan: 'mix' }], why: '杨浦 1990 年代起转移、关停传统工业，2003 年上海决定建设杨浦知识创新区。' },
+      { use: 'accident', level: 'light', label: '2003 年 4 号线事故', on: { y: 2003, m: 7, title: '轨道交通 4 号线董家渡事故', desc: '7 月 1 日，在建的 4 号线联络通道发生涌水塌陷，地面沉降，黄浦江防汛墙受损，软土中施工的风险引起全国关注。' }, why: '2003 年 7 月 1 日，上海轨道交通 4 号线隧道事故。' },
+      { use: 'finance', flavor: 'cn' },
+    ],
     city: '上海', riverName: '黄浦江', seaName: '长江口', hsrYear: 2010,
     stages: [[1993, '无地铁时代'], [2000, '浦东开发初期'], [2010, '迎世博建设期']], stageLast: '超大城市网络化时期',
     // 历史发展阶段（v2.2，eras.js）：summary 中「史实」可查证，「估算」为模型设定的发展倾向；grow 只改变人口与岗位增长的去向（总量仍按人口曲线），
@@ -304,7 +319,7 @@
     modes: ['challenge', 'free'], kind: 'real', mapVersion: 2, extent: { from: 1, dx: 0, dy: 0, oldW: 124, oldH: 136, note: '地图向东扩大到川沙、曹路，向南扩大到梅陇、康桥一带', oldRegionIds: ['airport', 'lujiazui', 'hqcbd', 'huangpu', 'jingan', 'xuhui', 'changning', 'putuo', 'hongkou', 'yangpu', 'pdriver', 'jinqiao', 'waigaoqiao', 'beicai', 'pudong', 'wusong', 'dachang', 'xinzhuang', 'minhang', 'jiading', 'outer'], oldLandmarkIds: ['sh_bund', 'sh_park', 'sh_expoctr', 'sh_yuyuan', 'sh_jingan', 'sh_jade', 'sh_longhua', 'sh_xjh', 'sh_station', 'sh_fudan', 'sh_tongji', 'sh_sjtu', 'sh_ecnu', 'sh_pearl', 'sh_museum', 'sh_stadium', 'sh_gt', 'sh_jinmao', 'sh_hongkou', 'sh_sniec', 'sh_south', 'sh_swfc', 'sh_hqstation', 'sh_cnpav', 'sh_tower'] }, scenario: 'sh-1990',
     region: '中国内地', tagline: '浦江两岸，从零开始的超大网络', difficulty: 3, tags: ['无地铁开局', '越江', '超大城市'],
     intro: '1990 年的上海，七百多万人挤在黄浦江西岸，公交车厢里人贴着人；对岸的浦东还是农田与码头，江上一座桥也没有。4 月，浦东开发开放的消息传来。你要从第一条南北线开始，跨过黄浦江，跟上一座超大城市三十年的扩张。',
-    features: [['bridge', '黄浦江越江', '越江段可以建设隧道或桥梁，1990 年江上还没有桥'], ['building', '陆家嘴天际线', '东方明珠、金茂、环球金融中心与上海中心按年份出现'], ['map', '浦东开发', '陆家嘴、金桥、外高桥与张江陆续开放'], ['flag', '世博会与虹桥枢纽', '历史任务跟随城市大事']],
+    features: [['building', '陆家嘴天际线', '东方明珠、金茂、环球金融中心与上海中心按年份出现']],
     highlights: [[1990, '浦东开发开放'], [1991, '南浦大桥通车'], [1994, '东方明珠落成'], [2010, '虹桥枢纽启用、世博会开幕'], [2015, '上海中心大厦落成']],
     geo: G, data: data,
     econ: { devOffset: 2, money: 1 },   // 出行选择参数：上海 1990 年约对应广州样本 1992 年的发展阶段

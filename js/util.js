@@ -358,4 +358,12 @@ window.CM = window.CM || {};
   U.Emitter = Emitter;
 
   CM.U = U;
+  // Browser download shared by network maps and city review posters.
+  U.downloadBlob = function (blob, filename) {
+    if (!blob || !blob.size) throw new Error('无法生成文件');
+    const url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a);
+    try { a.click(); } finally { setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 1500); }
+  };
 })(window.CM);

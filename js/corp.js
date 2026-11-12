@@ -34,15 +34,7 @@
       { key: 'low', name: '竞争报价', sub: 0, ap: 1.0, win: 0.78 }],
   };
 
-  const FLAVOR = {
-    cn: { name: 'PPP 特许经营', from: 2002, note: '参照中国内地 2000 年代起的地铁 PPP 与特许经营' },
-    hk: { name: '铁路＋物业', from: 1980, note: '参照香港以沿线物业开发收益支持铁路建设的做法' },
-    tw: { name: '联合开发与 BOT', from: 1990, note: '参照台北捷运的联合开发与 BOT' },
-    fr: { name: '特许经营', from: 1900, note: '参照巴黎市建设隧道、由运营公司特许经营地铁的做法' },
-    jp: { name: '公私合作', from: 1970, note: '参照日本地方政府与民间企业合资建设、运营轨道的做法' }
-  };
-  const MAP_FLAVOR={gz:'cn',hz:'cn',wh:'cn',sh:'cn',bj:'cn',hk:'hk',tp:'tw',pa:'fr',tk:'jp'};
-  Corp.flavor = function (g) { return g ? FLAVOR[MAP_FLAVOR[g.mapId]] || null : null; };
+  Corp.flavor = function (g) { const map = g && CM.MAPS[g.mapId]; return g ? CM.Traits.FLAVOR[(map ? map.data : CM.DATA).corpFlavor] || null : null; };
   Corp.enabled = function (g) { return !!g && !!g.econ && g.econ.mode === 'challenge' && !g.tutorial && !CM.DATA.noDynTasks && !!Corp.flavor(g); };
   Corp.grade = function (r) { return r >= 80 ? 'A' : (r >= 60 ? 'B' : (r >= 40 ? 'C' : 'D')); };
   // 履约信誉与拨款：50 分 ×1.00，100 分 ×1.05，0 分 ×0.95
@@ -119,7 +111,7 @@
       let E = 0, n = 0; const seen = new Set();
       for (const r of C.routes) if (r.lineId === x.lid) for (const k of r.stIdx) {
         const s = C.stations[k], tbl = CFG.cost.station[s.type] || CFG.cost.station.underground;
-        if (s.size !== 'L' && !seen.has(k)) { seen.add(k); E += (tbl.L - tbl[s.size]) * ci; n++; }
+        if (s.size !== 'L' && s.size !== 'XL' && !seen.has(k)) { seen.add(k); E += (tbl.L - tbl[s.size]) * ci; n++; }
       }
       if (E <= 0) continue;
       return { line: x.lid, lf: x.lf, cars: x.cars, n: n, est: Math.round(E * 1.1 / 1000) * 1000 };

@@ -27,9 +27,19 @@
     for (let k = 0; k < p.length; k += 2) { const x = p[k], y = p[k + 1]; if (x < bb[0]) bb[0] = x; if (y < bb[1]) bb[1] = y; if (x > bb[2]) bb[2] = x; if (y > bb[3]) bb[3] = y; }
     return bb;
   }
+  // 环的方向统一：外环有向面积为正、内环为负。合并多个要素后按 nonzero 填充，彼此重叠的水面（如“什刹海”整体与“后海”“前海”）叠加而不是按奇偶规则互相抵消成空白
+  function orient(p, outer) {
+    let a = 0;
+    for (let k = 0, n = p.length; k < n; k += 2) { const m = (k + 2) % n; a += p[k] * p[m + 1] - p[m] * p[k + 1]; }
+    if ((a > 0) === outer || a === 0) return p;
+    const q = new Float32Array(p.length);
+    for (let k = 0, n = p.length; k < n; k += 2) { q[k] = p[n - 2 - k]; q[k + 1] = p[n - 1 - k]; }
+    return q;
+  }
+  Geo.orient = orient;   // 地图缩略图（maps.js）同样合并后按 nonzero 填充
   function polyFeat(row, names) {
     const f = { name: names[row[0]] || '', rings: [], bbox: null };
-    for (let k = 1; k < row.length; k++) { const s = row[k]; const p = dec(s, 1); f.rings.push({ outer: s[0] === 'o', p: p }); f.bbox = bboxOf(p, f.bbox); }
+    for (let k = 1; k < row.length; k++) { const s = row[k], outer = s[0] === 'o'; const p = orient(dec(s, 1), outer); f.rings.push({ outer: outer, p: p }); f.bbox = bboxOf(p, f.bbox); }
     return f;
   }
 

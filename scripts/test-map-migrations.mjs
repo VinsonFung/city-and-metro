@@ -14,7 +14,10 @@ for(const [id,m]of Object.entries(C.MAPS)){
   const dx=applicable.reduce((v,s)=>v+s.dx,0),dy=applicable.reduce((v,s)=>v+s.dy,0),n=e.oldW*e.oldH;
   const old=new Float32Array(n);for(let k=0;k<n;k++)old[k]=k+.25;
   const payload={meta:{map:id,mapVersion:from},clock:{y:m.cfg.START.y,m:2,d:3},city:Object.fromEntries(keys.map(k=>[k,C.U.packTyped(old,'f32')])),net:{stations:{s1:{x:2.5,y:3.5,site:[2.5,3.5],name:'Custom name',angle:30}},segments:{g1:{pts:[[4.5,5.5],[6.5,7.5]],line:'l1',a:'s1',b:'s2'}}},econ:{funds:123456,debt:600},tasks:{active:[{anchors:[{name:'Anchor',x:8,y:9}],zone:1,coolKey:'cong:1'}],done:[],failed:[],cool:{'cov:1':20}},macro:{rec:[]}};
+  payload.netGone={stations:{old:{x:1.5,y:2.5,built:[1980,1],gone:[1990,2]}},segments:{gone:{pts:[[3.5,4.5]],built:[1980,1],gone:[1990,2],lh:[[1985,3,'l0']]}},lines:{l0:{id:'l0',name:'Retired'}}};
   const body=JSON.stringify(payload),raw=JSON.stringify({format:C.CFG.SAVE_FORMAT,version:2,body,checksum:C.U.fnv(body)}),p=C.Save.parseEnvelope(raw).payload;
+  assert.equal(p.netGone.stations.old.x,1.5+dx);assert.equal(p.netGone.stations.old.y,2.5+dy);
+  assert.deepEqual(Array.from(p.netGone.segments.gone.pts[0]),[3.5+dx,4.5+dy]);assert.equal(JSON.stringify(p.netGone.segments.gone.lh),'[[1985,3,"l0"]]');
   assert.equal(p.meta.mapVersion,m.mapVersion);assert.equal(p.city.pop.n,m.cfg.W*m.cfg.H);assert.equal(JSON.stringify(payload),body,'Parsing must not alter original input');
   const actual=C.U.unpackTyped(p.city.pop),fill=C.U.unpackTyped(p.city.fillNew);let newCells=0;
   for(let y=0;y<m.cfg.H;y++)for(let x=0;x<m.cfg.W;x++){

@@ -6,6 +6,8 @@
   const G = CM.GEOS && CM.GEOS.hk; if (!G) return;
   const P = G.proj, ll = function (lat, lon) { return [+((lon - P.lon0) * P.kx).toFixed(2), +((P.lat0 - lat) * P.ky).toFixed(2)]; };
   const poly = function (pts) { return pts.map(function (p) { return ll(p[0], p[1]); }); };
+  const szLine = poly([[22.5700, 113.8600], [22.5700, 114.3000], [22.5500, 114.3000], [22.5500, 114.2230], [22.5580, 114.1750], [22.5400, 114.1350], [22.5270, 114.1100], [22.5140, 114.0800], [22.5180, 114.0640], [22.5100, 114.0300], [22.5150, 113.9700], [22.4600, 113.9400], [22.4500, 113.8600]]);
+  const inSz = function (x, y) { let ins = false; for (let i = 0, j = szLine.length - 1; i < szLine.length; j = i++) { const a = szLine[i], b = szLine[j]; if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) ins = !ins; } return ins; };
   const at = function (lat, lon, o) { const p = ll(lat, lon); return Object.assign({ x: p[0], y: p[1] }, o); };
   const anchor = function (name, lat, lon, r) { const p = ll(lat, lon); return { name: name, x: p[0], y: p[1], r: r }; };
 
@@ -39,6 +41,28 @@
   // 启德机场：九龙城一侧的客运大楼与停机坪，加伸入九龙湾的跑道（按 OSM 现状的跑道岸线校准；1970 年跑道以东仍是海）
   const kaiTak = poly([[22.3302, 114.1885], [22.3318, 114.1945], [22.3300, 114.1990], [22.3262, 114.2007], [22.3218, 114.2006], [22.3200, 114.2002], [22.3160, 114.2048], [22.3120, 114.2096], [22.3085, 114.2158], [22.3045, 114.2168], [22.3028, 114.2160], [22.3045, 114.2142], [22.3100, 114.2075], [22.3160, 114.2009], [22.3200, 114.1966], [22.3235, 114.1910], [22.3262, 114.1880]]);
   const data = {
+    // 城市特色（traits.js，规则见《地图设计与城市特色机制.md》）。新条目加在末尾，已触发事件按序号记录
+    traits: [
+      { use: 'railProperty', level: 'heavy', star: true, icon: 'building', label: '铁路加物业', text: '车站上盖的物业收益反哺铁路：车站商业更赚钱，新线也更常带物业开发权', why: '港铁长期以沿线物业开发收益支持铁路建设，是“铁路加物业”模式的代表。' },
+      { use: 'crossing', star: true, icon: 'route', label: '过海、山地与填海', text: '过海要建沉管隧道，山体只能打隧道，新城区要等填海成陆', why: '香港平地极少，维多利亚港两岸靠隧道相连，新市镇和机场大量依靠填海。' },
+      { use: 'foresight', level: 'mid', star: true, icon: 'plane', label: '新机场提前布局', text: '1989 年新机场计划公布前就修到青衣一带，能得到出资，片区也长得更快', id: 'hk-rose', pos: [98.9, 91.2], ym: [1989, 10], before: 1985, r: 7, region: 'kwt', title: '新机场核心计划公布',
+        hit: '新机场核心计划公布，机场铁路要沿大屿山北岸进城。早已通车的{st}站让沿线的开发一下子有了依托。', miss: '新机场核心计划公布，机场铁路要沿大屿山北岸进城，青衣一带还没有地铁，要尽快补上。',
+        why: '1989 年 10 月 11 日，港督宣布新机场核心计划（玫瑰园计划），1998 年 7 月新机场启用。' },
+      { use: 'mountain', label: '郊野公园与山地', why: '郊野公园与山地占香港大部分土地，线路只能钻隧道。' },
+      { use: 'reclaim', label: '分阶段填海', why: '中环、启德、将军澳和赤鱲角都有大规模填海。' },
+      { use: 'investWindow', level: 'mid', label: '玫瑰园计划', on: { y: 1989, m: 10, title: '玫瑰园计划公布', desc: '港督卫奕信宣布兴建赤鱲角新机场以及配套的铁路、公路和填海工程。' }, years: 9, why: '新机场核心计划包括机场铁路在内的 10 项核心工程，1998 年 7 月完成。' },
+      { use: 'transition', level: 'light', label: '观塘转型', region: 'kt', close: { y: 1985, m: 1, title: '观塘工厂开始北移', desc: '内地开放后，观塘一带的工厂陆续迁往珠江三角洲，工业大厦开始空置。' }, renew: { y: 2011, m: 10, title: '起动九龙东', desc: '施政报告提出把九龙东转型为第二个核心商业区。' }, replan: [{ year: 2012, region: 'kt', plan: 'mix' }], why: '1980 年代起香港工厂大量北移；2011 年施政报告提出起动九龙东。' },
+      { use: 'carLimit', level: 'mid', label: '1982 年首次登记税', on: { y: 1982, m: 5, title: '首次登记税翻倍', desc: '政府把私家车首次登记税提高一倍，牌照费约增至三倍，并提高汽油税，以抑制私家车增长。' }, why: '1982 年 5 月的这轮措施之后，私家车新登记量大幅下降。' },
+      { use: 'landBoom', level: 'light', label: '1990 年代地价', on: { y: 1991, m: 1, title: '地价与楼价持续上涨', desc: '1990 年代上半叶香港地价和楼价持续上涨，新线的收地和建设成本随之上升。' }, years: 6, why: '1997 年亚洲金融风暴之前，香港楼价持续上涨多年。' },
+      { use: 'rival', label: '电车、渡轮与九广铁路', why: '港岛电车、过海渡轮和九广铁路都早于地铁，至今仍分担客流。' },
+      { use: 'hubMove', label: '启德机场', why: '1998 年 7 月启德机场关闭，旧址后来改作启德发展区。' },
+      { use: 'finance', flavor: 'hk' },
+      { use: 'cityLink', icon: 'bridge', label: '深港连接', map: 'sz', name: '深圳', ach: '深港一线', region: 'sz', gates: [
+        { id: 'hk_gate_lw', n: '罗湖接驳口', to: '深圳 · 罗湖口岸',at: ll(22.5283, 114.1135), dir: 'N', y: [2003, 8], pax: [[2003.6, 4], [2010, 6], [2019, 6]], title: '内地居民赴港个人游开放', desc: '深圳等地的居民可以个人身份赴港旅游，北上南下的旅客明显增加。罗湖接驳口开放，修到这里就能和深圳的地铁相接。', note: '接通后过境旅客可以乘地铁进出，也能切换到深圳。' },
+        { id: 'hk_gate_lmc', n: '落马洲接驳口', to: '深圳 · 福田口岸', at: ll(22.5145, 114.0660), dir: 'N', y: [2007, 8], pax: [[2007.7, 2], [2012, 4], [2019, 5]], title: '落马洲支线通车', desc: '8 月 15 日落马洲支线通车，经落马洲站与深圳福田口岸相接。落马洲接驳口开放。', note: '2007 年 8 月随落马洲支线开放。' },
+        { id: 'hk_gate_hsk', n: '流浮山接驳口', to: '深圳 · 深圳湾口岸', at: ll(22.4686, 113.9822), dir: 'N', y: [2035, 1], pax: [[2035, 1.5], [2045, 2.5]], title: '模拟：港深西部铁路开通', desc: '规划中的港深西部铁路从洪水桥经流浮山过海，到深圳湾口岸和前海，目标 2035 年，开通日期未定。这里按规划模拟，流浮山接驳口开放。', tag: '模拟', note: '规划中的港深西部铁路（洪水桥至前海）在流浮山一带过海，目标 2035 年，开通日期未定。' },
+      ], why: '罗湖口岸和福田口岸（香港一侧为落马洲）都有铁路与深圳相接；规划中的港深西部铁路经流浮山过海到深圳湾口岸，开通日期未定。两张图各算各的，时间也不同步。' },
+    ],
     city: '香港', riverName: '维多利亚港', seaName: '维多利亚港', hsrYear: 2018,
     stages: [[1979, '起步期'], [1990, '新市镇时期'], [1998, '过渡期'], [2010, '跨世纪发展期']], stageLast: '都会发展期',
     // 历史发展阶段（v2.2，eras.js）：summary 中「史实」可查证，「估算」为模型设定的发展倾向；grow 只改变人口与岗位增长的去向（总量仍按人口曲线），
@@ -120,7 +144,7 @@
       { id: 'st', name: '沙田新市镇', district: ['沙田区'], open: 1973, plan: 'res', pop: 4.05e6, note: '1973 年起按新市镇计划发展（史实）' },
       { id: 'tko', name: '将军澳新市镇', district: ['西贡区'], open: 1982, plan: 'res', pop: 4.95e6, note: '1982 年起规划发展，主体建于填海土地（史实）' },
       // v2.1 扩大范围：新界西北与东北的新市镇、大屿山东北部；深圳一侧不属于香港，不开放建设
-      { id: 'sz', name: '深圳（境外）', district: ['福田区', '罗湖区', '南山区', '宝安区', '龙岗区'], poly: poly([[22.5300, 113.8500], [22.5300, 113.9550], [22.4550, 113.9550], [22.4550, 113.8500]]), open: null, lockNote: '深圳市，不属于香港的建设范围' },
+      { id: 'sz', name: '深圳（境外）', district: ['福田区', '罗湖区', '南山区', '宝安区', '龙岗区', '盐田区'], poly: poly([[22.5300, 113.8500], [22.5300, 113.9550], [22.4550, 113.9550], [22.4550, 113.8500]]), open: null, lockNote: '深圳市，不属于香港的建设范围' },
       { id: 'tm', name: '屯门新市镇', district: ['屯门区'], poly: poly([[22.4550, 113.8500], [22.4550, 113.9510], [22.3420, 113.9510], [22.3420, 113.8500]]), open: 1976, plan: 'newtown', note: '1970 年代中期起发展，1977 年首批居民入伙（史实）' },
       { id: 'yl', name: '元朗·天水围', district: ['元朗区'], open: 1978, plan: 'res', note: '元朗新市镇 1978 年起发展，天水围 1980 年代后期起建成（史实）' },
       { id: 'tpo', name: '大埔新市镇', district: ['大埔区'], open: 1979, plan: 'res', note: '1979 年起按新市镇计划发展（史实）' },
@@ -249,6 +273,7 @@
     ],
     // 本地历史主题任务：参考香港的发展需求，不要求复刻真实线路走向（奖励单位：万港元）
     histTasks: [
+      { id: 'hk_link1', appear: [2003, 8], deadline: [2012, 12], type: 'connect', reward: 40000, title: '北上接到罗湖', desc: '罗湖接驳口已开放。修到接驳口，再和上水接到同一张线网，过境旅客就能乘地铁南下。', anchors: [anchor('罗湖接驳口', 22.5283, 114.1135, 1.2), anchor('上水', 22.5012, 114.1280, 3)] },
       { id: 'hk1', appear: [1972, 1], deadline: [1982, 12], type: 'connect', reward: 50000, title: '地铁跨越维多利亚港', desc: '用地铁连接港岛中环与九龙的尖沙咀、旺角，三处各需有车站并在同一网络中连通。跨海段可以建成沉管隧道。', anchors: [anchor('中环', 22.2820, 114.1580, 3), anchor('尖沙咀', 22.2980, 114.1720, 3), anchor('旺角', 22.3190, 114.1690, 3)] },
       { id: 'hk2', appear: [1975, 1], deadline: [1986, 12], type: 'connect', reward: 40000, title: '服务观塘工业区', desc: '连接观塘工业区、九龙塘与旺角，让九龙东的工人乘地铁上班。', anchors: [anchor('观塘', 22.3120, 114.2250, 3), anchor('九龙塘', 22.3370, 114.1760, 3), anchor('旺角', 22.3190, 114.1690, 3)] },
       { id: 'hk3', appear: [1978, 1], deadline: [1988, 12], type: 'connect', reward: 40000, title: '荃湾新市镇通地铁', desc: '连接荃湾、葵涌与深水埗。', anchors: [anchor('荃湾', 22.3720, 114.1170, 3), anchor('葵涌', 22.3600, 114.1300, 3), anchor('深水埗', 22.3310, 114.1600, 3)] },
@@ -277,25 +302,30 @@
       ['', '', '模拟结果不得作为真实香港交通规划预测。'],
     ],
     lineColorsNice: ['#00ab4e', '#ed1d24', '#0075c2', '#7d499d', '#f38b00', '#5eb6e4', '#9a3b26', '#bac429', '#00888a', '#e777cb', '#a35200', '#6d6e71'],
-    places: (G.places || []).map(function (p) { return [p[0], p[1], p[2], p[3]]; }),
+    // v2.7 向北扩大后：新增范围里的深圳一侧不收地名（边界线取近似）
+    places: (G.places || []).filter(function (p) { return !(p[2] < 24 && inSz(p[1], p[2])); }).map(function (p) { return [p[0], p[1], p[2], p[3]]; }),
   };
 
   (CM.MAP_LIST = CM.MAP_LIST || []).push({
     id: 'hk', name: '香港', title: '香港 · 1970', sub: '真实地理 · 1970 年起 · 港币',
     desc: '从 1970 年尚无地铁的香港开始：维多利亚港分隔港岛与九龙，山多地少、人口极其稠密；之后过海隧道、新市镇与大规模填海陆续出现。新土地随年份由系统填海形成后才能开发与建设。',
-    facts: [['范围', '44 km × 30 km'], ['起始', '1970 年'], ['人口', '约 363 万'], ['货币', '港币（港元）'], ['模式', '经营挑战 / 自由建造']],
-    modes: ['challenge', 'free'], kind: 'real', mapVersion: 3, extent: [{ from: 1, dx: 56, dy: 40, oldW: 80, oldH: 80, newW: 140, newH: 120, note: '地图扩大到屯门、元朗、天水围、上水与大埔等新市镇', oldRegionIds: ['hills', 'airport', 'central', 'wanchai', 'eastern', 'southern', 'ytm', 'ssp', 'klc', 'wts', 'kt', 'tw', 'kwt', 'st', 'tko', 'outer'], oldLandmarkIds: ['hk_pen', 'hk_hku', 'hk_stad', 'hk_hhs', 'hk_stra', 'hk_col', 'hk_cec', 'hk_hkcc', 'hk_boc', 'hk_cp', 'hk_ifc', 'hk_icc'] },
-      { from: 2, dx: 36, dy: 0, oldW: 140, oldH: 120, note: '地图向西扩大到赤鱲角（香港国际机场）、东涌与龙鼓滩',
-        oldRegionIds: ['hills', 'airport', 'disney', 'oceanpark', 'central', 'wanchai', 'eastern', 'southern', 'ytm', 'ssp', 'klc', 'wts', 'kt', 'tw', 'kwt', 'st', 'tko', 'sz', 'tm', 'yl', 'tpo', 'north', 'lantau', 'outer'] }],
+    facts: [['范围', '44 km × 36 km'], ['起始', '1970 年'], ['人口', '约 363 万'], ['货币', '港币（港元）'], ['模式', '经营挑战 / 自由建造']],
+    modes: ['challenge', 'free'], kind: 'real', mapVersion: 4, extent: [{ from: 1, dx: 56, dy: 40, oldW: 80, oldH: 80, newW: 140, newH: 120, note: '地图扩大到屯门、元朗、天水围、上水与大埔等新市镇', oldRegionIds: ['hills', 'airport', 'central', 'wanchai', 'eastern', 'southern', 'ytm', 'ssp', 'klc', 'wts', 'kt', 'tw', 'kwt', 'st', 'tko', 'outer'], oldLandmarkIds: ['hk_pen', 'hk_hku', 'hk_stad', 'hk_hhs', 'hk_stra', 'hk_col', 'hk_cec', 'hk_hkcc', 'hk_boc', 'hk_cp', 'hk_ifc', 'hk_icc'] },
+      { from: 2, dx: 36, dy: 0, oldW: 140, oldH: 120, newW: 176, newH: 120, note: '地图向西扩大到赤鱲角（香港国际机场）、东涌与龙鼓滩',
+        oldRegionIds: ['hills', 'airport', 'disney', 'oceanpark', 'central', 'wanchai', 'eastern', 'southern', 'ytm', 'ssp', 'klc', 'wts', 'kt', 'tw', 'kwt', 'st', 'tko', 'sz', 'tm', 'yl', 'tpo', 'north', 'lantau', 'outer'] },
+      // v2.7：向北扩大 24 格，罗湖、落马洲、皇岗、文锦渡、莲塘、沙头角等口岸都进入地图
+      { from: 3, dx: 0, dy: 24, oldW: 176, oldH: 120, newW: 176, newH: 144, note: '地图向北扩大到深港各口岸',
+        oldRegionIds: ['hills', 'hkia', 'tungchung', 'lantaun', 'airport', 'disney', 'oceanpark', 'central', 'wanchai', 'eastern', 'southern', 'ytm', 'ssp', 'klc', 'wts', 'kt', 'tw', 'kwt', 'st', 'tko', 'sz', 'tm', 'yl', 'tpo', 'north', 'lantau', 'outer'],
+        oldLandmarkIds: ['hk_pen', 'hk_hku', 'hk_stad', 'hk_hhs', 'hk_stra', 'hk_col', 'hk_cec', 'hk_hkcc', 'hk_boc', 'hk_cp', 'hk_ifc', 'hk_icc', 'hk_op', 'hk_disney'] }],
     scenario: 'hk-1970',
     region: '中国香港', tagline: '山与海之间的高密度城市', difficulty: 3, tags: ['无地铁开局', '过海', '填海'],
     intro: '1970 年的香港人口约 345 万，港岛与九龙隔着维多利亚港，靠渡轮与巴士往来，还没有地铁。土地少得惊人：新城区要等填海成陆才能开发。你要让地铁第一次穿过海港，再把荃湾、沙田、将军澳这些新市镇连起来。',
-    features: [['wave', '分阶段填海', '9 片新土地按年份成陆，之后才能建站'], ['route', '过海隧道', '跨越维多利亚港需要沉管隧道'], ['map', '新市镇', '荃湾、沙田、将军澳陆续开放'], ['coin', '港币经营', '造价、票价与拨款按港币计算']],
+    features: [['map', '新市镇', '荃湾、沙田、将军澳陆续开放']],
     highlights: [[1972, '红磡海底隧道通车'], [1973, '新市镇计划展开'], [1978, '沙田马场启用'], [1997, '香港回归，西区海底隧道通车'], [1998, '启德机场关闭']],
     geo: G, data: data,
     econ: { devOffset: 23, money: 0.25 },   // 出行选择参数：香港 1970 年约对应广州样本 1993 年的发展阶段；时间价值等按港币换算
     cfg: {
-      W: 176, H: 120, START: { y: 1970, m: 1, d: 1, minute: 360 },   // v2.2：向西扩大 36 格到赤鱲角
+      W: 176, H: 144, START: { y: 1970, m: 1, d: 1, minute: 360 },   // v2.2：向西扩大 36 格到赤鱲角；v2.7：向北扩大 24 格到深港各口岸
       // 工作周：政府 2006 年 7 月起分阶段实行五天工作周（史实）；私营机构周六上班的比例为估算
       workWeek: { sat: [[1970, 0.85], [1990, 0.7], [2006.5, 0.55], [2015, 0.4], [2030, 0.35]], school: [[1970, 1], [1990, 0.8], [2000, 0.3], [2006, 0]] },
       growth: Object.assign({}, CM.CFG.growth, { popCurve: [[1970, 3.63e6], [1975, 4.05e6], [1980, 4.75e6], [1985, 5.25e6], [1990, 5.75e6], [1995, 6.2e6], [2000, 6.55e6], [2010, 6.9e6], [2020, 7.08e6], [2040, 7.2e6], [2300, 7.3e6]], histEnd: 2020, jobsRatio: [[1970, 0.42], [1990, 0.48], [2020, 0.52]] }),
@@ -337,6 +367,6 @@
         ],
       },
     },
-    cam: { cx: 126, cy: 86, zoom: 18 },
+    cam: { cx: 126, cy: 110, zoom: 18 },
   });
 })(window.CM);

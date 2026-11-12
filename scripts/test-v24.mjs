@@ -11,8 +11,8 @@ for (const [,src] of (await readFile(new URL('index.html',root),'utf8')).matchAl
 }
 const C = context.CM, M = C.Metro;
 assert.ok(parseFloat(C.CFG.GAME_VERSION)>=2.4); assert.ok(C.CFG.RULES_REVISION>=5);
-assert.equal(C.MAP_ORDER.length,10); assert.equal(C.MAPS.bj.cfg.W,204); assert.equal(C.MAPS.bj.cfg.H,156);
-assert.ok(C.MAPS.bj.data.briefing.inherit);
+assert.equal(C.MAP_ORDER.length,12); assert.equal(C.MAPS.bj.cfg.W,204); assert.equal(C.MAPS.bj.cfg.H,156);
+assert.ok(C.MAPS.bj.data.initialNetwork);
 if (!process.argv.includes('--tasks-only')) {
 C.useMap('bj');
 const beijing = C.Game.create({mode:'challenge',seed:19900101});

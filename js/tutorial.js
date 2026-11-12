@@ -20,7 +20,6 @@
   const place = function (name) { const p = CM.DATA.places.find(function (q) { return q[0] === name; }); return p ? { x: p[1], y: p[2] } : { x: 0, y: 0 }; };
   const absMin = function (c) { return (U.ymIndex(c.y, c.m) * 31 + c.d) * 1440 + c.minute; };
   const nets = function () { return g.draft ? [g.draft.net, g.net] : [g.net]; };
-  const near = function (net, p, r) { for (const id in net.stations) { const s = net.stations[id]; if (U.dist(s.x, s.y, p.x, p.y) <= r) return id; } return null; };
   const lineStations = function (net, lid) { const tp = M.lineTopo(net, lid); return (tp.stations || []).map(function (sid) { return net.stations[sid]; }).filter(Boolean); };
   const NORTH = ['oldtown', 'xiguan', 'dongguan', 'beizhan', 'eastind'], SOUTH = ['nanan', 'tech'];
   const regionId = function (s) { const rg = g.city.regionAt(s.x, s.y); return rg ? rg.id : ''; };
@@ -234,14 +233,18 @@
         { t: '点亮圈里的片区（点到道路也行）', at: function () { const z = ctx.zone; return z ? { x: z.x, y: z.y } : null; } },
       ] },
     { id: 'adv-fare', main: true, ch: '学会经营', title: '票价与财政',
-      body: '票价越高收入越多，乘客越少。收入、运营费和债券都在财政页。',
-      hint: '在「票价」里调好后点「应用新票价」。青湾资金不限，真实城市选「经营挑战」要自己平衡收支。',
+      body: '票价越高收入越多，乘客越少。票价在地铁芯的「票价管理」；收入、运营费和债券在顶栏的「资金」。',
+      hint: '调好后点「应用新票价」。青湾资金不限，真实城市选「经营挑战」要自己平衡收支。相邻的城市接通口岸后，地铁芯里还会出现「口岸管理」。',
       enter: function () { if (ui.layer !== 'none') ui.setLayer('none'); },
-      check: function () { return ui.topIs(['finance']); },
-      sub: [{ t: '点顶栏的「资金」', el: function () { return ui.pills && ui.pills.money ? ui.pills.money.el : null; } }] },
+      check: function () { const s = opsState(); return !!s && s.root === 'fare'; },
+      sub: [
+        { t: '点右下角的「地铁芯」', el: function () { return ui.opsDock; }, done: function () { return !!ui.opsApp; } },
+        { t: '点左侧的「票价管理」，看看票价怎么调', el: function () { return opsEl('.mc-nav[data-v="fare"]'); } },
+      ] },
     { id: 'tasks', main: true, ch: '学会经营', title: '任务与政府合同',
       body: '经营挑战里，政府会发布任务和招标项目。任务可能同时考核多项条件，合同则按建设进度与运营表现支付。',
       hint: '任务详情都有「怎么做」；不会时打开「菜单 → 新手指南」。',
+      enter: function () { if (ui.opsApp) ui.opsApp.close(); },
       check: function () { return ui.topIs(['tasks']); },
       sub: [{ t: '点顶栏的「任务」', el: function () { return ui.hbtns && ui.hbtns.tasks; } }] },
     { id: 'follow', ext: true, title: '跟随一列列车',
@@ -251,8 +254,8 @@
       check: function () { return !!g.tutorial.followed; },   // 按本进度判定，不受其他进度的跟随影响
       sub: [PICK, { t: '点一列行驶中的列车（列车在线上移动，暂停时也能点）', at: midStation }] },
     { id: 'netmap', ext: true, title: '线路示意图',
-      body: '像地铁站里挂的线路图。',
-      hint: '可以缩放，也能导出图片。',
+      body: '像地铁站里挂的线路图，下方写着每条线的站数和公里数。',
+      hint: '可以缩放，也能导出图片；点「成长回放」能看线网这些年的变化。',
       check: function () { return !!(CM.NetMap && CM.NetMap.isOpen()); },
       sub: [{ t: '点左下的「线路示意图」', el: function () { return CM.Follow && CM.Follow.active() ? null : ui.tbtns.netmap; } }] },
     // 经济小知识（v2.3 改为图文分页；可跳过、可回看；青湾为自由建造，不实际发行债券）
@@ -394,10 +397,10 @@
   // 指示气泡：按钮在左侧栏时放在按钮右边，在画面下半部时放在上方，否则放在下方；地图位置放在其上方
   function placeTip(sub) {
     const hide = !sub || ui.blocking() || (CM.NetMap && CM.NetMap.isOpen()) || (CM.Follow && CM.Follow.active());
-    let rect = null, pt = null;
+    let rect = null, pt = null, side0 = false;
     if (!hide) {
       const e = sub.el ? sub.el() : null;
-      if (e && e.isConnected) { const r = e.getBoundingClientRect(); if (r.width > 0 && r.height > 0) rect = r; }
+      if (e && e.isConnected) { const r = e.getBoundingClientRect(); if (r.width > 0 && r.height > 0) { rect = r; side0 = !!e.closest('#layerPanel'); } }
       if (!rect && sub.at) { const p = sub.at(); if (p) pt = ui.R.P(p.x, p.y, 0, {}); }
     }
     if (hide || (!rect && !pt)) { if (tip) { tip.classList.add('off'); ring.classList.add('off'); } return; }
@@ -411,7 +414,7 @@
       ring.classList.remove('off');
       Object.assign(ring.style, { left: (rect.left - 5) + 'px', top: (rect.top - 5) + 'px', width: (rect.width + 10) + 'px', height: (rect.height + 10) + 'px' });
       ax = rect.left + rect.width / 2; ay = rect.top + rect.height / 2;
-      if (rect.left < 100 && rect.width < 90) { side = 'right'; x = rect.right + 16; y = ay - th / 2; }
+      if ((rect.left < 100 && rect.width < 90) || side0) { side = 'right'; x = rect.right + 16; y = ay - th / 2; }
       else if (ay > H * 0.55) { side = 'above'; x = ax - tw / 2; y = rect.top - th - 16; }
       else { side = 'below'; x = ax - tw / 2; y = rect.bottom + 16; }
     } else {

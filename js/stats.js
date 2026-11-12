@@ -1,5 +1,5 @@
 'use strict';
-// 统计面板：概览指标卡 + 交通 / 城市 / 财政 / 线路图表（SVG，悬停十字线与提示、图例）
+// 统计面板：概览指标卡 + 交通 / 城市 / 财政 / 线路图表（SVG，悬停十字线与提示、图例、表格视图）
 (function (CM) {
   const AX = CM.Accessibility;
   const U = CM.U;
@@ -9,7 +9,7 @@
     light: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'],
     dark: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'],
   };
-  const TABS = [['overview', '概览', 'chart'], ['traffic', '交通', 'metro'], ['econ', '经济', 'trend'], ['finance', '财政', 'wallet'], ['milestones', '城市纪事', 'book']];
+  const TABS = [['overview', '概览', 'chart'], ['traffic', '交通', 'metro'], ['econ', '经济', 'trend'], ['finance', '财政', 'wallet'], ['milestones', '城市纪事', 'book'], ['traits', '城市特色', 'sparkle'], ['review', '城市总评', 'star']];
   let ui = null, tab = 'overview', range = 'all', isOpen = false, charts = [], body = null, sig = '';
 
   function pal() { return AX.enabled() ? AX.palette() : PALETTE[document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light']; }
@@ -581,11 +581,80 @@
     drawBook(0);
     requestAnimationFrame(function () { syncTl(false); });
   }
-  const PAGES = { overview: pageOverview, traffic: pageTraffic, econ: pageEcon, finance: pageFinance, milestones: pageMilestones };
+  // ---------- 城市特色：招牌大卡 → 特色线（小列车停在当前年份）→ 其余机制的图鉴。内容都由机制库生成 ----------
+  function pageTraits(g, el) {
+    const T = CM.Traits, groups = T.view(g), seed = g.mapId, D = CM.DATA, mp = CM.curMap();
+    const all = []; groups.forEach(function (m) { m.items.forEach(function (x) { x.mod = m; all.push(x); }); });
+    const stamp = function (x) { return h('span', { class: 'tr-stamp ' + (x.state.cls || 'off') }, x.state.text); };
+    const goBtn = function (x) {
+      if (!x.place) return null;
+      return h('button', { class: 'tr-go', 'data-tip': '在地图上看', 'aria-label': '在地图上看', onclick: function () {
+        const p = x.place, u = ui; Stats.close();
+        if (p.region) { const k = g.city.regions.findIndex(function (r) { return r.id === p.region; }); if (k >= 0) u.locateRegion(k); } else u.locatePoint(p.x, p.y, p.label, p.r);
+      } }, CM.icon('pin', 13));
+    };
+    const hint = function (x) { return x.hint ? h('div', { class: 'tr-hint' + (x.hint.good ? ' good' : '') }, CM.icon(x.hint.good ? 'check' : 'clock', 12), h('span', null, x.hint.text)) : null; };
+    const why = function (x) { return h('p', { class: 'tr-why' }, h('i', null, '史实'), h('span', null, x.why)); };
+    // 抬头：城市与八个模块（本城没有的模块暗着，不是每座城市都要有）
+    el.appendChild(h('div', { class: 'ms-head2' }, h('div', { class: 'ms-ttl' }, h('span', { class: 'badge b-violet' }, CM.icon('sparkle')),
+      h('div', null, h('h3', null, (D.city || '城市') + '的城市特色'), h('small', null, mp.tagline || '')))));
+    const mods = h('div', { class: 'tr-mods' });
+    for (const k in T.MODULES) {
+      const M = T.MODULES[k], m = groups.find(function (q) { return q.id === k; });
+      mods.appendChild(h('button', { class: 'tr-mod' + (m ? ' on' : ''), disabled: m ? null : true, 'data-tip': m ? null : '这座城市没有选用这一类', 'data-silent': '1', onclick: function () {
+        const t = el.querySelector('[data-mod="' + k + '"]'); if (!t) return;
+        t.scrollIntoView({ behavior: CM.Settings.reducedMotion() ? 'auto' : 'smooth', block: 'center' }); t.classList.remove('flash'); void t.offsetWidth; t.classList.add('flash');
+      } }, CM.icon(M.icon, 14), h('span', null, M.name), m ? h('b', null, String(m.items.length)) : null));
+    }
+    el.appendChild(mods);
+    // 招牌
+    const stars = all.filter(function (x) { return x.star; });
+    if (stars.length) el.appendChild(h('div', { class: 'tr-stars n' + stars.length }, stars.map(function (x, i) {
+      return h('article', { class: 'tr-star', 'data-mod': x.mod.id, style: { animationDelay: (i * 0.07) + 's' } },
+        h('div', { class: 'tr-art', html: CM.Sketch.traitArt(x.use, seed + i) }), stamp(x),
+        h('div', { class: 'tr-body' }, h('div', { class: 'tr-kind' }, CM.icon(x.mod.icon, 12), h('span', null, x.kind), goBtn(x)), h('h4', null, x.label), h('p', { class: 'tr-text' }, x.text), h('p', { class: 'tr-eff' }, x.effect), hint(x), why(x)));
+    })));
+    // 特色线：开局和史料末年是两端的终点站，中间是有年份的机制；已经过去的一段点亮，小列车停在现在
+    const S = T.stops(), y0 = CM.CFG.START.y, end = Math.max((CM.CFG.growth && CM.CFG.growth.histEnd) || 2020, S.length ? S[S.length - 1].y : 0);
+    if (S.length) {
+      const nodes = [{ y: y0, m: 1, label: '开局', term: true }].concat(S, [{ y: end, m: 12, label: end > g.clock.y ? '史料截止' : '模拟未来', term: true }]);
+      const now = g.year(), at = function (q) { return q.y + (q.m - 1) / 12; }, n = nodes.length;
+      let idx = n - 1, frac = 0;
+      for (let i = 0; i + 1 < n; i++) if (now < at(nodes[i + 1])) { idx = i; frac = U.clamp((now - at(nodes[i])) / Math.max(0.01, at(nodes[i + 1]) - at(nodes[i])), 0, 1); break; }
+      const posOf = function (v) { return (v + 0.5) / n * 100; }, pos = posOf(idx + frac);
+      const col = (D.lineColorsNice && D.lineColorsNice[0]) || '#2f7dd1';
+      const line = h('div', { class: 'tr-line', style: { '--tr-c': col, minWidth: (n * 72) + 'px', gridTemplateColumns: 'repeat(' + n + ', 1fr)' } });
+      line.appendChild(h('i', { class: 'tr-rail', style: { left: posOf(0) + '%', right: (100 - posOf(n - 1)) + '%' } }));
+      line.appendChild(h('i', { class: 'tr-rail done', style: { left: posOf(0) + '%', width: Math.max(0, pos - posOf(0)) + '%' } }));
+      nodes.forEach(function (q, i) {
+        const past = i <= idx, st = q.t ? (q.use === 'foresight' ? (g.foresight && g.foresight[q.t.id] ? (g.foresight[q.t.id].hit ? 'hit' : 'miss') : '') : '') : '';
+        line.appendChild(h('div', { class: 'tr-stop' + (i % 2 ? ' up' : ' down') + (past ? ' past' : '') + (q.term ? ' term' : '') + (st ? ' ' + st : ''), 'data-tip': q.t ? T.LIB[q.use].name + '：' + T.LIB[q.use].effect(q.t) : null },
+          h('span', { class: 'tr-dot' }, q.t ? CM.icon(T.MODULES[T.LIB[q.use].mod].icon, 12) : null),
+          h('div', { class: 'tr-lb' }, h('b', null, String(q.y)), h('span', null, q.label), q.sub ? h('small', null, q.sub) : null)));
+      });
+      line.appendChild(h('div', { class: 'tr-train', style: { left: pos + '%' } }, h('span', { class: 'tr-now' }, String(g.clock.y)), h('span', { class: 'tr-car', html: '<svg viewBox="0 0 44 18" width="44" height="18"><rect x="1" y="1" width="42" height="13" rx="5" fill="var(--tr-c)" stroke="#fff" stroke-width="1.2"/><rect x="6" y="4" width="7" height="5" rx="1" fill="#fff"/><rect x="17" y="4" width="7" height="5" rx="1" fill="#fff"/><rect x="28" y="4" width="10" height="5" rx="1.5" fill="#fff"/><circle cx="11" cy="15.5" r="2" fill="var(--ink,#334)"/><circle cx="33" cy="15.5" r="2" fill="var(--ink,#334)"/></svg>' })));
+      el.appendChild(h('div', { class: 'tr-sec' }, h('b', null, '特色线'), h('small', null, '每一站是这座城市会遇到的一件大事，列车停在现在')));
+      el.appendChild(h('div', { class: 'tr-linewrap' }, line));
+    }
+    // 其余机制
+    const rest = all.filter(function (x) { return !x.star; });
+    if (rest.length) {
+      el.appendChild(h('div', { class: 'tr-sec' }, h('b', null, '城市图鉴'), h('small', null, '这座城市还有这些不一样的地方')));
+      const seen = {};
+      el.appendChild(h('div', { class: 'tr-cards' }, rest.map(function (x, i) {
+        const first = !seen[x.mod.id] && !el.querySelector('.tr-star[data-mod="' + x.mod.id + '"]'); seen[x.mod.id] = 1;
+        return h('article', { class: 'tr-card', 'data-mod': first ? x.mod.id : null }, h('div', { class: 'tr-thumb', html: CM.Sketch.traitArt(x.use, seed + 't' + i) }),
+          h('div', { class: 'tr-body' }, h('div', { class: 'tr-kind' }, CM.icon(x.mod.icon, 12), h('span', null, x.kind), goBtn(x), stamp(x)), h('h4', null, x.label), h('p', { class: 'tr-eff' }, x.effect), hint(x), why(x)));
+      })));
+    }
+  }
+  const PAGES = { overview: pageOverview, traffic: pageTraffic, econ: pageEcon, finance: pageFinance, milestones: pageMilestones, traits: pageTraits, review: function (g, el) { if (CM.Review) CM.Review.page(g, el); } };
   const NOTES = {
-    milestones: '只记录关键节点：地铁建设的「第一次」与里程关口、客流与分担率关口、人口关口、本地图的重大历史事件、地标落成与填海成陆。',
-    econ: '按年记录：每年 1 月结算上一年。游戏结果为本局地图范围的模拟值；预测只包含已经发生的事件；参考数据为全国或地区口径的近似值，与地图范围数据分开显示。',
-    _: '按月记录，最后一点为当前值；客流为周平均日（5 个工作日 + 2 个周末日）的模拟结果，v1.9 之前的记录为典型工作日口径（不重算）。悬停图表查看数值。',
+    review: '城市进入模拟阶段时自动生成一次，不影响游戏数值；评分是游戏设定。',
+    milestones: '记录建设、客流与人口的关键节点和重大事件。',
+    traits: '特色来自这座城市的真实情况；数值是游戏设定，不代表真实数据。',
+    econ: '每年 1 月结算上一年；参考数据为全国或地区口径。',
+    _: '按月记录，客流为周平均日。悬停查看数值。',
   };
 
   // ---------- 外框：窗口与标签只建一次；切换标签或刷新数据只替换内容区（不重播入场动画，图表同步绘制，不闪动） ----------
@@ -610,9 +679,10 @@
   }
   function syncTabs(g, instant) {
     const free = g.econ.isFree(), eco = !!(g.macro && CM.Macro);
-    if ((tab === 'finance' && free) || (tab === 'econ' && !eco)) tab = 'overview';
+    const noTr = !CM.Traits || !CM.Traits.view(g).length;
+    if ((tab === 'finance' && free) || (tab === 'econ' && !eco) || (tab === 'traits' && noTr)) tab = 'overview';
     for (const k in tabBtns) {
-      tabBtns[k].style.display = (k === 'finance' && free) || (k === 'econ' && !eco) ? 'none' : '';
+      tabBtns[k].style.display = (k === 'finance' && free) || (k === 'econ' && !eco) || (k === 'traits' && noTr) ? 'none' : '';
       tabBtns[k].classList.toggle('on', k === tab); tabBtns[k].setAttribute('aria-selected', k === tab ? 'true' : 'false');
     }
     const b = tabBtns[tab];
@@ -652,6 +722,8 @@
   function signature(g) {
     const th = document.documentElement.dataset.theme + '|' + AX.flag(), n = g.milestones ? g.milestones.list.length : 0;
     if (tab === 'milestones') return 'ms|' + n + '|' + th + '|' + (window.innerWidth < 820 ? 1 : 2);
+    if (tab === 'traits') return 'tr|' + g.clock.y + '|' + (g.foresight ? Object.keys(g.foresight).length : 0) + '|' + g.netVersion + '|' + th;
+    if (tab === 'review') return 'rev|' + (g.cityReview ? g.cityReview.when + '|' + (g.cityReview.thumb ? 1 : 0) : 0) + '|' + th;
     if (tab === 'econ') return 'ec|' + g.clock.y + '-' + g.clock.m + '|' + (g.macro ? g.macro.rec.length + '|' + g.macro.gv : '') + '|' + th;
     return g.clock.y + '-' + g.clock.m + '-' + g.clock.d + '|' + (g.model.dailyStale ? 0 : 1) + '|' + g.history.length + '|' + g.econ.ledger.length + '|' + g.netVersion + '|' + th + '|' + n;
   }

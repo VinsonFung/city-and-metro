@@ -30,6 +30,7 @@
     this.flow = [];            // 资金流水
     this.bondSeq = 1;
     this.fare = Economy.defaultFare();
+    this.cross = {};           // 城市连接：各接驳口的跨境附加费（v2.7），键为设施 id
     this.cur = blankMonth(y, m, this.funds, 0);
     this.ledger = [];
     this.sat = CFG.economy.startSat;
@@ -44,8 +45,6 @@
   CM.Economy = Economy;
 
   Economy.prototype.isFree = function () { return this.mode === 'free'; };
-  // 只检查新增的现金支出：零费用操作（如拆除既有设施）在负余额时也允许，便于止损
-  Economy.prototype.canAfford = function (amount) { return this.isFree() || amount <= MONEY_EPS || this.funds >= amount; };
   Economy.prototype.spend = function (kind, amount) {
     if (amount <= 0) return;
     this.cur[kind] = (this.cur[kind] || 0) + amount;
@@ -70,7 +69,7 @@
       { name: '站城一体开发', k: 0.3, cost: 0.075, upkeep: 0.035, cyc: 1, desc: '车站上盖与周边物业联合开发' },
     ],
     HUB: 1.25,   // 两条及以上线路的换乘站
-    SIZE: { S: 0.7, M: 1, L: 1.5 },
+    SIZE: { S: 0.7, M: 1, L: 1.5, XL: 2 },
     pi: function (y) { return U.priceIndex(y, CFG.cost.inflation, CFG.econBase || 1990); },
     cost: function (level, y, size, hub) { return TOD.LEVELS[level].cost * CFG.cost.station.underground.M * (TOD.SIZE[size] || 1) * (hub ? 1.3 : 1) * TOD.pi(y); },
     // 经济周期系数：城市经济的商业系数（约 0.7–1.25），按等级的敏感度折算；没有城市经济的地图为 1。每月缓存一次
@@ -101,8 +100,11 @@
   Economy.prototype.opsIndex = function (year) { return U.priceIndex(year, CFG.ops.inflation, CFG.econBase || 1990); };
 
   // 每日结算：票款与运营费用，按当天的日类型（工作日 / 周末）的模拟结果逐日累计（v1.9 起；之前按典型工作日）
-  Economy.prototype.day = function (daily, compiled, year, dt) {
-    const fareWan = daily && daily.ready ? daily.fare / 10000 : 0;
+  // cross：当天的跨境附加费（元，v2.7），计入票款，并单独记一笔供账目显示
+  Economy.prototype.day = function (daily, compiled, year, dt, cross) {
+    const crossWan = daily && daily.ready && cross > 0 ? cross / 10000 : 0;
+    const fareWan = daily && daily.ready ? daily.fare / 10000 + crossWan : 0;
+    if (crossWan) this.cur.crossFee = (this.cur.crossFee || 0) + crossWan;
     let ops = 0;
     if (daily && compiled) {
       const oi = this.opsIndex(year);
@@ -220,7 +222,7 @@
     const y = this.cur && this.cur.y;
     if (y && this.fare.flat > 0) {
       const real = this.fareReal(y);
-      if (real < 0.4) out.push({ level: 'warn', text: '票价预警：票价没有随物价调整，实际价值只剩开局时的 ' + Math.round(real * 100) + '%，可在财政页调整票价' });
+      if (real < 0.4) out.push({ level: 'warn', text: '票价预警：票价没有随物价调整，实际价值只剩开局时的 ' + Math.round(real * 100) + '%，可在地铁芯的「票价管理」调整票价' });
     }
     return out;
   };
@@ -271,6 +273,7 @@
   };
 
   // ======================== 建设支出：先用建设专项资金，不足部分用一般资金 ========================
+  // 零费用操作（如拆除既有设施）在负余额时也允许，便于止损。
   Economy.prototype.canAffordBuild = function (amount) { return this.isFree() || amount <= MONEY_EPS || Math.max(0, this.funds) + Math.max(0, this.capex) >= amount; };
   Economy.prototype.spendBuild = function (byKind, note, when, side) {
     let total = 0; for (const k of BUILD_KINDS) total += byKind[k] || 0;
@@ -437,14 +440,15 @@
   };
 
   Economy.prototype.serialize = function () {
-    return { mode: this.mode, funds: this.funds, fare: this.fare, cur: this.cur, ledger: this.ledger, sat: this.sat, mods: this.mods, negMonths: this.negMonths, lowSatMonths: this.lowSatMonths, failed: this.failed, satFactors: this.satFactors, lastDay: this.lastDay,
+    return { mode: this.mode, funds: this.funds, fare: this.fare, cross: this.cross, cur: this.cur, ledger: this.ledger, sat: this.sat, mods: this.mods, negMonths: this.negMonths, lowSatMonths: this.lowSatMonths, failed: this.failed, satFactors: this.satFactors, lastDay: this.lastDay,
       capex: this.capex, bonds: this.bonds, bondIssued: this.bondIssued, overdue: this.overdue, overdueParts: this.overdueParts || null, overdueMonths: this.overdueMonths, flow: this.flow, bondSeq: this.bondSeq, svc: this._svc == null ? null : this._svc,
       fisc: this.fisc || null, built: this.built || 0, rate: this.rate || undefined, fareMark: this.fareMark != null ? this.fareMark : undefined, fareAuto: this.fareAuto || undefined, fareNote: this.fareNote || undefined };
   };
   Economy.restore = function (s) {
     const e = new Economy(s.mode, s.cur.y, s.cur.m);
-    Object.assign(e, { funds: s.funds, fare: Economy.normFare(s.fare), cur: s.cur, ledger: s.ledger || [], sat: s.sat, mods: s.mods || [], negMonths: s.negMonths || 0, lowSatMonths: s.lowSatMonths || 0, failed: s.failed || null, satFactors: s.satFactors || null, lastDay: s.lastDay || null,
+    Object.assign(e, { funds: s.funds, fare: Economy.normFare(s.fare), cross: {}, cur: s.cur, ledger: s.ledger || [], sat: s.sat, mods: s.mods || [], negMonths: s.negMonths || 0, lowSatMonths: s.lowSatMonths || 0, failed: s.failed || null, satFactors: s.satFactors || null, lastDay: s.lastDay || null,
       capex: s.capex || 0, bonds: s.bonds || [], bondIssued: s.bondIssued || {}, overdue: s.overdue || 0, overdueParts: s.overdueParts || null, overdueMonths: s.overdueMonths || 0, flow: s.flow || [], bondSeq: s.bondSeq || 1, built: s.built || 0 });
+    for (const id of Object.keys(s.cross || {})) if (Number.isFinite(s.cross[id]) && s.cross[id] >= 0) e.cross[id] = s.cross[id];
     e._svc = s.svc == null ? null : s.svc;
     e.fareMark = Number.isFinite(s.fareMark) ? s.fareMark : null;   // 没调过价（含旧存档）：物价涨幅从开局算起，读档不改变
     const fa = s.fareAuto;
@@ -602,6 +606,51 @@
     return { vol: vol, share: vol > 0 ? m / vol : 0 };
   };
 
+  // 设施的运营状态（v2.8 玩家反馈：虹桥站、世博园 2010 年才启用，任务到期时判「不在运营」，这一项根本完成不了）。
+  // wait：还没到启用日期；idle：日期到了但还没进入交通计算（场地未成陆、地标未落成等）；on：在运营；closed / gone：已停用或不存在
+  Tasks.FAC_SETTLE = 3;   // 运营结果至少在设施启用 3 个月后才结算
+  const ymOf = function (yr) { return Math.ceil(yr * 12 - 1e-6); };
+  const ymWords = function (ym) { return Math.floor(ym / 12) + ' 年 ' + (ym % 12 + 1) + ' 月'; };
+  const ymPair = function (ym) { return [Math.floor(ym / 12), ym % 12 + 1]; };
+  Tasks.facState = function (f, g) {
+    if (!f) return 'gone';
+    const yr = g.year();
+    if (f.close != null && yr >= f.close) return 'closed';
+    if (yr < f.open) return 'wait';
+    return g.model.facIndex(f.id) >= 0 ? 'on' : 'idle';
+  };
+  // 任务要考核的设施在截止时间之后（或临近截止）才启用：把截止时间放到启用后 FAC_SETTLE 个月。发布时和旧存档的进行中任务都走这里，只往后放
+  Tasks.alignFacDeadline = function (t) {
+    if (!t.deadline || !CM.Fac) return;
+    const list = t.type === 'facShare' ? [t] : (t.type === 'combo' ? t.parts.filter(function (p) { return p.type === 'facShare'; }) : []);
+    let need = -Infinity, who = null;
+    for (const p of list) {
+      const f = CM.Fac.byId(p.fac); if (!f || !(f.open > -1e8)) continue;
+      const v = Math.min(ymOf(f.open) + Tasks.FAC_SETTLE, f.close != null ? ymOf(f.close) - 1 : Infinity);
+      if (v > need) { need = v; who = f; }
+    }
+    if (who && need > U.ymIndex(t.deadline[0], t.deadline[1])) {
+      t.deadline = ymPair(need);
+      t.facDelay = who.name + ' ' + ymWords(ymOf(who.open)) + '启用，运营结果要启用后才能统计，截止时间放到 ' + ymWords(need);
+    }
+  };
+  // 任务的地点在截止前能不能建站：半径内要有已开放、或截止 12 个月前按参考年份开放的陆地（台北淡水 1997 年才开放，1991 年发布的 4 年期任务完成不了）
+  Tasks.anchorsOpenBy = function (g, anchors, dlYm) {
+    const c = g.city, lk = c.lockState(), W = c.W, H = c.H;
+    return (anchors || []).every(function (a0) {
+      const a = Array.isArray(a0) ? Tasks.placeOf(a0[0]) : a0, R = (Array.isArray(a0) ? a0[1] : a0 && a0.r) || 3;
+      if (!a || !isFinite(a.x)) return true;
+      for (let j = Math.max(0, Math.floor(a.y - R)); j <= Math.min(H - 1, Math.floor(a.y + R)); j++) for (let i = Math.max(0, Math.floor(a.x - R)); i <= Math.min(W - 1, Math.floor(a.x + R)); i++) {
+        if (U.dist(i + 0.5, j + 0.5, a.x, a.y) > R) continue;
+        const k = j * W + i;
+        if (c.landMax[k] >= 0.5 && (!lk.mask[k] || (lk.year[k] && lk.year[k] * 12 <= dlYm - 12))) return true;
+      }
+      return false;
+    });
+  };
+  // 票价显示（去掉「/次」），用于提示玩家要把票价调回多少
+  const fareWords = function (v) { return CM.UI && CM.UI.fmtFare ? CM.UI.fmtFare(v).replace('/次', '') : String(+v.toFixed(2)); };
+
   Tasks.prototype.evaluate = function (t, g) {
     const C = g.compiled, model = g.model, acc = model.net ? model.net.acc : null;
     if (t.type === 'connect') {
@@ -626,7 +675,7 @@
     }
     if (t.type === 'zoneCong' && t.metric==='carShare') {
       const v=model.zoneTraffic(t.zone).carShare,cheap=Tasks.fareCheap(t,g);
-      return{ok:v<=t.target&&!cheap,cheap,value:U.clamp((t.start-v)/Math.max(.001,t.start-t.target),0,1),text:'片区工作日早高峰汽车出行占比 '+U.fmtPct(v,1)+' / 目标 ≤ '+U.fmtPct(t.target,1)+(cheap?'（票价低于任务发布时，本月不计）':''),sample:v};
+      return{ok:v<=t.target&&!cheap,cheap,met:v<=t.target,fare0:t.fare0,value:U.clamp((t.start-v)/Math.max(.001,t.start-t.target),0,1),text:'片区工作日早高峰汽车出行占比 '+U.fmtPct(v,1)+' / 目标 ≤ '+U.fmtPct(t.target,1)+(cheap?'（票价低于任务发布时，本月不计）':''),sample:v};
     }
     if (t.type === 'zoneCong') {
       const v = g.zoneCong(t.zone, 'wd');
@@ -651,12 +700,14 @@
       return { ok: v >= t.target, value: v / t.target, text: (b === 'wd' ? '工作日' : (b === 'we' ? '周末' : '日均（周平均）')) + '客运量 ' + U.fmtPeople(v) + ' / 目标 ' + U.fmtPeople(t.target) };
     }
     if (t.type === 'facShare') {
-      const f = CM.Fac && CM.Fac.byId(t.fac);
-      if (!f || model.facIndex(t.fac) < 0) return { ok: false, value: 0, text: '设施目前不在运营' };
+      const f = CM.Fac && CM.Fac.byId(t.fac), st = t.noFac ? 'closed' : Tasks.facState(f, g);
+      if (st === 'gone' || st === 'closed') return { ok: false, na: true, value: 0, text: (f ? f.name + ' 已停用' : '设施已不存在') + '，这一项不再考核' };
+      if (st === 'wait') return { ok: false, wait: true, value: 0, text: f.name + ' 将于 ' + ymWords(ymOf(f.open)) + '启用，启用后开始统计' };
+      if (st === 'idle') return { ok: false, wait: true, value: 0, text: f.name + ' 还没有投入使用，投入后开始统计' };
       const r = Tasks.facShareOf(model, f, t.basis);
       if (!r) return { ok: false, value: 0, text: '客流计算中' };
       const cheap = Tasks.fareCheap(t, g);
-      return { ok: r.share >= t.target && !cheap, cheap: cheap, value: U.clamp(r.share / t.target, 0, 1), text: (t.kind ? f.name + ' ' : '') + (t.basis === 'we' ? '周末' : (t.basis === 'wd' ? '工作日' : '周平均')) + '乘地铁' + (f.T.hub ? '接驳' : '到访') + '比例 ' + U.fmtPct(r.share, 0) + ' / 目标 ' + U.fmtPct(t.target, 0) + (cheap ? '（票价低于任务发布时，本月不计）' : '') };
+      return { ok: r.share >= t.target && !cheap, cheap: cheap, met: r.share >= t.target, fare0: t.fare0, value: U.clamp(r.share / t.target, 0, 1), text: (t.kind ? f.name + ' ' : '') + (t.basis === 'we' ? '周末' : (t.basis === 'wd' ? '工作日' : '周平均')) + '乘地铁' + (f.T.hub ? '接驳' : '到访') + '比例 ' + U.fmtPct(r.share, 0) + ' / 目标 ' + U.fmtPct(t.target, 0) + (cheap ? '（票价低于任务发布时，本月不计）' : '') };
     }
     if (t.type === 'recovery') {
       // 票款与车站商业收入（v2.3 起计入 TOD 收入）÷ 运营费用
@@ -673,6 +724,7 @@
       const L = g.net.lines[t.line]; if (!L) return { ok: false, dead: true, value: 0, text: '线路已拆除' };
       const cr = Tasks.crowdOf(g).find(function (x) { return x.lid === t.line; });
       if (!cr) return { ok: false, value: 0, text: '客流计算中' };
+      if (cr.noTrain) return { ok: false, value: 0, text: L.name + ' 早高峰没有列车运行，配属列车后才能统计满载率' };
       const S = g.model.net.C.stations, sa = S[cr.a], sb = S[cr.b];
       return { ok: cr.lf <= t.target, value: U.clamp((t.start - cr.lf) / Math.max(0.01, t.start - t.target), 0, 1), text: L.name + ' 最拥挤区段' + (sa && sb ? '「' + sa.name + '—' + sb.name + '」' : '') + '早高峰满载率 ' + U.fmtPct(cr.lf, 0) + ' / 目标 ≤ ' + U.fmtPct(t.target, 0) };
     }
@@ -750,6 +802,7 @@
   };
   // 发布（或接受）时记下基准：预算、物价年份、人口岗位、票价
   Tasks.prepare = function (t, g) {
+    Tasks.alignFacDeadline(t);
     if (t.type !== 'combo') return t;
     const anchors = t.anchors || [], ready = g.model.trafficReady();
     for (const p of t.parts) {
@@ -831,10 +884,13 @@
         const hasCore = t.parts.some(function (p) { return p.core; });
         const parts = t.parts.map(function (p, i) {
           const r = self.evaluate(p.anchors ? p : Object.assign({ anchors: t.anchors }, p), g);
-          return { kind: p.kind || 'net', core: !!p.core || (!hasCore && i === 0), ok: !!r.ok, value: r.ok ? 1 : U.clamp(r.value || 0, 0, 1), text: r.text, dead: !!r.dead };
+          return { kind: p.kind || 'net', core: !!p.core || (!hasCore && i === 0), ok: !!r.ok, value: r.ok ? 1 : U.clamp(r.value || 0, 0, 1), text: r.text, dead: !!r.dead, na: !!r.na, wait: !!r.wait, cheap: !!r.cheap, met: !!r.met, fare0: r.fare0 };
         });
-        return { ok: parts.every(function (p) { return p.ok; }), coreOk: parts.every(function (p) { return !p.core || p.ok; }), dead: parts.some(function (p) { return p.core && p.dead; }), value: parts.reduce(function (s, p) { return s + p.value; }, 0) / parts.length, parts: parts,
-          text: parts.map(function (p) { return (p.ok ? '✓ ' : '✗ ') + p.text; }).join('；') };
+        // 设施已停用的一项不再考核（na）：不计入完成条件和进度；其余条件照常
+        const live = parts.filter(function (p) { return !p.na; });
+        // 主体全被免除时，剩余条件须全部完成；空的主体集合不能触发部分奖励。
+        return { ok: live.length > 0 && live.every(function (p) { return p.ok; }), coreOk: live.some(function (p) { return p.core; }) && live.every(function (p) { return !p.core || p.ok; }), dead: live.some(function (p) { return p.core && p.dead; }), wait: live.some(function (p) { return p.wait; }), value: live.reduce(function (s, p) { return s + p.value; }, 0) / Math.max(1, live.length), parts: parts,
+          text: parts.map(function (p) { return (p.na ? '— ' : p.ok ? '✓ ' : '✗ ') + p.text; }).join('；') };
       }
       // ---- 网络形态 ----
       case 'direct': {   // 各处由同一条线直达，不用换乘
@@ -930,11 +986,13 @@
         if (!rt.all) return { ok: false, value: 0, text: '线路建成后统计满载率（目标 ≤ ' + pct(t.target) + '）' };
         const cr = Tasks.crowdOf(g).find(function (x) { return x.lid === rt.route.lineId; });
         if (!cr) return { ok: false, value: 0, text: '客流计算中' };
+        if (cr.noTrain) return { ok: false, value: 0, text: rt.route.line.name + ' 早高峰没有列车运行，配属列车后才能统计满载率' };
         return { ok: cr.lf <= t.target, value: atMost(cr.lf, t.target), text: rt.route.line.name + ' 早高峰最高满载率 ' + pct(cr.lf) + ' / 目标 ≤ ' + pct(t.target) };
       }
       case 'netLoad': {   // 全网最拥挤区段的早高峰满载率
         const cr = Tasks.crowdOf(g)[0];
         if (!cr) return { ok: false, value: 0, text: '客流计算中' };
+        if (cr.noTrain) return { ok: false, value: 0, text: '全网早高峰都没有列车运行，配属列车后才能统计满载率' };
         return { ok: cr.lf <= t.target, value: atMost(cr.lf, t.target), text: '全网早高峰最高满载率 ' + pct(cr.lf) + ' / 目标 ≤ ' + pct(t.target) };
       }
       case 'regionShare': {   // 片区居民的出行乘地铁的比例（工作日全天）
@@ -981,16 +1039,28 @@
     }
     return null;
   };
-  // 工作日早高峰各线路最拥挤的区段（满载率 = 区间断面客流 ÷ 线路运力），按满载率从高到低
-  Tasks.crowdOf = function (g) {
-    const m = g.model, net = m.net; if (!net || !net.R || !m.trafficReady()) return [];
-    const P = m.resultsFor('wd').per[0], out = new Map();
+  // 工作日早高峰各区段的满载情况（任务、地铁芯和线路详情共用这一份）：满载率 = 区间断面客流 ÷ 线路运力（发车频率 × 定员，v2.5 定员按车队，环线两个方向分别计）。
+  // 没有列车运行的路线（列车都调走了、手动设为 0，或全部跑在加开的交路上）没有运力，满载率无从谈起：标 noTrain，不再除以兜底的 1 得出几十万 %
+  Tasks.LF_MAX = 9.99;
+  Tasks.crowdSections = function (g, lid) {
+    const m = g.model, net = m.net, out = []; if (!net || !net.R || !m.trafficReady()) return out;
+    const P = m.resultsFor('wd').per[0]; if (!P.load || P.load.length !== net.nE) return out;
     for (let r = 0; r < net.R; r++) {
-      const rt = net.C.routes[r], re = net.rideEdge[r], capT = m.capOf(r, net);   // v2.5：定员按车队，环线两个方向的频率分别计
+      const rt = net.C.routes[r]; if (lid != null && rt.lineId !== lid) continue;
+      const re = net.rideEdge[r], capT = m.capOf(r, net), n = rt.stIdx.length;
       for (let q = 0; q < re.length; q++) {
-        const lf = P.load[re[q]] / Math.max(1, CM.Model.dirFreq(P, net, r, q) * capT), cur = out.get(rt.lineId);
-        if (!cur || lf > cur.lf) { const k = q >> 1; out.set(rt.lineId, { lid: rt.lineId, lf: lf, a: rt.stIdx[k], b: rt.stIdx[(k + 1) % rt.stIdx.length], cars: rt.cars }); }
+        const load = P.load[re[q]] || 0, f = CM.Model.dirFreq(P, net, r, q), capH = f * capT, k = q >> 1, on = capH >= 1;
+        out.push({ lid: rt.lineId, r: r, q: q, leg: k, a: rt.stIdx[k], b: rt.stIdx[(k + 1) % n], rev: !!(q & 1), label: rt.label, load: load, f: f, capH: capH, lf: on ? Math.min(Tasks.LF_MAX, load / capH) : 0, noTrain: !on, cars: rt.cars });
       }
+    }
+    return out;
+  };
+  // 各线路最拥挤的区段，按满载率从高到低。一条线只要还有交路在跑就只看在跑的交路；整条线都没有列车时 noTrain（满载率记 0，不进过载排行，也不发拥挤任务）
+  Tasks.crowdOf = function (g) {
+    const out = new Map();
+    for (const s of Tasks.crowdSections(g)) {
+      const cur = out.get(s.lid);
+      if (!cur || (cur.noTrain && !s.noTrain) || (cur.noTrain === s.noTrain && (s.noTrain ? s.load > cur.load : s.lf > cur.lf))) out.set(s.lid, s);
     }
     return Array.from(out.values()).sort(function (x, y) { return y.lf - x.lf; });
   };
@@ -1102,10 +1172,10 @@
     const transit = g.inTransition ? g.inTransition(ym) : false;
     for (const t of this.active.slice()) {
       if(t.evaluatedYM===ym)continue;
-      // 复合条件也可能包含已停用的设施；未来开放的设施不算停用。
+      // 单设施或全部设施均退役时撤销；复合任务只免除退役子项，保留其余目标。
       const retired = function (p) {
-        if (p.type === 'facShare') { const f = CM.Fac && CM.Fac.byId(p.fac); return !f || (f.close != null && g.year() >= f.close); }
-        return p.type === 'combo' && p.parts.some(retired);
+        if (p.type === 'facShare') { const f = CM.Fac && CM.Fac.byId(p.fac); return !f || p.noFac || (f.close != null && g.year() >= f.close); }
+        return p.type === 'combo' && p.parts.length > 0 && p.parts.every(retired);
       };
       if (retired(t)) {
         t.status = 'withdrawn'; t.closedAt = [y, m]; this.active.splice(this.active.indexOf(t), 1);
@@ -1127,8 +1197,27 @@
         g.taskRecheckYM=ym;t.graced='交通结果正在更新，保留进度并顺延到期评估';continue;
       }
       if (Tasks.FARE_GATED[t.type] && t.fare0 == null) t.fare0 = Tasks.fareLevel(g.econ.fare);   // 旧存档的进行中任务：以现在的票价为门槛
-      const ev = this.evaluate(t, g);
-      if(['zoneCong','stationCrowd','ridership','facShare'].includes(t.type)){
+      const ev = this.evaluate(t, g), due = ym >= U.ymIndex(t.deadline[0], t.deadline[1]);
+      // 到期时设施日期已到、却还没投入使用（场地未成陆、地标未落成等）：顺延，最多等 12 个月，之后这一项不再考核
+      if (due && ev.wait) {
+        t.waitN = (t.waitN || 0) + 1;
+        if (t.waitN <= 12) { t.deadline = ymPair(ym + 1); t.graced = '设施还没投入使用，运营结果顺延到投入后结算'; t.progress = ev; continue; }
+        if (t.type === 'combo') { for (const p of t.parts) if (p.type === 'facShare') { const f1 = CM.Fac.byId(p.fac); if (Tasks.facState(f1, g) !== 'on') p.noFac = true; } }
+        else t.noFac = true;
+        g.taskRecheckYM = ym; continue;
+      }
+      // 指标已经达标、只差票价（低于任务发布时）：这不是交通结果的波动。到期时说明原因并顺延，把票价调回去还能结算；最多 3 次
+      const fareOnly = t.type === 'combo' ? (ev.parts || []).some(function (p) { return p.cheap; }) && ev.parts.every(function (p) { return p.na || p.ok || (p.cheap && p.met); }) : !!(ev.cheap && ev.met);
+      if (due && fareOnly) {
+        const fare0 = t.type === 'combo' ? Math.max.apply(null, ev.parts.filter(function (p) { return p.cheap; }).map(function (p) { return p.fare0 || 0; })) : t.fare0;
+        if ((t.fareWait || 0) < 3) {
+          t.fareWait = (t.fareWait || 0) + 1; t.deadline = ymPair(ym + 1); t.progress = ev;
+          t.graced = '指标已达标，但票价低于任务发布时，本月不计。10 公里票价调回 ' + fareWords(fare0 * 0.95) + ' 以上，下月重新结算';
+          continue;
+        }
+        t.fareWhy = '指标已达标，但到期时票价仍低于任务发布时（现 ' + fareWords(Tasks.fareLevel(g.econ.fare)) + ' / 发布时 ' + fareWords(fare0) + '），按规则不计';
+      }
+      if(!fareOnly&&['zoneCong','stationCrowd','ridership','facShare'].includes(t.type)){
         const near=this.nearTrafficThreshold(t,g,ev),basis=Tasks.basisOf(t);
         if(near&&!g.model.trafficVerified(basis)&&!this.reviewSafe(t,g)){
           this.startTrafficReview(t,g);
@@ -1142,7 +1231,7 @@
         }
       }
       // 复合任务要结算时先确认交通结果已稳定，不因一时波动拿到奖励或判定未达成
-      if(comboTraffic&&(ev.ok||ym>=U.ymIndex(t.deadline[0],t.deadline[1]))&&!g.model.trafficVerified('avg')){
+      if(comboTraffic&&!fareOnly&&(ev.ok||ym>=U.ymIndex(t.deadline[0],t.deadline[1]))&&!g.model.trafficVerified('avg')){
         this.startTrafficReview({basis:'avg',type:'ridership'},g);
         if(!g.model.reviewComplete('avg')){g.taskRecheckYM=ym;t.graced='交通目标正在复核，暂不奖惩';continue;}
       }
@@ -1305,6 +1394,7 @@
     for (const tp0 of (D.dynTasks || []).concat(CM.Eras ? CM.Eras.goals() : [])) {   // v2.2：历史阶段目标同样作为本城任务，在阶段时间内发布
       const tp = Tasks.withPlan(g, tp0);
       if (this.issued['dyn:' + tp.id] || ym < U.ymIndex(tp.from[0], tp.from[1]) || ym > U.ymIndex(tp.to[0], tp.to[1]) || !free('city:' + tp.id, tp.type)) continue;
+      if (!Tasks.anchorsOpenBy(g, tp.anchors, ym + (tp.months || 0))) continue;   // 地点在截止前开放不了：先不发布，等开放临近时再发
       const c = Object.assign({ coolKey: 'city:' + tp.id, cityId: tp.id }, JSON.parse(JSON.stringify(tp)), { reward: tp.reward * ci });
       delete c.from; delete c.to; delete c.id;
       if (this.evaluate(c, g).ok) continue;
@@ -1360,6 +1450,7 @@
       const s = Tasks.withPlan(g, s0);
       if (this.issued['sc:' + s.id] || ym < U.ymIndex(s.from[0], s.from[1]) || ym > U.ymIndex(s.to[0], s.to[1])) continue;
       if (s.challengeOnly && g.econ.mode !== 'challenge') continue;
+      if (!Tasks.anchorsOpenBy(g, s.anchors, ym + (s.months || 48))) continue;
       const c = { type: s.type, scenario: s.id, theme: s.theme, title: s.title, desc: s.desc, tips: s.tips || [], months: s.months || 48, reward: (s.rewardMonths || 3) * gm, coolKey: 'opt:sc:' + s.id };
       if (s.type === 'combo') {
         c.parts = s.parts;

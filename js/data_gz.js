@@ -19,6 +19,26 @@
   const OLD_LIWAN = ['沙面街道', '多宝街道', '龙津街道', '金花街道', '彩虹街道', '西村街道', '华林街道', '岭南街道', '逢源街道', '昌华街道', '南源街道', '站前街道', '桥中街道'];
 
   CM.DATA = {
+    // 城市特色（traits.js，规则见《地图设计与城市特色机制.md》）。新条目加在末尾，已触发事件按序号记录
+    traits: [
+      { use: 'foresight', level: 'mid', star: true, icon: 'building', label: '珠江新城提前布局', text: '金融中心动工前就通地铁，能得到开发商出资，片区也长得更快',
+        id: 'gz-zjxc', at: 'ifc', ym: [2005, 12], before: 2003, r: 7, region: 'cbd', title: '广州国际金融中心动工',
+        hit: '珠江新城的第一座超高层动工，早已通车的{st}站成了开发商最看重的条件。写字楼和剧院沿着地铁一路铺开。',
+        miss: '珠江新城的第一座超高层动工，这里还没有地铁。岗位很快就要来了，你得赶工把线路修到这里。',
+        why: '珠江新城 1993 年开始规划，进入 2000 年代后核心区才集中建设，广州国际金融中心 2005 年动工。' },
+      { use: 'megaEvent', level: 'mid', star: true, icon: 'flag', label: '2010 亚运会', text: '获得主办权后拨款增加，六年内要把地铁修到亚运场馆和广州塔',
+        bid: { y: 2004, m: 7, title: '广州获得 2010 年亚运会主办权', desc: '亚奥理事会在多哈确定广州为 2010 年亚运会主办城市，全市的交通建设开始提速。' }, open: [2010, 11],
+        why: '2004 年 7 月 1 日，亚奥理事会确定广州主办 2010 年亚运会；亚运前广州地铁进入集中开通期。' },
+      { use: 'guard', level: 'mid', label: '老城古建', guards: ['zsjnt', 'cjc', 'gxs', 'sm'], why: '中山纪念堂、陈家祠、光孝寺和沙面建筑群都是全国重点文物保护单位，老城的地铁要在附近小心绕行。' },
+      { use: 'transition', level: 'light', label: '芳村：广钢外迁', region: 'fangcun',
+        close: { y: 2013, m: 6, title: '广钢白鹤洞基地停产', desc: '2013 年前后，白鹤洞的广州钢铁基地停产外迁，周边开始转向住宅和商业开发。' }, replan: [{ year: 2014, region: 'fangcun', plan: 'mix' }],
+        why: '广钢白鹤洞基地 2010 年代初停产外迁，旧厂区改作城市开发用地。' },
+      { use: 'carLimit', level: 'light', label: '2012 年牌照调控', on: { y: 2012, m: 7, title: '广州实行中小客车指标调控', desc: '7 月起，广州新增中小客车要通过摇号或竞价取得指标。' }, why: '广州自 2012 年 7 月起实行中小客车总量调控。' },
+      { use: 'crossing', label: '珠江', why: '珠江把老城与海珠分开，越江段的造价明显更高。' },
+      { use: 'scenic', label: '白云山', why: '白云山风景区与火炉山森林公园不能开发。' },
+      { use: 'hubMove', label: '旧白云机场', why: '2004 年 8 月新白云机场启用，旧机场关闭后改建白云新城。' },
+      { use: 'finance', flavor: 'cn' },
+    ],
     city: '广州',
     // 发展阶段：[截止年份（不含）, 名称]；史料截止年份（CFG.growth.histEnd）前的最后阶段为 stageLast
     stages: [[1997, '起步期（无地铁时代）'], [2005, '扩张期'], [2011, '亚运建设期']], stageLast: '网络化时期',
@@ -215,7 +235,7 @@
       { id: 'citic', name: '中信广场', x: 48.89, y: 31.12, w: 230, d: 230, rot: 0, year: 1997, kind: 'skyscraper', h: 391, style: 'citic' },
       { id: 'xhyyt', name: '星海音乐厅', x: 41.06, y: 46.30, w: 122, d: 92, rot: -30, year: 1998, kind: 'concert' },
       { id: 'gdmsg', name: '广东美术馆', x: 41.73, y: 46.22, w: 130, d: 98, rot: -46, year: 1997, kind: 'gallery' },
-      { id: 'pzhz', name: '琶洲会展中心', x: 63.12, y: 49.37, w: 1550, d: 860, rot: 10, year: 2003, kind: 'expo' },
+      { id: 'pzhz', name: '琶洲会展中心', x: 63.5, y: 49.15, w: 1500, d: 480, rot: 3, year: 2003, kind: 'expo' },
       { id: 'bycc', name: '白云国际会议中心', x: 30.49, y: 10.73, w: 400, d: 250, rot: -60, year: 2006, kind: 'conference' },
       { id: 'gzt', name: '广州塔', x: 48.80, y: 46.95, w: 120, d: 100, year: 2010, kind: 'tvtower', h: 600 },
       { id: 'ifc', name: '广州国际金融中心', x: 48.28, y: 41.98, w: 70, d: 66, year: 2010, kind: 'skyscraper', h: 440, style: 'west' },

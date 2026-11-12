@@ -87,6 +87,7 @@
       if ((c & 4095) === 4095) yield;
       const L = this.lu[c];
       if (L === LU.WATER || L === LU.HILL || L === LU.PARK || L === LU.AIRPORT) continue;
+      if (this.regions[this.region[c]].empty) continue;   // empty（v2.8）：境外土地和不开放的管制用地，没有人口和岗位，也不吸引出行
       const i = c % W, j = (c / W) | 0, cx = i + 0.5, cy = j + 0.5;
       let p = D.rural.pop, jb = D.rural.jobs;
       for (const ct of D.centers) {
@@ -150,11 +151,27 @@
 
   // 规划用地：按所在区域的用地配方随机选取，并用低频噪声让同类用地成片（确定性，填海后的新土地复用）
   // 历史城区（v2.6，机制见 traits.js）：区域的 heritage 标记（1，只能走地下、造价更高）与地标周围的地下保护范围（D.heritage.guards，2，更贵）。
-  // 只由地图数据决定，不进存档
+  // 只由地图数据决定，不进存档。
+  // 水面过半的格：整片水面（四邻连通）都在历史城区区域内的湖泊算历史城区（如北京旧城的什刹海、北海、中南海，现实中同属旧城保护范围，
+  // 以前排除在外，选址时湖面成了一块块虚线方框的“漏洞”）；流出历史城区的江河不算（如泰晤士河，可以架桥跨越）
   City.prototype.buildHeritage = function () {
     this.heritage = null; const H = D.heritage; if (!H) return;
-    const W = this.W, a = new Uint8Array(this.N), R = this.regions;
-    for (let c = 0; c < this.N; c++) if (R[this.region[c]].heritage && this.landMax[c] >= 0.5) a[c] = 1;
+    const W = this.W, HH = this.H, a = new Uint8Array(this.N), R = this.regions, lm = this.landMax;
+    for (let c = 0; c < this.N; c++) if (R[this.region[c]].heritage && lm[c] >= 0.5) a[c] = 1;
+    const seen = new Uint8Array(this.N);
+    for (let s = 0; s < this.N; s++) {
+      if (seen[s] || lm[s] >= 0.5 || !R[this.region[s]].heritage) continue;
+      const comp = [s], st = [s]; let inside = true; seen[s] = 1;
+      while (st.length) {
+        const q = st.pop(), x = q % W, y = (q / W) | 0;
+        if (!R[this.region[q]].heritage) inside = false;
+        if (x > 0 && !seen[q - 1] && lm[q - 1] < 0.5) { seen[q - 1] = 1; st.push(q - 1); comp.push(q - 1); }
+        if (x + 1 < W && !seen[q + 1] && lm[q + 1] < 0.5) { seen[q + 1] = 1; st.push(q + 1); comp.push(q + 1); }
+        if (y > 0 && !seen[q - W] && lm[q - W] < 0.5) { seen[q - W] = 1; st.push(q - W); comp.push(q - W); }
+        if (y + 1 < HH && !seen[q + W] && lm[q + W] < 0.5) { seen[q + W] = 1; st.push(q + W); comp.push(q + W); }
+      }
+      if (inside) for (const q of comp) a[q] = 1;
+    }
     this.heritageGuards = [];
     for (const g of H.guards || []) {
       const lm = D.landmarks.find(function (l) { return l.id === g.lm; }); if (!lm) continue;
@@ -204,7 +221,8 @@
     const out = [], self = this;
     (D.reclaim || []).forEach(function (r, k) {
       if (pendingOnly && r.year <= self.terrainYear) return;
-      if (!r._f) { const p = new Float32Array([].concat.apply([], r.poly)); r._f = { name: r.name, rings: [{ outer: true, p: p }], bbox: CM.Geo.bbox(p), k: k }; }
+      // holes（v2.8）：填海范围里本来就有的小岛，一开局就是陆地
+      if (!r._f) { const p = new Float32Array([].concat.apply([], r.poly)); r._f = { name: r.name, rings: [{ outer: true, p: p }].concat((r.holes || []).map(function (h) { return { outer: false, p: new Float32Array([].concat.apply([], h)) }; })), bbox: CM.Geo.bbox(p), k: k }; }
       out.push(r._f);
     });
     return out;
@@ -612,24 +630,42 @@
     if (i < 0 || j < 0 || i >= this.FW || j >= this.FH) return 0;
     return this.wmask[j * this.FW + i];
   };
+  // 窄河道（v2.7 玩家反馈）：只画成线的溪流、水渠、小河（约 12–22 m 宽），附近约 75 m 内没有湖面、河面和海。
+  // 水域栅格比这些线粗，紧挨河道的陆地也会被当成水面；地下车站可以从下面过、高架车站可以跨过去
+  City.prototype.narrowWaterAt = function (x, y) {
+    let line = false;
+    for (let r = 0; r <= 0.3001; r += 0.1) for (let a = 0; a < (r ? 12 : 1); a++) {
+      const t = a / 12 * Math.PI * 2, id = this.waterAt(x + Math.cos(t) * r, y + Math.sin(t) * r);
+      if (!id) continue;
+      if (id <= 30000 || id > 60000) return false;
+      line = true;
+    }
+    return line;
+  };
   City.prototype.crossesRiver = function (ax, ay, bx, by) {
     const L = U.dist(ax, ay, bx, by), n = Math.max(1, Math.ceil(L * this.FS));
     for (let k = 0; k <= n; k++) { const t = k / n; if (this.waterAt(ax + (bx - ax) * t, ay + (by - ay) * t)) return true; }
     return false;
   };
+  // 某处水体的名称：没有名字的水面算作本城主要河流；没有名字的小河道（只画成线）先找附近有名字的水体，找不到就叫「河道」
+  //（v2.7 玩家反馈：北京什刹海旁的无名小河被说成「永定河」）
   City.prototype.riverNameAt = function (x, y) {
     const Geo = CM.Geo;
+    let line = false;
     for (let r = 0; r <= 8; r++) {
       for (let a = 0; a < (r ? 16 : 1); a++) {
         const t = a / 16 * Math.PI * 2, id = this.waterAt(x + Math.cos(t) * r / this.FS, y + Math.sin(t) * r / this.FS);
         if (!id) continue;
         if (id > 60000) { const rc = (D.reclaim || [])[id - 60001]; return (rc && rc.sea) || D.seaName || D.riverName || '海'; }
         const f = id > 30000 ? Geo.waterLines[id - 30001] : Geo.water[id - 1];
+        // seaZones（v2.8）：同一片海面在不同水域有不同的名字
+        if (f && f.name && f.name === D.seaName) for (const z of D.seaZones || []) { let ins = false; for (let i = 0, j = z.poly.length - 1; i < z.poly.length; j = i++) { const a = z.poly[i], b = z.poly[j]; if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) ins = !ins; } if (ins) return z.name; }
         if (f && f.name) return f.name;
+        if (f && id > 30000) { line = true; continue; }
         if (f) return D.riverName || '珠江';
       }
     }
-    return D.riverName || '珠江';
+    return line ? '河道' : (D.riverName || '珠江');
   };
 
   // 地标场地：旋转矩形（米）内的格
@@ -667,7 +703,7 @@
     for (let c = 0; c < N; c++) {
       if (LF[c] < 0.5) continue;
       const k0 = reg[c], k = R[k0].scenic && host && host[c] !== 255 ? host[c] : k0, rg = R[k];
-      if (rg.scenic) continue;
+      if (rg.scenic || rg.empty || R[k0].empty) continue;
       const hub = rg.hub || (air && rg.id === 'airport');
       if (open[k] || hub) el[c] = 1;
       if (!R[k0].scenic && !hub && rg.open != null && rg.open <= y0) seed[c] = 1;
@@ -717,7 +753,8 @@
     }
     bfs(q, function (v) { return !inM(v); }, out, wr);
     const mask = new Uint8Array(N);
-    for (let c = 0; c < N; c++) if (LF[c] >= 0.5 && !inM(c) && out[c]) mask[c] = 1;
+    // lockEnclaves（v2.8）：岛屿地图四面环海，地图边缘到不了的未开放片区不算「被包围的小块」；empty 片区任何时候都不能建设
+    for (let c = 0; c < N; c++) if (LF[c] >= 0.5 && (R[reg[c]].empty || (!inM(c) && (out[c] || D.lockEnclaves)))) mask[c] = 1;
     return mask;
   };
   City.prototype.lockState = function () {
@@ -848,6 +885,12 @@
       const c = q[h], i = c % W;
       for (const nb of [i > 0 ? c - 1 : -1, i < W - 1 ? c + 1 : -1, c - W, c + W]) if (nb >= 0 && nb < N && host[nb] === 255) { host[nb] = host[c]; q.push(nb); }
     }
+    // host（v2.8）：离岛风景区指定开放状态随哪个片区（host: 片区 id），或不随任何片区、始终按风景区自己算（host: null）；不写时取最近的格
+    regions.forEach(function (rg, k) {
+      if (!rg.scenic || rg.host === undefined) return;
+      const h = rg.host ? regions.findIndex(function (r) { return r.id === rg.host; }) : -1;
+      for (let c = 0; c < N; c++) if (reg[c] === k) host[c] = h < 0 ? 255 : h;
+    });
     this.scenicHost = host;
   };
   City.prototype.activateLandmarks = function (year) {
@@ -856,7 +899,7 @@
       const lm = D.landmarks[k];
       if (this.landmarkOn[k] || lm.year > year) continue;
       const c0 = this.cellAt(lm.x, lm.y);
-      if (c0 >= 0 && this.landFrac[c0] < 0.5) continue;
+      if (c0 >= 0 && this.landFrac[c0] < 0.5 && !lm.shore) continue;   // shore（v2.8）：紧贴水边的地标，所在格按面积算是水面，也要立在真实位置
       this.landmarkOn[k] = 1; changed = true;
       this.protectLandmark(k, null);
     }
@@ -936,6 +979,17 @@
       const c = self.cellAt(p[m], p[m + 1]);
       const rg = c >= 0 ? self.regions[self.region[c]] : D.defaultRegion;
       g.year = rg.scenic || rg.open == null ? CFG.START.y : Math.max(CFG.START.y, rg.open);
+    }
+    // linkRoadYears（v2.8）：没有名称的快速路匝道跟随相连的晚通车道路，快速路还没修时匝道不先出现（连续匝道逐轮传递）
+    if (D.linkRoadYears) {
+      const touch = function (x, y, g) { const b = g.bbox; if (x < b[0] - 0.3 || x > b[2] + 0.3 || y < b[1] - 0.3 || y > b[3] + 0.3) return false; for (const p of g.ways) for (let k = 0; k + 3 < p.length; k += 2) if (U.distToSeg(x, y, p[k], p[k + 1], p[k + 2], p[k + 3]) < 0.15) return true; return false; };
+      const links = groups.filter(function (g) { return !g.sim && !g.name && g.cls === 4; });
+      for (let round = 0; round < 4; round++) {
+        const later = groups.filter(function (g) { return !g.sim && g.year > CFG.START.y && g.cls >= 3 && (g.name || round > 0); });
+        let moved = 0;
+        for (const g of links) for (const p of g.ways) for (const e of [0, p.length - 2]) for (const m of later) if (m !== g && m.year > g.year && touch(p[e], p[e + 1], m)) { g.year = m.year; moved++; }
+        if (!moved) break;
+      }
     }
     // 填海土地上的道路：不早于该处填海成陆的年份（道路有三成以上的点在填海范围内，或桥梁接到填海土地上）
     // 按平滑后的实际填海范围（reclaimGeom）判断，旧陆地上的道路不受多边形近似范围的影响
@@ -1670,7 +1724,7 @@
     // v2.3 位置校正后，旧存档里地标原址留下的场地格不再属于任何地标：恢复为规划用地，之后照常开发；
     // 地标新址的格在下一次月度更新时按年份启用并受保护
     for (let c = 0; c < N; c++) if (this.lu[c] === LU.LANDMARK && !this.protectedId[c]) this.lu[c] = this.plan[c] === LU.LANDMARK ? LU.RES : this.plan[c];
-    for (let k = 0; k < D.landmarks.length; k++) if (this.landmarkOn[k] && !this.landmarkCells(D.landmarks[k]).some((c) => this.protectedId[c] === k + 1)) this.landmarkOn[k] = 0;
+    for (let k = 0; k < D.landmarks.length; k++) if (this.landmarkOn[k] && !D.landmarks[k].shore && !this.landmarkCells(D.landmarks[k]).some((c) => this.protectedId[c] === k + 1)) this.landmarkOn[k] = 0;
     this.applyReclaim(year, true);   // 历史海岸线恢复到存档年份（用地已从存档恢复）
     this.applyReplan(year, true);
     // 同范围地形修订：填海 / 机场边界校正及武汉河渠异常宽度修复，按当前地理重新核验旧档用地。

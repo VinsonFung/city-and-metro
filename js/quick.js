@@ -6,12 +6,12 @@
   const U = CM.U, h = U.h, M = CM.Metro, CFG = CM.CFG, AX = CM.Accessibility;
   const ic = function (n, s) { return CM.icon(n, s); };
   const snd = function (n) { if (CM.Sound) CM.Sound.play(n); };
-  let ui = null, bar = null, pop = null, menu = null, cur = null, at = null, key = '';
+  let ui = null, bar = null, pop = null, menu = null, cur = null, at = null, key = '', overlayKey = '';
   const Q = {};
   CM.Quick = Q;
   const game = function () { return CM.game; };
   const net = function () { const g = game(); return g.draft ? g.draft.net : g.net; };
-  const zoom = function () { return CM.Settings.get('uiScale') || 1; };
+  const zoom = function () { return CM.Settings.scale(); };
   function bounds() {
     const v = ui && ui.viewport ? ui.viewport() : { left: 0, top: 0, right: innerWidth, bottom: innerHeight };
     const b = { left: v.left + 8, top: v.top + 8, right: v.right - 8, bottom: v.bottom - 8 };
@@ -36,7 +36,8 @@
     bar = h('div', { id: 'objBar', class: 'glass hidden', role: 'toolbar' });
     document.getElementById('app').appendChild(bar);
     window.addEventListener('pointerdown', function (e) {
-      if (pop && !pop.contains(e.target) && !bar.contains(e.target)) closePop();
+      const inDd = e.target && e.target.closest && e.target.closest('.dd-pop');
+      if (pop && !pop.contains(e.target) && !bar.contains(e.target) && !inDd) closePop();
       if (menu && !menu.contains(e.target)) closeMenu();
     }, true);
   };
@@ -126,6 +127,14 @@
     if (!bar) return;
     const g = game(), T = ui.tools;
     if (!g || ui.blocking() || (CM.Follow && CM.Follow.active())) { Q.hide(); return; }
+    // 横竖屏、软键盘、界面缩放或内容换行后只重排位置，不重建正在编辑的控件。
+    if (pop || menu) {
+      const b = bounds(), k = [b.left, b.top, b.right, b.bottom, zoom(), pop && pop.offsetWidth, pop && pop.offsetHeight, menu && menu.offsetWidth, menu && menu.offsetHeight].join('|');
+      if (k !== overlayKey) {
+        overlayKey = k;
+        for (const el of [pop, menu]) if (el) { const r = el.getBoundingClientRect(); placeOverlay(el, r.left, r.top); }
+      }
+    } else overlayKey = '';
     if (!cur) return;
     if (T.tool !== 'select' || !ui.selection || ui.selection.id !== cur.id) { Q.hide(); return; }
     render(); if (!cur) return;
@@ -274,8 +283,9 @@
       const mids = tp.stations.filter(function (sid) { return tp.adj.get(sid).length >= 2; });
       if (mids.length) {
         const order = tp.routes.length ? tp.routes[0].st.concat(tp.routes.slice(1).map(function (r) { return r.st; }).reduce(function (a, b) { return a.concat(b); }, [])) : mids;
-        const seen = new Set(), sel = h('select', { 'aria-label': '拆开的车站' });
-        for (const sid of order) if (mids.indexOf(sid) >= 0 && !seen.has(sid)) { seen.add(sid); sel.appendChild(h('option', { value: sid }, n.stations[sid].name)); }
+        const seen = new Set(), items = [];
+        for (const sid of order) if (mids.indexOf(sid) >= 0 && !seen.has(sid)) { seen.add(sid); items.push([sid, n.stations[sid].name]); }
+        const sel = CM.UI.dropdown({ label: '拆开的车站', items: items, cls: 'grow' });
         body.appendChild(h('div', { class: 'qpop-k' }, '在车站拆开成两条线'));
         body.appendChild(h('div', { class: 'row' }, sel, h('button', { class: 'btn sm', onclick: function () { doSplit(sel.value, lid); } }, ic('scissors', 14), '拆开')));
       }

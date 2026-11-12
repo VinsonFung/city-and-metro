@@ -181,6 +181,8 @@
       if (d < bd) { bd = d; best = p; }
     }
     if (!best) return null;
+    // 城市连接的接驳口没到开放年份前不能接
+    if (best.f.ext.gate && this.game().year() < best.f.open) return null;
     const P = CM.Fac.portal(best.f);
     let sid = null;
     for (const id in net.stations) if (CM.Fac.isPortalStation(net.stations[id], best.f)) { sid = id; break; }
@@ -201,7 +203,8 @@
       if (!pp.sid) { this.cursor.x = pp.x; this.cursor.y = pp.y; }
       const nm = CM.Fac.shortName(pp.f), lk = CM.Fac.extLink(pp.f, g);
       const sname = pp.sid ? this.net().stations[pp.sid].name : '';
-      const tip = pp.sid ? { title: this.tool === 'line' ? (this.chain ? '连接到「' + sname + '」' : '从「' + sname + '」开始') : '接驳口车站「' + sname + '」', lines: ['在地图边缘接通' + nm] }
+      const tip = pp.sid ? { title: this.tool === 'line' ? (this.chain ? '连接到「' + sname + '」' : '从「' + sname + '」开始') : '接驳口车站「' + sname + '」', lines: [pp.f.ext.gate ? nm + CM.Fac.extText(pp.f) : '在地图边缘接通' + nm] }
+        : pp.f.ext.gate ? { title: '接通「' + nm + '」', lines: [CM.Fac.extText(pp.f) + '，点击在接驳口' + (this.tool === 'line' && this.chain ? '建站并连线' : '建站'), CM.DATA.cityLink ? '接通后过境旅客可以乘地铁，还能切换到对岸、看到对岸的线网' : '接通后过境旅客可以乘地铁'] }
         : { title: '在地图边缘接通「' + nm + '」', lines: [CM.Fac.extText(pp.f) + '，点击在接驳口' + (this.tool === 'line' && this.chain ? '建站并连线' : '建站'), '接驳口车站直接服务' + nm + '的全部接驳出行，不受区域开放限制', lk && !lk.portal ? '（附近的「' + lk.st.name + '」已在步行范围内接通）' : null].filter(Boolean) };
       this.hint = tip; this.ui.setTooltip(tip, sx, sy);
       R.cv.style.cursor = 'var(--cur-pointer)';
@@ -268,7 +271,7 @@
       tip = this.measureTip();
     }
     if (this.tool === 'select' && !st) { const pin = R.pickTaskPin(sx, sy); if (pin) tip = { title: pin.title, lines: [pin.name, '点击查看任务'].filter(Boolean) }; }
-    if (!tip && !st && !seg && this.tool === 'select') tip = this.lockTip(w);
+    if (!tip && !st && !seg && this.tool === 'select') tip = CM.CityLink.hoverTip(g, w.x, w.y) || this.lockTip(w);
     this.hint = tip;
     this.ui.setTooltip(tip, sx, sy);
     R.cv.style.cursor = 'var(--cur-' + (this.ptr && this.ptr.pan ? 'grabbing' : (st || seg ? 'pointer' : (this.tool === 'select' ? 'default' : 'crosshair'))) + ')';   // 游戏配色的指针（v2.4，见 style.css 的 --cur-*）
@@ -585,7 +588,8 @@
           else if (fid) ui.select({ kind: 'facility', id: fid });
           else {
             const c = g.city.cellAt(w.x, w.y);
-            if (c >= 0 && this.ui.layer !== 'none') ui.select({ kind: 'zone', id: g.city.zoneOf(c) });
+            if (CM.CityLink.at(g, w.x, w.y)) CM.CityLink.offer(ui);   // 已接通时点对岸城市的范围进入对岸
+            else if (c >= 0 && this.ui.layer !== 'none') ui.select({ kind: 'zone', id: g.city.zoneOf(c) });
             else ui.select(null);
           }
         }
@@ -706,7 +710,7 @@
       return { lid: lid, to: to, created: created, host: host && net.lines[host.line] ? net.lines[host.line].name : null, levels: levels };
     });
     if (r.error) { ui.toast(r.error, 'bad'); return; }
-    if (r.host) ui.toast('与 ' + r.host + ' 共线运营：沿用这两站之间的既有轨道，不另收建设费（需要单独建轨道时，先 Shift+点击加一个转弯点）', 'info');
+    if (r.host) ui.toast('与 ' + r.host + ' 共线运营：沿用既有轨道，免建设费', 'info');
     if (r.levels) for (const t of r.levels) ui.toast(t, 'info');   // 各线路站台层可在车站详情中调整
     if (r.created) this.newLineColor = null;
     sfx('lay');

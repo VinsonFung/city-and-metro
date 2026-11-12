@@ -207,6 +207,7 @@
       }
     },
     done: function (slot, m) {
+      if (!m.stale) this.stats[m.kernel ? 'wasm' : 'js']++;
       slot.n = Math.max(0, slot.n - 1);
       const req = this.reqs.get(m.req);
       let fin = false;
@@ -776,7 +777,16 @@
   CM.Model = Model;
 
   // epoch：求解流程被放弃（重新开始）时递增，工作线程队列中属于旧流程的计算块不再发出
-  Model.prototype.wake = function (cycles) { this.solveLimit = cycles || 2; this.settled = false; this.gen = null; this.epoch = (this.epoch || 0) + 1; };
+  Model.prototype.wake = function (cycles) {
+    // 基础票价或物价变化后，附加费折合分钟也会变化；更新已有口岸入口，不重跑步行寻路。
+    const acc = this.net && this.net.acc, fn = this.fn;
+    if (acc && fn && this.crossFee) for (const id of Object.keys(this.crossFee)) {
+      const k = fn.ids.indexOf(id), f = fn.list[k], entries = acc.zl[this.Z + k];
+      if (!f || !f.ext || !f.ext.gate || !entries) continue;
+      for (const e of entries) if (CM.Fac.isPortalStation(this.net.C.stations[e.s], f)) e.w = 1 + this.crossMin(f);
+    }
+    this.solveLimit = cycles || 2; this.settled = false; this.gen = null; this.epoch = (this.epoch || 0) + 1;
+  };
   Model.prototype.setYear = function (y) { if (this.year !== y) this.wake(1); this.year = y; this.capF = U.interp(CFG.road.capGrowth, y); };
   // 当天的日类型：实时画面（车流、客流、拥堵）与当天的票款使用对应的求解结果；两套结果都在后台保持收敛
   Model.prototype.setDayType = function (dt) {
@@ -818,6 +828,12 @@
     if (!S) return fare / vot * 60;
     if (r >= 1) return mRef + S * L + (c.fareOver || 0) * L * L;
     return Math.max(mRef + S * L, mRef * r);
+  };
+  // 跨境附加费（v2.7）折合的步行分钟：按票价折合分钟的差额，除以步行时间权重后加到接驳口的进站步行上
+  Model.prototype.crossMin = function (f) {
+    const fee = this.crossFee && this.crossFee[f.id]; if (!(fee > 0)) return 0;
+    const vot = U.interp(CFG.choice.vot, this.year), ref = Model.fareRef(this.year), base = this.fare ? this.fare.flat : ref;
+    return Math.max(0, Model.fareMinutes(base + fee, ref, vot) - Model.fareMinutes(base, ref, vot)) / (CFG.choice.walkW || 1);
   };
   // 某乘距的票价折合分钟：长途的参考票价按开局的里程阶梯放大（统一票价的地图不放大）
   Model.fareMinAt = function (f, km, y, vot) {
@@ -1256,15 +1272,28 @@
       }
       // 按出入口（场地边缘）计：能步行到达边缘的车站服务全部到访者，步行时间 = 到边缘 + 场内步行
       let em = eMap.get(k);
-      // 步行网络没有通到场地（填海地、无街道的园区）时：直线距离 × 1.35 的绕行系数，不跨越水面，且在步行上限的八成以内
-      if ((!em || !em.size) && !fn.list[k].ext) {
-        const f = fn.list[k];
+      // 地图外设施的接驳点、接驳口附近的车站：与 Fac.extLink 同一口径，周围没有路也能接驳，路程按直线 × 1.35 计
+      const fExt = fn.list[k];
+      if (fExt.ext && !fExt.ext.gate) for (let s = 0; s < N; s++) {
+        if ((C.serviced && !C.serviced[s]) || (em && em.has(s))) continue;
+        const dc = CM.Fac.extNear(fExt, C.stations[s]);
+        if (dc < 0) continue;
+        if (!em) { em = new Map(); eMap.set(k, em); }
+        em.set(s, Math.max(60, dc * CFG.CELL_M * 1.35));
+      }
+      // 步行网络没有通到场地（填海地、无街道的园区）时：直线距离 × 1.35 的绕行系数，不跨越水面，且在步行上限的八成以内。
+      // 车站自己周围没有路时同样按这条算（玩家反馈：新站就在设施旁边，却因为附近没有人行道接不上；别的车站能走到时也不例外）
+      if (!fExt.ext) {
+        const f = fExt, none = !em || !em.size;
         for (let s = 0; s < N; s++) {
-          if (C.serviced && !C.serviced[s]) continue;
+          if ((C.serviced && !C.serviced[s]) || (em && em.has(s)) || (!none && accessible[s])) continue;
           const st = C.stations[s], d = U.dist(st.x, st.y, f.x, f.y) * CFG.CELL_M * 1.35 - Math.sqrt(fn.cells[k].length) * CFG.CELL_M * 0.5;
           if (d > maxM * 0.8) continue;
+          // 水面只判断到场地最近的一格：公园中央有湖、景点挨着水边时，从岸上进场不算跨水
+          let ex = f.x, ey = f.y, en = Infinity;
+          for (const c of fn.cells[k]) { const cx = c % city.W + 0.5, cy = ((c / city.W) | 0) + 0.5, q = U.dist(st.x, st.y, cx, cy); if (q < en) { en = q; ex = cx; ey = cy; } }
           let wet = false;
-          for (let t = 0.1; t < 0.95 && !wet; t += 0.1) if (city.waterDistAt(st.x + (f.x - st.x) * t, st.y + (f.y - st.y) * t) < 0) wet = true;
+          for (let t = 0.1; t < 0.95 && !wet; t += 0.1) if (city.waterDistAt(st.x + (ex - st.x) * t, st.y + (ey - st.y) * t) < 0) wet = true;
           if (wet) continue;
           if (!em) { em = new Map(); eMap.set(k, em); }
           em.set(s, Math.max(60, d));
@@ -1280,9 +1309,10 @@
     // 地图外设施的接驳口（v2.1）：在地图边缘接驳口建成并接入线路的车站，直接服务该设施的全部接驳出行（步行约 1 分钟）
     if (fn && CM.Fac) for (let k = 0; k < F; k++) {
       const f = fn.list[k]; if (!f.ext) continue;
+      if (f.ext.gate) { zCov[Z + k] = 0; zWalk[Z + k] = 0; zl[Z + k] = null; }
       for (let s = 0; s < N; s++) {
         if ((C.serviced && !C.serviced[s]) || !CM.Fac.isPortalStation(C.stations[s], f)) continue;
-        zCov[Z + k] = 1; zWalk[Z + k] = 1; zl[Z + k] = [{ s: s, w: 1, share: 1 }];
+        zCov[Z + k] = 1; zWalk[Z + k] = 1; zl[Z + k] = [{ s: s, w: 1 + this.crossMin(f), share: 1 }];
         break;
       }
     }
@@ -1459,28 +1489,36 @@
     const N = net.N, nn = net.nNodes, nE = net.nE;
     let key=skimKeys.get(net);if(key===undefined){key=++skimSerial;skimKeys.set(net,key);}
     let work = store.work;
-    if (!work || work.cost.length !== nE || work.dist.length !== nn) { store.valid=false; work = store.work = { cost: new Float32Array(nE), tAct: new Float32Array(nE), dist: new Float64Array(nn), dtm: new Float32Array(nn), dkm: new Float32Array(nn) }; }
-    const cost = work.cost, tAct = work.tAct;
+    if (!work || work.cost.length !== nE || work.dist.length !== nn || work.open.length !== N) { store.valid=false; work = store.work = { cost: new Float32Array(nE), tAct: new Float32Array(nE), dist: new Float64Array(nn), dtm: new Float32Array(nn), dkm: new Float32Array(nn), open: new Uint8Array(N) }; }
+    const cost = work.cost, tAct = work.tAct, open = work.open;
+    // 本时段没有列车的路线不能乘坐（代价 INF，最短路走不通，不是长时间候车）：按各方向的频率判断。环线只停一个方向时，停的方向不能乘车，另一个方向照常；
+    // 没有任何路线开行的车站这一时段关站，不能进出，也不能借站外换乘穿过
+    open.fill(0);
+    for (let r = 0; r < net.R; r++) if (Model.boardFreq(P, net, r) > 0) for (const s of net.C.routes[r].stIdx) open[s] = 1;
     let same=store.valid&&store.skimKey===key&&store.transferPen===prm.tpen;store.valid=false;
     for (let e = 0; e < nE; e++) {
       const before=cost[e],beforeT=tAct[e];cost[e]=0;tAct[e]=0;
-      const ty = net.eType[e];
+      const ty = net.eType[e], r = net.eRoute[e];
       if (ty === 0) {
-        let fr = P.freq[net.eRoute[e]];
-        const stopped = !(fr > 0), shareL = net.boardShare && !stopped ? net.boardShare.get(e) : null;
-        if (shareL) for (const o of shareL) fr += P.freq[o];
-        const f = Math.max(0.5, fr);
-        const w = 60 / (2 * f);
-        cost[e] = prm.waitW * w + prm.tpen + P.stDelay[net.eSt[e]];
-        if (stopped && net.isSvc[net.eRoute[e]]) cost[e] = 1e5;   // 加开的交路没有投入列车时不能上车（不算长时间候车）
-        tAct[e] = w + P.stDelay[net.eSt[e]] * 0.5;
-        if (net.eT0[e] > 0) { cost[e] += prm.walkW * net.eT0[e]; tAct[e] += net.eT0[e]; }   // 天地换乘的垂直通道
+        let fr = Model.boardFreq(P, net, r);
+        if (fr > 0) {
+          const shareL = net.boardShare ? net.boardShare.get(e) : null;
+          if (shareL) for (const o of shareL) fr += Model.boardFreq(P, net, o);
+          const f = Math.max(0.5, fr);
+          const w = 60 / (2 * f);
+          cost[e] = prm.waitW * w + prm.tpen + P.stDelay[net.eSt[e]];
+          tAct[e] = w + P.stDelay[net.eSt[e]] * 0.5;
+          if (net.eT0[e] > 0) { cost[e] += prm.walkW * net.eT0[e]; tAct[e] += net.eT0[e]; }   // 天地换乘的垂直通道
+        } else cost[e] = INF;
       } else if (ty === 1) {
-        if (net.eT0[e] > 0) { cost[e] = prm.walkW * net.eT0[e]; tAct[e] = net.eT0[e]; }
+        if (!(Model.boardFreq(P, net, r) > 0)) cost[e] = INF;
+        else if (net.eT0[e] > 0) { cost[e] = prm.walkW * net.eT0[e]; tAct[e] = net.eT0[e]; }
       } else if (ty === 2) {
-        cost[e] = net.eT0[e] * P.crowd[e]; tAct[e] = net.eT0[e];
+        if (Model.dirFreq(P, net, r, net.eDir[e]) > 0) { cost[e] = net.eT0[e] * P.crowd[e]; tAct[e] = net.eT0[e]; }
+        else cost[e] = INF;
       } else if (ty === 3) {
-        cost[e] = prm.walkW * net.eT0[e] + prm.opn; tAct[e] = net.eT0[e];
+        if (open[net.eFrom[e]] && open[net.eTo[e]]) { cost[e] = prm.walkW * net.eT0[e] + prm.opn; tAct[e] = net.eT0[e]; }
+        else cost[e] = INF;
       }
       if(before!==cost[e]||beforeT!==tAct[e])same=false;
     }
@@ -1640,6 +1678,10 @@
         }
       }
       const lam = opts.metroLam || 0.5;
+      // 没有列车的路线和关闭的车站本轮起就没有客流：不参与平滑，否则旧客流逐轮减半，稳定后每月只迭代一轮，要好几个月才清零
+      const blocked = store.work.cost, open = store.work.open;
+      for (let e = 0; e < nE; e++) if (blocked[e] >= INF) P.load[e] = 0;
+      for (let s = 0; s < N; s++) if (!open[s]) P.stIn[s] = P.stOut[s] = 0;
       // 平滑只用来稳定客流在各站、各区间的分布，总量取本轮结果；否则车站与断面客流总比实际地铁出行偏低（开通时约 6%，之后每月只迭代一轮，客流增长时一直追不上）
       let rawIn = 0, oldIn = 0;
       for (let s = 0; s < N; s++) { rawIn += stIn[s]; oldIn += P.stIn[s]; }
@@ -2100,6 +2142,14 @@
   Model.prototype.capOf = function (r, net) { net = net || this.net; const pl = this.fleetOf(net), fp = pl && pl[r]; return fp ? fp.cap : (net && net.C.routes[r] ? net.C.routes[r].cap : 1); };
   // 区间 q（rideEdge 下标：偶数正向、奇数反向）的发车频率
   Model.dirFreq = function (P, net, r, q) { const rt = net.C.routes[r]; return P.freqDir && P.freqDir.length === 2 * net.R ? P.freqDir[2 * r + (rt.loop ? (q & 1) : 0)] : P.freq[r]; };
+  // 路线的候车频率（0 表示本时段没有列车）。环线两个方向共用一个上车环节，P.freq 是两向平均；只开一个方向时按在跑的方向算，不被停运方向拉低一半
+  Model.boardFreq = function (P, net, r) {
+    if (!net.C.routes[r].loop || !P.freqDir || P.freqDir.length !== 2 * net.R) return P.freq[r];
+    const a = P.freqDir[2 * r], b = P.freqDir[2 * r + 1];
+    return a > 0 && b > 0 ? P.freq[r] : Math.max(a, b);
+  };
+  // 区间满载率（画面用）：没有列车运行的区间没有运力，不算满载
+  Model.sectionLF = function (load, f, cap) { const c = f * cap; return c >= 1 ? (load || 0) / c : 0; };
   // 车队变化（购买、调拨、出售、手动设定）后立即按新的列车数重算各时段频率与运营费用，不等下个月的交通求解；
   // 所需频率（needDir）沿用上次求解结果，客流分配在下次求解时随之调整
   Model.prototype.applyFleet = function () {
@@ -2108,19 +2158,23 @@
     const sets = [this.ctxs.wd.per, this.ctxs.we.per]; if (this.results) sets.push(this.results.wd.per, this.results.we.per);
     for (const per of sets) for (let p = 0; p < per.length; p++) {
       const P = per[p]; if (!P || !P.freq || P.freq.length !== net.R || !P.freqDir || P.freqDir.length !== 2 * net.R) continue;
+      let flipped = false;
       for (let r = 0; r < net.R; r++) {
         const rt = net.C.routes[r], fp = plan[r]; if (!fp) continue;
         const per1 = 3600 / Math.max(60, rt.cycleSec), nd = rt.loop ? 2 : 1;
         for (let d = 0; d < nd; d++) {
           const k = 2 * r + d, f = fp.manual ? Math.min(mc.fMax, Math.min(fp.manual[d][p], fp.avail[d]) * per1) : Math.min(P.needDir[k] || P.freqDir[k] || Model.serviceFloor(rt, p), mc.fMax, fp.avail[d] * per1);
+          if ((P.freqDir[k] > 0) !== (f > 0)) flipped = true;
           P.freqDir[k] = f; if (nd === 1) P.freqDir[k + 1] = f;
         }
         P.freq[r] = nd === 2 ? (P.freqDir[2 * r] + P.freqDir[2 * r + 1]) / 2 : P.freqDir[2 * r];
       }
+      // 有路线在这一时段开行或停运：可走的线网变了，旧的收敛状态作废，下面的后台求解要重新分配这一时段的客流（只调整列车数时不重算）
+      if (flipped && P.solveSignature) { P.solveSteps = 0; P.quiet = 0; P.stable = false; }
     }
     if (!this.solving && !this.refreshing && this.ctxs.wd.per.every(function (P) { return P.stats; })) this.computeDaily();
     this.version++;
-    if (this.settled) this.wake(1);   // 后台再求解一轮，让客流随新的发车间隔重新分配
+    if (this.settled) this.wake(1);   // 后台求解一轮（只处理上面作废了收敛状态的时段），让客流离开停运的路线或回到恢复开行的路线
   };
   Model.prototype.stFlowAt = function (s, W, kind) {
     const P0 = this.live.per[W.p0], P1 = this.live.per[W.p1];

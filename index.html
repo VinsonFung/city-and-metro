@@ -6,7 +6,7 @@
   <title>城市与地铁</title>
   <meta name="author" content="VinsonFung">
   <meta name="copyright" content="Copyright © 2026 VinsonFung. Non-commercial use only. All rights reserved.">
-  <meta name="description" content="单人地铁规划与城市经营游戏：广州、杭州、香港、台北、东京、上海、武汉、巴黎、北京与青湾教程，支持简体中文、繁体中文和英语。">
+  <meta name="description" content="单人地铁规划与城市经营游戏：十一座真实城市，包括广州、香港、北京、东京、伦敦和深圳，以及青湾教程；支持简体中文、繁体中文和英语，桌面与手机均可游玩。">
   <meta name="theme-color" content="#eaf1f7">
   <link rel="icon" type="image/png" href="img/favicon.png">
   <script>
@@ -16,7 +16,9 @@
       try { s = JSON.parse(localStorage.getItem('cm1.settings') || 'null'); t = (s && s.theme) || localStorage.getItem('cm1.theme') || 'auto'; } catch (e) {}
       if (t !== 'light' && t !== 'dark') t = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
       document.documentElement.setAttribute('data-theme', t);
-      if (s && s.uiScale) document.documentElement.style.setProperty('--uiz', String(s.uiScale));
+      var z = s && Number(s.uiScale) > 0 && isFinite(Number(s.uiScale)) ? Number(s.uiScale) : 1;
+      if (window.matchMedia && window.matchMedia('(max-width: 760px), (max-width: 1024px) and (max-height: 520px) and (pointer: coarse)').matches) z = Math.max(0.85, z * 0.9);
+      document.documentElement.style.setProperty('--uiz', String(z));
     })();
   </script>
   <link rel="stylesheet" href="css/style.css">
@@ -54,6 +56,11 @@
   <script src="js/data_sh.js"></script>
   <script src="js/geo_bj.js"></script>
   <script src="js/data_bj.js"></script>
+  <script src="js/geo_ld.js"></script>
+  <script src="js/data_ld.js"></script>
+  <script src="js/geo_sz.js"></script>
+  <script src="js/data_sz.js"></script>
+  <script src="js/traits.js"></script>
   <script src="js/maps.js"></script>
   <script src="js/data_eras.js"></script>
   <script src="js/facility.js"></script>
@@ -65,6 +72,7 @@
   <script src="js/economy.js"></script>
   <script src="js/taskplans.js"></script>
   <script src="js/macro.js"></script>
+  <script src="js/citylink.js"></script>
   <script src="js/game.js"></script>
   <script src="js/milestones.js"></script>
   <script src="js/sim-stamp.js"></script>
@@ -92,7 +100,10 @@
   <script src="js/voices.js"></script>
   <script src="js/opsapp.js"></script>
   <script src="js/stats.js"></script>
+  <script src="js/netlayout.js"></script>
   <script src="js/netmap.js"></script>
+  <script src="js/netreplay.js"></script>
+  <script src="js/review.js"></script>
   <script src="js/follow.js"></script>
   <script src="js/tutorial.js"></script>
   <script src="js/quick.js"></script>

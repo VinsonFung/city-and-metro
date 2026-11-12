@@ -10,8 +10,8 @@ for(const [,src]of(await readFile(new URL('index.html',root),'utf8')).matchAll(/
 const C=c.CM,M=C.Metro,copy=x=>JSON.parse(JSON.stringify(x));
 C.UI=function(){};for(const name of ['settings','corp','fleet','opsapp'])await load('js/'+name+'.js');
 const F=C.Fleet;
-assert.equal(C.CFG.GAME_VERSION,'2.5.1');assert.equal(C.CFG.RULES_REVISION,7);
-assert.equal(C.MAP_ORDER.length,10);assert.equal(F.MODELS.length,43);assert.ok(!C.TaskPlans.ld);
+assert.equal(C.CFG.GAME_VERSION,'2.7.0');assert.equal(C.CFG.RULES_REVISION,10);
+assert.equal(C.MAP_ORDER.length,12);assert.equal(F.MODELS.length,56);assert.ok(C.TaskPlans.ld);
 for(const map of C.MAP_ORDER)for(const y of [1900,1950,1990,2025])for(const m of F.available(map,y))assert.ok(m.from<=y&&m.to>=y&&(!m.maps||m.maps.includes(map)));
 C.useMap('tutorial');const g=C.Game.create({mode:'free',tutorial:true,seed:20000101});
 F.ensure(g);let sample;
@@ -25,7 +25,7 @@ for(let y=5;y<g.city.H-5&&!sample;y++)for(let x=5;x<g.city.W-22&&!sample;x++){
 assert.ok(sample);const {lid,ids}=sample;
 g.edit(n=>Object.assign(n,sample.n));const ev=g.draftEval();assert.ok(ev.fleetAdd.some(x=>x.buy>0));assert.equal(g.confirmDraft().ok,true);g.model.solveNow(4);F.ensure(g);
 assert.ok(g.fleet.trains.length>0);assert.ok(F.plan(g,g.model.net)[0].cap>0);
-console.log('PASS v2.5 scope, 43 city/era models and construction includes minimum fleet');
+console.log('PASS v2.5 regressions, current city/era models and construction includes minimum fleet');
 // Legacy fleet bootstrap is an asset migration, never a retroactive charge.
 const old=copy(g.serialize());delete old.fleet;old.rulesRevision=5;
 const oldFunds=old.econ.funds,oldLedger=JSON.stringify(old.econ.ledger);
@@ -120,7 +120,7 @@ console.log('PASS standard track decoration generation and terrain cache');
  T.active=[item('closed-facility','closed'),item('future-facility','future')];
  const money=g.econ.funds,mods=JSON.stringify(g.econ.mods);
  try{C.Fac.byId=id=>({id,T:{hub:true},open:id==='future'?g.year()+2:1900,close:id==='closed'?g.year()-1:null});T.monthly(g);}finally{C.Fac.byId=oldById;g.tasks=originalTasks;}
- assert.equal(T.adjusted.length,1);assert.equal(T.adjusted[0].status,'withdrawn');assert.equal(T.active.length,1);assert.equal(T.active[0].id,'future-facility');assert.equal(T.failed.length,0);assert.equal(g.econ.funds,money);assert.equal(JSON.stringify(g.econ.mods),mods);
+ assert.equal(T.done.length,1);assert.equal(T.done[0].id,'closed-facility');assert.equal(T.done[0].progress.parts[1].na,true);assert.equal(T.active.length,1);assert.equal(T.active[0].id,'future-facility');assert.equal(T.failed.length,0);assert.equal(g.econ.funds,money+100);assert.equal(JSON.stringify(g.econ.mods.slice(0,-1)),mods);assert.equal(g.econ.mods.at(-1).delta,4);
 }
 for(const m of F.MODELS){assert.ok(C.I18N_EN[m.name]);assert.ok(C.I18N_EN[m.desc]);assert.equal(F.nameOf(m),m.name);}
-console.log('PASS retired compound facilities withdraw without penalty; future facilities remain active; canonical train translations');
+console.log('PASS retired facility subgoals are waived; future facilities wait; canonical train translations');

@@ -346,7 +346,8 @@
       try { CM.agents.updatePreview(dt, preview, R); } catch (e) { console.error(e); }
     }
     // 跳月 / 跳年期间画面被推进卡片遮住、列车车辆静止：地图降频重绘，把时间留给结算
-    const jumpHold = g && g.jumping && t - lastJumpPaint < CFG.perf.jumpRenderMs;
+    const overlay = !!(g && CM.NetMap && CM.NetMap.isOpen());
+    const jumpHold = overlay || (g && g.jumping && t - lastJumpPaint < CFG.perf.jumpRenderMs);
     // 静止画面降频（v2.5 性能）：暂停、没有操作、没有待补的地图块和动画时每 6 帧才重绘一次，把 CPU 与 GPU 省下来
     const still = !jumpHold && g && isStill(g, t);
     idleN = still ? idleN + 1 : 0;

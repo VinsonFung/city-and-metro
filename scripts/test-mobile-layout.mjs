@@ -3,7 +3,7 @@ import os from 'node:os';import {fileURLToPath} from 'node:url';import fs from '
 const candidates=[process.env.CM_BROWSER,'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe','C:/Program Files/Google/Chrome/Application/chrome.exe','/usr/bin/chromium','/usr/bin/google-chrome','/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].filter(Boolean);let browser;for(const p of candidates){try{await fs.access(p);browser=p;break;}catch{}}if(!browser)throw Error('No Chromium browser found. Set CM_BROWSER to its executable path.');
 const root=path.resolve(fileURLToPath(new URL('..',import.meta.url))),tempRoot=os.tmpdir(),task=await fs.mkdtemp(path.join(tempRoot,'city-metro-mobile-')),profile=path.join(task,'profile');await fs.mkdir(profile);const output=process.env.CM_MOBILE_OUTPUT&&path.resolve(process.env.CM_MOBILE_OUTPUT);if(output)await fs.mkdir(output,{recursive:true});
 const server=http.createServer(async(req,res)=>{try{const u=new URL(req.url,'http://localhost'),f=path.resolve(root,'.'+(u.pathname==='/'?'/index.html':decodeURIComponent(u.pathname)));if(!f.startsWith(root+path.sep))throw Error('outside');const b=await fs.readFile(f);res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.json':'application/json'})[path.extname(f)]||'application/octet-stream');res.end(b);}catch{res.writeHead(404);res.end();}});await new Promise((r,j)=>server.once('error',j).listen(0,'127.0.0.1',r));
-const edge=spawn(browser,['--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check','--remote-debugging-port=0','--user-data-dir='+profile],{windowsHide:true,stdio:'ignore'}),delay=ms=>new Promise(r=>setTimeout(r,ms));let ws,send;
+const edge=spawn(browser,['--headless=new','--disable-gpu','--disable-extensions','--disable-sync','--no-first-run','--no-default-browser-check','--remote-debugging-port=0','--user-data-dir='+profile],{windowsHide:true,stdio:'ignore'}),delay=ms=>new Promise(r=>setTimeout(r,ms));let ws,send;
 try{let port;for(let i=0;i<100;i++){try{port=Number((await fs.readFile(path.join(profile,'DevToolsActivePort'),'utf8')).split('\n')[0]);break;}catch{}await delay(100);}if(!port)throw Error('No debug port');const target=await(await fetch('http://127.0.0.1:'+port+'/json/new?'+encodeURIComponent('http://127.0.0.1:'+server.address().port+'/'),{method:'PUT'})).json();ws=new WebSocket(target.webSocketDebuggerUrl);await new Promise((r,j)=>{ws.onopen=r;ws.onerror=j;});let seq=0;const waiting=new Map(),errors=[];
 ws.onclose=()=>{for(const w of waiting.values()){clearTimeout(w.timer);w.bad(Error('Browser closed'));}waiting.clear();};
 ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.id){const w=waiting.get(m.id);if(w){clearTimeout(w.timer);waiting.delete(m.id);m.error?w.bad(Error(JSON.stringify(m.error))):w.ok(m.result);}}else if(m.method==='Runtime.exceptionThrown')errors.push(m.params.exceptionDetails.exception?.description||m.params.exceptionDetails.text);else if(m.method==='Runtime.consoleAPICalled'&&m.params.type==='error')errors.push(m.params.args.map(a=>a.description||a.value).join(' '));};
@@ -22,8 +22,9 @@ async function runMobileChecks({evaluate:E,send,screenshot,delay,task,fs,path,un
  await E(`window.mobileAudit=function(selector,required){const ui=CM.ui,v=ui.viewport(),out={hits:0,bad:[]},rname=e=>e.getAttribute('data-act')||e.getAttribute('aria-label')||e.getAttribute('data-tip')||e.textContent.trim().slice(0,30);for(const e of document.querySelectorAll(selector)){if(e.disabled)continue;let visible=true;for(let p=e;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0){visible=false;break;}}const r=e.getBoundingClientRect(),must=e.matches(required||':not(*)');if(!visible||!r.width||!r.height){if(must)out.bad.push({name:rname(e),reason:'hidden'});continue;}let a={left:Math.max(r.left,v.left),top:Math.max(r.top,v.top),right:Math.min(r.right,v.right),bottom:Math.min(r.bottom,v.bottom)};for(let p=e.parentElement;p;p=p.parentElement){const s=getComputedStyle(p),b=p.getBoundingClientRect();if(/auto|scroll|hidden|clip/.test(s.overflowX)){a.left=Math.max(a.left,b.left);a.right=Math.min(a.right,b.right);}if(/auto|scroll|hidden|clip/.test(s.overflowY)){a.top=Math.max(a.top,b.top);a.bottom=Math.min(a.bottom,b.bottom);}}if(a.right-a.left<8||a.bottom-a.top<8){if(must)out.bad.push({name:rname(e),reason:'outside',r:[r.x,r.y,r.width,r.height]});continue;}if(must&&(a.right-a.left<r.width-1||a.bottom-a.top<r.height-1))out.bad.push({name:rname(e),reason:'clipped',r:[r.x,r.y,r.width,r.height],a});const n=document.elementFromPoint((a.left+a.right)/2,(a.top+a.bottom)/2);out.hits++;if(n!==e&&!e.contains(n))out.bad.push({name:rname(e),reason:'covered',point:[(a.left+a.right)/2,(a.top+a.bottom)/2],a,by:n?.closest('button,aside,nav,.ops-pop,#layerPanel')?.outerHTML.slice(0,150)||n?.tagName,r:[r.x,r.y,r.width,r.height]});}if(selector.includes('#coach')){const c=document.getElementById('coach'),t=document.getElementById('coachTip');if(c&&t&&getComputedStyle(t).visibility!=='hidden'&&getComputedStyle(t).display!=='none'){const a=c.getBoundingClientRect(),b=t.getBoundingClientRect();if(a.width&&b.width&&a.left<b.right&&a.right>b.left&&a.top<b.bottom&&a.bottom>b.top)out.bad.push({name:'tutorial hint',reason:'covers tutorial card'});}}if(selector.includes('#hudTop')){const x=ui.pills.money.v,r=x.getBoundingClientRect(),m=ui.top.querySelector('.metrics').getBoundingClientRect();if(r.width&&(x.scrollWidth>x.clientWidth+1||r.right>m.right+1||r.left<m.left-1))out.bad.push({name:'funds text',reason:'clipped',width:x.clientWidth,needed:x.scrollWidth});}if(selector.includes('#hudTop')){const sb=ui.scaleBar;if(sb&&sb.offsetWidth&&getComputedStyle(sb).opacity!=='0'&&getComputedStyle(sb).visibility!=='hidden'){const a=sb.getBoundingClientRect();for(const b of document.querySelectorAll('#toolbar,.br-dock,#hudTop,#rightPanel,#coach,#legendCard,#dock')){const st=getComputedStyle(b);if(st.display==='none'||st.visibility==='hidden'||st.opacity==='0')continue;const r=b.getBoundingClientRect();if(r.width&&r.height&&a.left<r.right-1&&a.right>r.left+1&&a.top<r.bottom-1&&a.bottom>r.top+1)out.bad.push({name:'scale bar',reason:'overlaps '+b.id});}}}return out};true`);
  const audit=async(label,sel='#hudTop button,#toolbar button,.br-dock button,#dock button',must='#toolbar button,.br-dock button')=>{let r=await E('mobileAudit('+JSON.stringify(sel)+','+JSON.stringify(must)+')');if(r.bad.length){await delay(350);r=await E('mobileAudit('+JSON.stringify(sel)+','+JSON.stringify(must)+')');}report.states++;report.hits+=r.hits;if(r.bad.length){await screenshot('failure');throw Error(label+' '+JSON.stringify(r.bad));}};
  const tap=async(exp)=>{const p=await E('(()=>{const r=('+exp+').getBoundingClientRect();const p={x:r.x+r.width/2,y:r.y+r.height/2},n=document.elementFromPoint(p.x,p.y);if(!r.width||!r.height||!(n===('+exp+')||('+exp+').contains(n)))throw Error("Touch target covered: "+('+JSON.stringify(exp)+')+" by "+n?.outerHTML.slice(0,160));return p})()');await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[p]});await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await delay(80);};
- const wait=async()=>{await E('CM.ui.layoutHud();CM.ui.measureLayout();true');await delay(180);await E('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(r))))');};
+ const wait=async()=>{await send('Page.bringToFront');await E('CM.ui.layoutHud();CM.ui.measureLayout();true');await delay(180);await E('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(r))))');};
  const sizes=[[320,568],[360,740],[375,667],[390,844],[430,932],[568,320],[667,375],[844,390]],langs=['zh-CN','zh-TW','en'];
+ await runNewsChecks({E,send,tap,wait,audit,screenshot,langs});
  if(!process.env.CM_MOBILE_FAST&&!inputOnly)for(const lang of langs)for(const scale of [.9,1,1.15]){
   for(const[w,h]of sizes){await send('Emulation.setDeviceMetricsOverride',{width:w,height:h,deviceScaleFactor:1,mobile:true});await E('CM.Settings.set("language",'+JSON.stringify(lang)+');CM.Settings.set("uiScale",'+scale+');CM.ui.closePanel(true);CM.ui.tools.setTool("select");CM.ui.toasts.replaceChildren();true');await wait();await audit([lang,scale,w,h,'base'].join('/'));report.groups.push({lang,scale,w,h});if(lang==='zh-CN'&&scale===1&&w===390)await screenshot('after-390');}
   console.log('PASS base HUD',lang,scale);
@@ -45,14 +46,14 @@ async function runMobileChecks({evaluate:E,send,screenshot,delay,task,fs,path,un
  await send('Emulation.setDeviceMetricsOverride',{width:375,height:667,deviceScaleFactor:1,mobile:true});await E('CM.Settings.set("language","en");CM.Settings.set("uiScale",1.15);for(const[k,v]of Object.entries({"--safe-top":"24px","--safe-bottom":"24px","--safe-left":"18px","--safe-right":"18px"}))document.documentElement.style.setProperty(k,v);true');await wait();await audit('safe area with enlarged UI');await screenshot('after-safe-area');
  await E('for(const k of ["--safe-top","--safe-bottom","--safe-left","--safe-right"])document.documentElement.style.removeProperty(k);CM.Settings.set("uiScale",1);true');
  // App switches and immersive restore are real pointer targets.
- await wait();for(const t of ['edit','demolish','select']){await tap('CM.ui.tbtns.'+t);if(!await E('CM.ui.tools.tool==='+JSON.stringify(t)))throw Error('Native touch did not select '+t);}for(const type of ['opsDock','satDock']){await tap('CM.ui.'+type);await delay(100);const app=type==='opsDock'?'opsApp':'voApp';if(!await E('!!CM.ui.'+app))throw Error('App did not open: '+app);await E('CM.ui.'+app+'.close(null,true);true');}
+ await wait();for(const t of ['edit','demolish','select']){await tap('CM.ui.tbtns.'+t);if(!await E('CM.ui.tools.tool==='+JSON.stringify(t)))throw Error('Native touch did not select '+t);}for(const type of ['opsDock','satDock']){await tap('CM.ui.'+type);await delay(100);const app=type==='opsDock'?'opsApp':'voApp';if(!await E('!!CM.ui.'+app))throw Error('App did not open: '+app);if(app==="opsApp"){await E('(()=>{const app=CM.ui.opsApp.el;window.modalButtons=Array.from(app.querySelectorAll("button:not([disabled]),input:not([disabled]),select:not([disabled]),a[href],[tabindex]")).filter(e=>e.getClientRects().length&&getComputedStyle(e).visibility!=="hidden");modalButtons.at(-1).focus();return true})()');await send("Input.dispatchKeyEvent",{type:"keyDown",key:"Tab",code:"Tab"});if(!await E('document.activeElement===modalButtons[0]'))throw Error("App Tab escaped into map controls");}await E('CM.ui.'+app+'.close(null,true);true');}
  await E('CM.ui.openPage("station",layoutStation,{root:true});CM.ui.rTitle.click();true');await send('Emulation.setDeviceMetricsOverride',{width:375,height:400,deviceScaleFactor:1,mobile:true});await wait();await audit('name editing with reduced viewport','#rightPanel .p-head button,#rightPanel input');if(await E('!!CM.ui.brDock.offsetHeight'))throw Error('App dock covers keyboard editing');await E('document.activeElement.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}));CM.ui.closePanel(true);true');await send('Emulation.setDeviceMetricsOverride',{width:375,height:667,deviceScaleFactor:1,mobile:true});await wait();
  await E('const tr=CM.agents.trains.find(t=>!t.dying&&t.g);if(!tr)throw Error("No train to follow");CM.Follow.start(tr);true');await wait();await audit('following controls','#followCard button');if(await E('!!CM.ui.brDock.offsetHeight'))throw Error('App dock covers train controls');await E('CM.Follow.stop(true);CM.ui.queueLayout();true');await wait();
  await E('CM.ui.toggleImmersive(true);true');await wait();await audit('immersive restore','#immExit','#immExit');if(await E('!!CM.ui.brDock.offsetHeight'))throw Error('Footer visible in immersive mode');await E('CM.ui.toggleImmersive(false);true');await wait();await audit('restored HUD');
 
  // Native input with the game's normal animation preference.
  await E('document.getElementById("mobile-test-motion").remove();CM.Settings.set("language","zh-CN");CM.ui.closePanel(true);true');await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});await wait();await delay(500);
- for(const t of ['edit','demolish','select']){await tap('CM.ui.tbtns.'+t);if(!await E('CM.ui.tools.tool==='+JSON.stringify(t)))throw Error('Animated touch failed: '+t);}await tap('CM.ui.opsDock');await until('!!CM.ui.opsApp&&!CM.ui.opsApp.el.getAnimations().some(a=>a.playState==="running")');await delay(150);await tap('document.querySelector(".mc-exit")');await delay(350);if(await E('!!CM.ui.opsApp'))throw Error('Native app exit failed');await audit('normal animation HUD');
+ for(const t of ['edit','demolish','select']){await tap('CM.ui.tbtns.'+t);if(!await E('CM.ui.tools.tool==='+JSON.stringify(t)))throw Error('Animated touch failed: '+t);}await tap('CM.ui.opsDock');await until('!!CM.ui.opsApp&&!CM.ui.opsApp.el.getAnimations().some(a=>a.playState==="running")');await delay(150);await tap('document.querySelector(".mc-exit")');await delay(350);if(await E('!!CM.ui.opsApp'))throw Error('Native app exit failed');await until('!document.querySelector(\".mc-app\")&&Number(getComputedStyle(CM.ui.opsDock).opacity)>.99',5000);await audit('normal animation HUD');
  if(!process.env.CM_MOBILE_INPUT_ONLY)await runPatchChecks({E,send,tap,wait,audit,until,delay,screenshot,report});
  // Real tutorial: long English cards scroll within the space above the footer.
  await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});await E('CM.newGame({map:"tutorial",mode:"free",tutorial:true,seed:20000101});true');await until('!CM.isLoading()&&CM.game?.tutorial');await until('!!document.querySelector("#screen:not(.hidden) .mission-card .primary")');await E('document.querySelector(".mission-card .primary").scrollIntoView({block:"center"});true');await delay(200);await tap('document.querySelector(".mission-card .primary")');await until('CM.ui.screen.classList.contains("hidden")');await E('CM.ui.toasts.replaceChildren();true');
@@ -60,6 +61,44 @@ async function runMobileChecks({evaluate:E,send,screenshot,delay,task,fs,path,un
  await E('CM.Tutorial.detach();CM.ui.closePanel(true);CM.Settings.set("uiScale",1);true');await send('Emulation.setTouchEmulationEnabled',{enabled:false});await send('Emulation.setDeviceMetricsOverride',{width:1600,height:1000,deviceScaleFactor:1,mobile:false});await wait();await audit('desktop HUD preserved');report.nativeTouch=true;report.animationSmoke=true;
  report.missing=await E('CM.I18n.missing()');if(report.missing.length)throw Error('Untranslated interface text: '+JSON.stringify(report.missing));
  await fs.writeFile(path.join(task,'report.json'),JSON.stringify(report,null,2));console.log('PASS mobile layout',JSON.stringify({groups:report.groups.length,states:report.states,hits:report.hits}));
+}
+
+async function runNewsChecks({E,send,tap,wait,audit,screenshot,langs}) {
+  const close = '.card.news > .card-head button';
+  const previous = '.news-list > .sec:nth-child(2) .sec-h';
+  for (const lang of langs) for (const [width,height] of [[320,568],[568,320]]) {
+    await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:true});
+    await E('CM.Settings.set("language",'+JSON.stringify(lang)+');CM.Settings.set("uiScale",1.15);delete CM.ui.open["news-"+CM.NEWS[1].v];CM.ui.showNews();true');
+    await wait();
+    const notice = await E(`(() => {
+      const card = document.querySelector('.card.news');
+      const latest = card.querySelector('.news-list > .sec');
+      const version = CM.NEWS[0];
+      const items = [...latest.querySelectorAll('li')];
+      const label = latest.querySelector('.news-t');
+      return {
+        date: latest.querySelector('.news-d').textContent,
+        expectedDate: version.date,
+        visibleTitle: label.scrollWidth <= label.clientWidth + 1,
+        horizontalFit: card.scrollWidth <= card.clientWidth + 1,
+        translated: items.length === 6 && items.every((item, i) => item.textContent === CM.I18n.text(version.items[i]))
+      };
+    })()`);
+    if (notice.date !== notice.expectedDate || !notice.visibleTitle || !notice.horizontalFit || !notice.translated) {
+      throw Error('Release notes '+lang+'/'+width+' '+JSON.stringify(notice));
+    }
+    await audit('news open '+lang+'/'+width,close,close);
+    await E('document.querySelector('+JSON.stringify(previous)+').scrollIntoView({block:"center"});true');
+    await wait();
+    await audit('news history '+lang+'/'+width,close+','+previous,close+','+previous);
+    await tap('document.querySelector('+JSON.stringify(previous)+')');
+    if (!await E('document.querySelector('+JSON.stringify(previous)+').closest(".sec").classList.contains("open")')) {
+      throw Error('Previous release notes did not expand');
+    }
+    if (lang === 'en') await screenshot('news-'+width);
+    await tap('document.querySelector('+JSON.stringify(close)+')');
+  }
+  console.log('PASS release notes date, three languages, scrolling, expansion and close in portrait and landscape');
 }
 
 async function runPatchChecks({E,send,tap,wait,audit,until,delay,screenshot,report}) {
@@ -78,17 +117,17 @@ async function runPatchChecks({E,send,tap,wait,audit,until,delay,screenshot,repo
     await E('CM.ui.showFleetAlloc();true');await wait();
     await E('document.querySelector("#screen .modal-actions").scrollIntoView({block:"center"});true');
     await audit('patch allocation '+lang+'/'+width,'#screen button','#screen .modal-actions button');
-    await E('CM.ui.closeScreen();CM.ui.openPage("finance","ov",{root:true});true');await wait();
+    await E('CM.ui.closeScreen();CM.ui.openOpsApp("fare");true');await wait();
     await until('!CM.ui.right.getAnimations({subtree:true}).some(a=>a.playState==="running"&&Number.isFinite(a.effect.getTiming().iterations))');
-    await E('window.patchFareSwitch=Array.from(document.querySelectorAll("#rightPanel [role=switch]")).find(b=>b.getAttribute("aria-label")===CM.I18n.text("随物价自动调价"));if(!patchFareSwitch)throw Error("Missing fare switch");patchFareSwitch.scrollIntoView({block:"center"});true');
+    await E('window.patchFareSwitch=Array.from(document.querySelectorAll(".mc-app [role=switch]")).find(b=>b.getAttribute("aria-label")===CM.I18n.text("随物价自动调价"));if(!patchFareSwitch)throw Error("Missing fare switch");patchFareSwitch.scrollIntoView({block:"center"});true');
     await wait();
     // Traffic publication can redraw an open finance page; scroll the current control after its layout settles.
-    await E('window.patchFareSwitch=document.querySelector("#rightPanel [role=switch]");patchFareSwitch.scrollIntoView({block:"center"});true');
-    await delay(150);await audit('patch fare switch '+lang+'/'+width,'#rightPanel button[role=switch]','#rightPanel button[role=switch]');
+    await E('window.patchFareSwitch=document.querySelector(".mc-app [role=switch]");patchFareSwitch.scrollIntoView({block:"center"});true');
+    await delay(150);await audit('patch fare switch '+lang+'/'+width,'.mc-app button[role=switch]','.mc-app button[role=switch]');
     const previous=await E('!!CM.game.econ.fareAuto');
     await tap('patchFareSwitch');if(await E('!!CM.game.econ.fareAuto')===previous)throw Error('Fare indexing touch did not change preference');
     await tap('patchFareSwitch');
-    await E('CM.ui.closePanel(true);CM.ui.toasts.replaceChildren();true');await wait();await audit('patch restored map '+lang+'/'+width);
+    await E('CM.ui.opsApp.close(null,true);CM.ui.closePanel(true);CM.ui.toasts.replaceChildren();true');await wait();await audit('patch restored map '+lang+'/'+width);
     await E('CM.ui.tools.setTool("line");true');await wait();
     await audit('patch construction labels '+lang+'/'+width,'#hudTop button,#toolbar button,.br-dock button,#toolopts button');
     await E('CM.ui.tools.setTool("select");true');

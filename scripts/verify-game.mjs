@@ -48,8 +48,11 @@ export async function inspectGame(root = projectRoot) {
   if (new Set(scripts).size !== scripts.length) throw new Error('入口重复加载脚本');
   if (scripts.at(-1) !== 'js/main.js') throw new Error('入口必须最后加载主循环');
   if (scripts.some(f => /(?:^|\/)(?:intro|desktop|achievements|view3d|actors3d|models3d|world|world_hd|world_water|worldmap|transitions)\.js$|\/vendor\/three\//i.test(f))) throw new Error('网页版不得加载独立版专属模块');
+  for (const file of ['js/netmap.js', 'js/settings.js', 'js/stats.js']) {
+    if (/CM\.Achievements|LSTYLE|Settings\.get\(['"]lineStyle/.test(files.get(path.join(root,file)).bytes.toString())) throw new Error('网页版包含独立版线路风格或成就入口：' + file);
+  }
   for (const [first, next] of [['js/ui.js','js/sketch.js'],['js/sketch.js','js/pages.js'],['js/pages.js','js/impact.js'],['js/impact.js','js/voices.js'],['js/voices.js','js/main.js']]) if (scripts.indexOf(first) < 0 || scripts.indexOf(next) <= scripts.indexOf(first)) throw new Error('v2.3 模块缺失或加载顺序错误：' + first + ' → ' + next);
-  for (const [first, next] of [['js/util.js', 'js/i18n.js'], ['js/locales/en.js', 'js/i18n.js'], ['js/vendor/opencc/cn2t.js', 'js/i18n.js'], ['js/vendor/pinyin/pinyin-pro.js', 'js/i18n.js'], ['js/config.js', 'js/maps.js'], ['js/maps.js', 'js/main.js'], ['js/settings.js', 'js/main.js'], ['js/ui.js', 'js/main.js'], ['js/road-kernel.js', 'js/sim.js'], ['js/sim-stamp.js', 'js/traffic-cache.js'], ['js/traffic-cache.js', 'js/save.js'], ['js/render.js', 'js/sites.js'], ['js/sites.js', 'js/main.js'], ['js/pages.js', 'js/quick.js'], ['js/quick.js', 'js/main.js'], ['js/economy.js', 'js/taskplans.js'], ['js/pages.js', 'js/corp.js'], ['js/corp.js', 'js/fleet.js'], ['js/fleet.js', 'js/opsapp.js'], ['js/voices.js', 'js/opsapp.js'], ['js/opsapp.js', 'js/main.js']]) {
+  for (const [first, next] of [['js/util.js', 'js/i18n.js'], ['js/locales/en.js', 'js/i18n.js'], ['js/vendor/opencc/cn2t.js', 'js/i18n.js'], ['js/vendor/pinyin/pinyin-pro.js', 'js/i18n.js'], ['js/data_ld.js', 'js/traits.js'], ['js/data_sz.js', 'js/traits.js'], ['js/traits.js', 'js/maps.js'], ['js/citylink.js', 'js/game.js'], ['js/netlayout.js', 'js/netmap.js'], ['js/netmap.js', 'js/netreplay.js'], ['js/netreplay.js', 'js/review.js'], ['js/config.js', 'js/maps.js'], ['js/maps.js', 'js/main.js'], ['js/settings.js', 'js/main.js'], ['js/ui.js', 'js/main.js'], ['js/road-kernel.js', 'js/sim.js'], ['js/sim-stamp.js', 'js/traffic-cache.js'], ['js/traffic-cache.js', 'js/save.js'], ['js/render.js', 'js/sites.js'], ['js/sites.js', 'js/main.js'], ['js/pages.js', 'js/quick.js'], ['js/quick.js', 'js/main.js'], ['js/economy.js', 'js/taskplans.js'], ['js/pages.js', 'js/corp.js'], ['js/corp.js', 'js/fleet.js'], ['js/fleet.js', 'js/opsapp.js'], ['js/voices.js', 'js/opsapp.js'], ['js/opsapp.js', 'js/main.js']]) {
     if (!scripts.includes(first) || !scripts.includes(next) || scripts.indexOf(first) >= scripts.indexOf(next)) throw new Error('脚本依赖或加载顺序错误：' + first + ' → ' + next);
   }
   if (scripts.indexOf('js/scenery.js') <= scripts.indexOf('js/sites.js') || scripts.indexOf('js/settings.js') <= scripts.indexOf('js/scenery.js')) throw new Error('Canvas 场景扩展必须在 sites.js 之后、settings.js 之前加载');
@@ -74,7 +77,7 @@ export async function inspectGame(root = projectRoot) {
   let loaded = false;
   for (const file of scripts) {
     // 数据检查不启动DOM、渲染、工作线程或存储。
-    if (!/^js\/(?:util|config|news|legal|geo(?:_\w+)?|data_\w+|maps)\.js$/.test(file)) continue;
+    if (!/^js\/(?:util|config|news|legal|geo(?:_\w+)?|data_\w+|traits|maps)\.js$/.test(file)) continue;
     const asset = requireAsset(root, file);
     vm.runInContext(files.get(asset).bytes.toString(), context, { filename: file, timeout: 10000 });
     if (file === 'js/maps.js') loaded = true;
@@ -89,6 +92,8 @@ export async function inspectGame(root = projectRoot) {
   }
   const maps = CM.MAP_ORDER.map(id => {
     const m = CM.MAPS[id], c = m.cfg, p = m.geo.proj;
+    const traitErrors = CM.Traits.validate(m);
+    if (traitErrors.length) throw new Error('城市特色配置错误：' + id + ' ' + traitErrors.join('；'));
     if (m.id !== id || !Number.isInteger(m.mapVersion) || m.mapVersion < 1 || !c.W || !c.H || CM.CFG.CELL_M !== 250 || (m.kind === 'real' && !p)) throw new Error('地图登记或尺寸无效：' + id);
     return { id, mapVersion: m.mapVersion, displayRevision: m.data.displayRevision || 1, terrainRevision: m.data.terrainRevision || 1,
       width: c.W, height: c.H, cellMeters: CM.CFG.CELL_M, fingerprint: m.fp, projection: p ? JSON.parse(JSON.stringify(p)) : null };

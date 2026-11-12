@@ -22,6 +22,20 @@
   const xinban = poly([[25.0188, 121.4555], [25.0188, 121.4685], [25.0098, 121.4685], [25.0098, 121.4555]]);
 
   const data = {
+    // 城市特色（traits.js，规则见《地图设计与城市特色机制.md》）。新条目加在末尾，已触发事件按序号记录
+    traits: [
+      { use: 'railProperty', level: 'light', star: true, icon: 'building', label: '联合开发', text: '捷运站与周边土地联合开发：车站商业更赚钱，新线也更常带开发权', why: '台北捷运以联合开发的方式，把车站出入口和周边土地与民间合作开发。' },
+      { use: 'disaster', level: 'heavy', star: true, icon: 'wave', label: '纳莉台风', text: '2001 年洪水灌入捷运，三个月才完全恢复，出行骤降、满意度下滑',
+        on: { y: 2001, m: 9, title: '纳莉台风淹没捷运', desc: '纳莉台风带来的洪水灌入台北捷运，16 座车站、南港机厂和行控中心进水，板南线全线停驶，到 12 月才全部恢复。' }, why: '2001 年 9 月纳莉台风使 16 座捷运车站淹水，系统分阶段复驶，12 月 15 日全线恢复。' },
+      { use: 'foresight', level: 'mid', star: true, icon: 'chart', label: '新板与信义提前布局', text: '开发启动前就通捷运，能得到开发商出资，片区也长得更快', id: 'tp-xinban', at: 'tp_banqiao', ym: [1999, 7], before: 1997, r: 7, region: 'xinban', title: '新板特区开发',
+        hit: '板桥车站启用，早已通车的{st}站让新板特区一开始就有了捷运。', miss: '板桥车站启用，新板特区的高楼开始动工，可这里还没有捷运。', why: '1999 年 7 月板桥车站启用，周边的新板特区开始开发。' },
+      { use: 'foresight', level: 'mid', label: '信义计划区提前布局', id: 'tp-101', at: 'tp_101', ym: [1998, 1], before: 1996, r: 7, region: 'xinyi', title: '台北金融大楼筹建',
+        hit: '信义计划区筹建全台最高的大楼，早已通车的{st}站让这里成了新的办公中心。', miss: '信义计划区筹建全台最高的大楼，可这里还没有捷运。', why: '信义计划区 1990 年代成形，台北金融大楼（后来的台北 101）1998–1999 年前后动工，2004 年底落成。' },
+      { use: 'transition', level: 'light', label: '内湖与南港转型', region: ['neihu', 'nangang'], renew: { y: 2000, m: 1, title: '内湖与南港转向科技园区', desc: '基隆河沿岸的内湖、南港工业区陆续转型，科技公司和软件园区进驻。' }, replan: [{ year: 2001, region: 'neihu', plan: 'mix' }, { year: 2001, region: 'nangang', plan: 'mix' }], why: '台北市政府陆续规划内湖科技园区和南港经贸园区。' },
+      { use: 'scenic', label: '阳明山与盆地山地', why: '阳明山国家公园与盆地周边山地不能开发。' },
+      { use: 'crossing', label: '三条河', why: '淡水河、新店溪和基隆河分隔盆地，过河要建隧道或桥梁。' },
+      { use: 'finance', flavor: 'tw' },
+    ],
     city: '台北', riverName: '淡水河', seaName: '台湾海峡', hsrYear: 2007,
     stages: [[1994, '盆地老城时期'], [2004, '东区与信义时期'], [2011, '双城发展期']], stageLast: '大台北都会时期',
     // 历史发展阶段（v2.2，eras.js）：summary 中「史实」可查证，「估算」为模型设定的发展倾向；grow 只改变人口与岗位增长的去向（总量仍按人口曲线），
@@ -31,7 +45,7 @@
         summary: '史实：城市集中在台北车站、西门町与大稻埕一带，淡水线铁路 1988 年停驶，捷运正在施工，道路因施工与机车交通十分拥挤；1993 年基隆河截弯取直完工。估算：台北市人口趋于饱和，新增人口主要落在三重、中和、永和与新庄等新北各区。',
         grow: { pop: { zhongzheng: 0.6, oldtown: 0.6, daan: 0.8, zhongshan: 0.8, sanchong: 1.3, zhongyong: 1.3, xinzhuang: 1.3, banqiao: 1.2, xindian: 1.2, neihu: 1.2 }, jobs: { zhongzheng: 1.2, zhongshan: 1.2, daan: 1.2, songshan: 1.3, xinyi: 1.3 } },
         demand: { decayHW: 0.9 }, corridors: [{ a: 'sanchong', b: 'zhongzheng', f: 1.1 }, { a: 'zhongyong', b: 'daan', f: 1.1 }],
-        goals: [{ id: 'tp-g1', type: 'connect', months: 48, reward: 40000, title: '淡水通勤', desc: '淡水线铁路停驶后，淡水与北投的居民只能搭公车进城。用地铁连接淡水与北投。', anchors: [anchor('淡水', 25.1680, 121.4450, 3), anchor('北投', 25.1320, 121.4980, 3)] }] },
+        goals: [{ id: 'tp-g1', to: 1997, type: 'connect', months: 48, reward: 40000, title: '淡水通勤', desc: '淡水线铁路停驶后，淡水与北投的居民只能搭公车进城。用地铁连接淡水与北投。', anchors: [anchor('淡水', 25.1680, 121.4450, 3), anchor('北投', 25.1320, 121.4980, 3)] }] },
       { id: 'tp-e2', from: 1994, name: '东区与信义时期', tag: '史实',
         summary: '史实：1994 年台北市政府迁入信义计划区，基隆河新生地（大直、内湖）开发，1996 年起捷运陆续通车（史实背景，不会自动建成），1999 年板桥车站启用。估算：商务岗位由西区向东区与信义计划区转移，内湖、南港形成科技园区，新北的通勤人口持续增加。',
         grow: { pop: { newland: 1.5, neihu: 1.4, banqiao: 1.3, xinzhuang: 1.3, tucheng: 1.3, xizhi: 1.3, zhongzheng: 0.6, oldtown: 0.5 }, jobs: { xinyi: 2.0, xinyiq: 1.4, songshan: 1.3, neihu: 1.6, newland: 1.4, oldtown: 0.8 } },
@@ -274,7 +288,7 @@
     scenario: 'tp-1990',
     region: '中国台湾', tagline: '盆地里的第一条捷运', difficulty: 3, tags: ['无捷运开局', '跨河', '高密度'],
     intro: '1990 年的台北还没有捷运，公车与机车塞满了盆地里的每一条干道。淡水河两岸都住满了人，河西的永和是全台最拥挤的城市之一。你要从零画出整张路网：先打通南北与东西两条主轴，再跨过河去连接三重、板桥与中和。',
-    features: [['wave', '三条河流', '淡水河、新店溪与基隆河分隔盆地，过河要建隧道或桥梁'], ['mountain', '盆地与山地', '阳明山与周边山地不能开发，线路只能地下穿越'], ['building', '新生地与新都心', '基隆河截弯取直新生地、信义计划区、新板特区随年份出现'], ['coin', '新台币经营', '造价、票价、拨款与债券按新台币计算']],
+    features: [['wave', '三条河流', '淡水河、新店溪与基隆河分隔盆地，过河要建隧道或桥梁']],
     highlights: [[1993, '基隆河截弯取直完工'], [1994, '市政府迁入信义计划区'], [2004, '台北101 落成'], [2007, '台湾高铁通车'], [2010, '台北花博']],
     geo: G, data: data,
     econ: { devOffset: 20, money: 3.5 },   // 出行选择参数：台北 1990 年约对应广州样本 2010 年的发展阶段；时间价值等按新台币换算

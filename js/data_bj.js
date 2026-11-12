@@ -22,6 +22,24 @@
   const gugong = poly([[39.9227, 116.3843], [39.9227, 116.3971], [39.9112, 116.3971], [39.9112, 116.3843]]);   // v2.6.1：原值为 GCJ-02，换算到与底图一致的 WGS-84
 
   const data = {
+    // 城市特色（traits.js，规则见《地图设计与城市特色机制.md》）。新条目加在末尾，已触发事件按序号记录
+    traits: [
+      { use: 'conserve', level: 'light', star: true, icon: 'building', label: '旧城保护', text: '旧城只能走地下，隧道、车站和拆迁都更贵；天安门、钟鼓楼、雍和宫周围另有保护范围', regions: ['jiucheng', 'gugong', 'tiantan'], guards: ['bj_tam', 'bj_gulou', 'bj_yonghe'],   // 故宫、天坛在旧城之内，同属保护范围（以前不在列，旧城里留出两块空洞）
+        why: '北京旧城是历史文化名城保护的核心，内有故宫、中轴线和大片胡同，长期限制高度和大拆大建。' },
+      { use: 'megaEvent', level: 'mid', star: true, icon: 'flag', label: '2008 奥运会', text: '申奥成功后拨款增加，奥林匹克公园一带可以提前布局',
+        bid: { y: 2001, m: 7 }, open: [2008, 8],
+        foresight: { id: 'bj-oly', level: 'mid', at: 'bj_nest', ym: [2001, 7], before: 1999, r: 7, region: 'aoyun', title: '奥运主场馆定在北中轴',
+          hit: '奥运主场馆定在北中轴，早已通车的{st}站让这一带抢先有了依托。', miss: '奥运主场馆定在北中轴，这里还没有地铁，七年内要补上。' },
+        why: '2001 年 7 月北京申奥成功，奥运前地铁进入大规模建设期。' },
+      { use: 'relocate', star: true, icon: 'road', label: '疏解与城市副中心', text: '老城人口和岗位逐步外迁；提前修到通州的线路，等来城市副中心', why: '北京 2015 年起规划建设城市副中心，疏解非首都功能。' },
+      { use: 'foresight', level: 'mid', label: '通州提前布局', id: 'bj-tz', pos: [169.21, 81.06], ym: [2015, 7], before: 2005, r: 7, region: 'tongzhou', title: '规划建设北京城市副中心',
+        hit: '通州成为城市副中心，早已通车的{st}站让机关和企业搬过来时已有现成的地铁。', miss: '通州成为城市副中心，这里的地铁还不够，要尽快补上。', why: '2015 年 7 月，北京决定规划建设城市副中心。' },
+      { use: 'transition', level: 'mid', label: '首钢搬迁', region: 'shijingshan', close: { y: 2010, m: 12, title: '首钢石景山主流程停产', desc: '12 月，首钢石景山厂区的钢铁主流程全面停产，结束了在北京 91 年的钢铁生产，老厂区开始再开发。' }, replan: [{ year: 2011, region: 'shijingshan', plan: 'mix' }], why: '首钢石景山厂区 2010 年 12 月全面停产，8.56 平方公里的老厂区重新开发。' },
+      { use: 'carLimit', level: 'mid', label: '小客车摇号', on: { y: 2011, m: 1, title: '小客车指标摇号', desc: '1 月 1 日起，北京新增小客车要摇号取得指标，当年指标 24 万个。' }, why: '北京自 2011 年 1 月 1 日起实行小客车指标摇号。' },
+      { use: 'scenic', label: '故宫与皇家园林', why: '故宫、天坛、颐和园和圆明园都不能开发。' },
+      { use: 'portal', label: '大兴机场', why: '大兴国际机场 2019 年 9 月通航，在地图南缘以南约 35 km。' },
+      { use: 'finance', flavor: 'cn' },
+    ],
     city: '北京', terrainRevision: 1, riverName: '永定河', hsrYear: 2008,
     stages: [[1999, '亚运时代'], [2004, '扩张与申奥'], [2009, '奥运建设期'], [2017, '网络化时期']], stageLast: '疏解与副中心时期',
     eras: [
@@ -63,7 +81,6 @@
         demand: { lz: 1.08, decayHW: 1.15 }, corridors: [{ a: 'tongzhou', b: 'cbd', f: 1.2 }] },
     ],
     briefing: {
-      inherit: true,
       lead: '1990 年的北京，地铁只有两条：1 号线从苹果园到复兴门，环线（2 号线）沿二环绕旧城一圈。亚运会就要开幕，三环正在贯通，城市即将向四面八方扩张。',
       modes: [['train', '地铁：1 号线与环线（由你接管）', '苹果园—复兴门的 1 号线与环线（2 号线）共 29 站已在运营，在复兴门换乘。票款与运营费照常结算，可以延长、改建或拆除，不收历史建设费；真实的复八线、13 号线等不会自动出现。'], ['bus', '公交与自行车', '自行车是最主要的通勤方式，公交线路拥挤，长安街上车流与自行车流交织。'], ['road', '环路', '二环快速路正在改造，三环 1994 年全线贯通，四环、五环要到 2000 年代才通车。'], ['rail', '铁路', '北京站与永定门站（后来的北京南站）承担对外铁路交通，北京西站 1996 年启用。列车本身不参与模拟，车站会产生市内接驳出行。']],
     },
@@ -148,7 +165,7 @@
     simRoads: [],
     landmarks: [
       Object.assign(atW(39.90736, 116.39126), { id: 'bj_tam', name: '天安门', w: 120, d: 40, year: 1651, kind: 'traditional' }),
-      Object.assign(atW(39.91728, 116.39077), { id: 'bj_gugong', name: '故宫', w: 750, d: 960, year: 1420, kind: 'palace' }),
+      Object.assign(atW(39.91669, 116.39077), { id: 'bj_gugong', name: '故宫', w: 750, d: 960, rot: -2.4, year: 1420, kind: 'palace' }),   // 按 OSM 筒子河外沿的最小外接矩形：北京中轴线北端向西偏约 2.4°，原位置偏北约 64 m
       Object.assign(atW(39.8822, 116.4066), { id: 'bj_qnd', name: '天坛祈年殿', w: 90, d: 90, year: 1420, kind: 'temple' }),
       Object.assign(atW(39.94793, 116.41154), { id: 'bj_yonghe', name: '雍和宫', w: 120, d: 400, year: 1744, kind: 'temple' }),
       Object.assign(atW(39.94060, 116.38445), { id: 'bj_gulou', name: '钟鼓楼', w: 60, d: 140, year: 1420, kind: 'traditional' }),
@@ -314,7 +331,7 @@
     modes: ['challenge', 'free'], kind: 'real', mapVersion: 1, scenario: 'bj-1990',
     region: '中国内地', tagline: '一环套一环，接管两条线的首都', difficulty: 3, tags: ['已有地铁', '环路', '奥运'],
     intro: '1990 年的北京，地铁只有两条：1 号线从苹果园开到复兴门，环线沿着旧城墙的位置绕城一圈。亚运会就要开幕，自行车流填满长安街。接下来是二环到五环一圈圈向外，中关村、CBD、北部大社区与城市副中心一个接一个出现。你要在一座摊大饼的城市里织出一张网。',
-    features: [['train', '开局接管 1 号线与环线', '29 站、约 39 km，复兴门换乘，票款与运营费照常结算'], ['road', '一环套一环', '二环到五环按年份贯通，城市沿环路向外扩张'], ['building', '中关村与 CBD', '新的就业中心与北部大社区按年份出现'], ['flag', '9 项历史任务', '从贯通长安街到奥运与机场线']],
+    features: [['train', '开局接管 1 号线与环线', '29 站、约 39 km，复兴门换乘，票款与运营费照常结算']],
     highlights: [[1990, '亚运会'], [1999, '中关村科技园区设立'], [2001, '申奥成功'], [2008, '北京奥运会'], [2015, '规划建设城市副中心'], [2022, '北京冬奥会']],
     geo: G, data: data,
     econ: { devOffset: 1, money: 1 },   // 出行选择参数：北京 1990 年约对应广州样本 1991 年的发展阶段

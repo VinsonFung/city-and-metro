@@ -54,7 +54,7 @@
       g.model.setNetwork(g.compiled);
       lp(0.3, '建立交通模型');
       g.econ = new CM.Economy(g.mode, g.clock.y, g.clock.m);
-      g.model.fare = g.econ.fare;
+      g.model.fare = g.econ.fare; g.model.crossFee = g.econ.cross;
       g.tasks = new CM.Tasks();
       g.model.onSolveProgress = function (f) { lp(0.3 + (pre ? 0.08 : 0.62) * f, '计算居民出行'); };
       try { if (sync) g.model.solveNow(4); else yield* g.model.solveGen(4); } finally { g.model.onSolveProgress = null; }
@@ -114,13 +114,22 @@
         prev = sid;
       }
       if (L.loop && prev && first && prev !== first) M.addSegment(net, lid, prev, first, [], L.type || 'underground');   // 环线：首尾相连
-      desc.push(net.lines[lid].name + (L.loop ? '（环线，' : ' ' + L.stations[0][0] + '—' + L.stations[L.stations.length - 1][0] + '（') + L.stations.length + ' 站）');
+      // 支线（v2.6）：从本线的某座车站分出去
+      for (const b of L.branches || []) {
+        let p = byName[b.from];
+        for (const st of b.stations) { const sid = stationOf(st); if (p) M.addSegment(net, lid, p, sid, [], st[5] || L.type || 'underground'); p = sid; }
+      }
+      const nSt = L.stations.length + (L.branches || []).reduce(function (s, b) { return s + b.stations.length; }, 0);
+      desc.push(net.lines[lid].name + (L.loop ? '（环线，' : ' ' + L.stations[0][0] + '—' + L.stations[L.stations.length - 1][0] + '（') + nSt + ' 站）');
     }
     M.normalizeLines(net);
     for (const id in net.segments) { net.segments[id].built = [IN.year || CFG.START.y, 1]; net.segments[id].inherited = true; }
     return { metro: (IN.note ? IN.note + '：' : '') + desc.join('；'), year: CFG.START.y };
   }
 
+  // 自定义起始年份的开局推演（v2.2，仅自由建造）：从默认开局逐月推进到 toYear 年 1 月，按与每月结算相同的规则处理历史事件、
+  // 城市经济、机场关闭、填海、道路、地标、区域开放与人口就业增长；不逐月计算交通（每 5 年刷新一次道路可达性），不弹出提示。
+  // 开局前的事件与经济变化记入城市纪事；推演结束后按所选年份重新开账，发布当年的任务，统计从所选年份开始
   Game.prototype.prehistoryGen = function* (toYear, sync, onProgress) {
     const city = this.city, model = this.model, y0 = this.clock.y;
     let n = 0;
@@ -171,7 +180,7 @@
     try { if (sync) model.solveNow(4); else yield* model.solveGen(4); } finally { model.onSolveProgress = null; }
     // 按所选年份重新开账：票价、拨款口径与任务从这一年开始；开局前的任务与统计不保留
     this.econ = new CM.Economy(this.mode, this.clock.y, this.clock.m);
-    model.fare = this.econ.fare;
+    model.fare = this.econ.fare; model.crossFee = this.econ.cross;
     if (this.macro && CM.Macro) CM.Macro.sync(this);
     this.tasks = new CM.Tasks();
     this.events = this.events.filter(function (e) { return e.tag !== '任务'; });
@@ -219,7 +228,7 @@
     if (o.type === 'issued') { this.logEvent({ tag: '任务', title: '新任务：' + t.title, desc: t.desc }); this.emit('toast', { kind: 'info', text: '新任务：' + t.title }); }
     else if (o.type === 'done' && t.partial) { this.logEvent({ tag: '任务', title: '任务部分完成：' + t.title, desc: (t.desc ? t.desc + ' ' : '') + (this.econ.mode === 'challenge' ? '主体目标已达成，获得奖励拨款 ' + U.fmtMoney(t.reward) + '，拨款不受影响。' : '') }); this.emit('toast', { kind: 'good', text: '任务部分完成：' + t.title + '（任务 → 已完成 可查看详情）' }); }
     else if (o.type === 'done') { this.logEvent({ tag: '任务', title: '任务完成：' + t.title, desc: (t.desc ? t.desc + ' ' : '') + (this.econ.mode === 'challenge' ? '获得奖励拨款 ' + U.fmtMoney(t.reward) + '。' : '') }); this.emit('toast', { kind: 'good', text: '任务完成：' + t.title + '（任务 → 已完成 可查看详情）' }); }
-    else if (o.type === 'failed') { this.logEvent({ tag: '任务', title: '任务未完成：' + t.title, desc: this.econ.mode !== 'challenge' ? '自由建造模式下无后果' : (t.kind === 'opt' ? '可选挑战：未来 6 个月满意度 −2，拨款不受影响' : (function () { const P = CM.Tasks.failPenalty(t); return '后果：未来 ' + P.months + ' 个月（含本月）拨款 ×' + P.factor + '，满意度 ' + P.sat; })()) }); this.emit('toast', { kind: 'bad', text: '任务未完成：' + t.title }); }
+    else if (o.type === 'failed') { this.logEvent({ tag: '任务', title: '任务未完成：' + t.title, desc: (t.fareWhy ? t.fareWhy + '。' : '') + (this.econ.mode !== 'challenge' ? '自由建造模式下无后果' : (t.kind === 'opt' ? '可选挑战：未来 6 个月满意度 −2，拨款不受影响' : (function () { const P = CM.Tasks.failPenalty(t); return '后果：未来 ' + P.months + ' 个月（含本月）拨款 ×' + P.factor + '，满意度 ' + P.sat; })())) }); this.emit('toast', { kind: 'bad', text: '任务未完成：' + t.title }); }
     else if (o.type === 'withdrawn') { this.logEvent({ tag: '任务', title: '任务撤销：' + t.title, desc: '这处设施已经停用，任务取消，没有奖惩。' }); this.emit('toast', { kind: 'info', text: '任务撤销：' + t.title }); }
     // 可选挑战（v2.3）：只提示，玩家在任务面板中决定是否接受
     else if (o.type === 'offer') { this.logEvent({ tag: '任务', title: '可选挑战：' + t.title, desc: (t.theme ? t.theme + '。' : '') + t.desc }); this.emit('toast', { kind: 'info', text: '新的可选挑战：' + t.title, offer: t.id }); }
@@ -283,7 +292,7 @@
   Game.prototype.dayType = function () { return CM.Model.dayType(this.clock.y, this.clock.m, this.clock.d); };
   Game.prototype.endDay = function () {
     const dt = this.dayType();
-    this.econ.day(this.model.dailyFor(dt), this.compiled, this.clock.y, dt);
+    this.econ.day(this.model.dailyFor(dt), this.compiled, this.clock.y, dt, CM.CityLink.dayIncome(this, dt));
     // 车站商业开发（TOD，v2.3）：广告与商铺租金，按当天客流逐日计入非票务收入；v2.5 起逐日扣除开发后的运营与维护成本
     if (CM.TOD) { const v = CM.TOD.daily(this, dt); if (v.rev > 0) this.econ.income('commerce', v.rev); if (v.cost > 0) this.econ.spend('todCost', v.cost); }
     this.clock.d++;
@@ -349,19 +358,27 @@
     const oldFacKey = model.fn.key;
     const yr = y + (m - 1) / 12;
     if (CM.applyMoneyEra && CM.applyMoneyEra(y, m)) this.emit('money');   // 货币改革（巴黎 1960、2002）：只改变显示货币，内部记账单位不变
+    // 超大型站（v2.7）：进入最后一个历史阶段时解锁并提示一次
+    if (!this.xlNoted && !this.tutorial && M.xlUnlocked(y)) {
+      this.xlNoted = true;
+      this.logEvent({ tag: '建设', title: '超大型车站已解锁', desc: '车站容量是大型站的 2 倍，造价和运营费也更高。新建车站时可选，既有大型站可以在车站页升级。' });
+      this.emit('toast', { kind: 'good', text: '超大型车站已解锁：容量是大型站的 2 倍，可在建站时选择或在车站页升级' });
+    }
     // 票价随物价（v2.6.1）：1 月自动调价或提醒
     if (m === 1) {
       const fy = this.econ.fareYearly(y, m);
-      if (fy.changed) { model.fare = this.econ.fare; model.wake(2); this.logEvent({ tag: '经营', title: '票价随物价调整', desc: CM.UI.fareText(this.econ.fare, true) }); }
+      if (fy.changed) { model.fare = this.econ.fare; model.crossFee = this.econ.cross; model.wake(2); this.logEvent({ tag: '经营', title: '票价随物价调整', desc: CM.UI.fareText(this.econ.fare, true) }); }
       else if (fy.remind) {
-        this.logEvent({ tag: '经营', title: '票价实际水平只有开局时的 ' + Math.round(fy.real * 100) + '%', desc: '物价上涨后，票价一直没有调整。可以在财政页调价，或开启随物价自动调价。' });
+        this.logEvent({ tag: '经营', title: '票价实际水平只有开局时的 ' + Math.round(fy.real * 100) + '%', desc: '物价上涨后，票价一直没有调整。可以在地铁芯的「票价管理」调价，或开启随物价自动调价。' });
         this.emit('toast', { kind: 'info', text: '票价实际水平只有开局时的 ' + Math.round(fy.real * 100) + '%，运营成本却一直在涨', fare: true });
       }
     }
     // 历史事件
     D.events.forEach((e, k) => {
       if (this.firedEvents[k]) return;
-      if (U.ymIndex(e.y, e.m) <= U.ymIndex(y, m)) { this.firedEvents[k] = 1; this.logEvent({ tag: e.tag, title: e.title, desc: e.desc + (CM.Eras ? CM.Eras.fxNote(e) : '') }); this.emit('histEvent', e); if (CM.Milestones) CM.Milestones.onEvent(this, e, k); }
+      const late = U.ymIndex(y, m) - U.ymIndex(e.y, e.m);
+      if (late > 1) { this.firedEvents[k] = 1; return; }   // 新版本补充的较早事件（旧存档已过其日期）：只标记，不在当前日期补记
+      if (late >= 0) { this.firedEvents[k] = 1; if (CM.Eras) CM.Eras.applyStrike(this, e); this.logEvent({ tag: e.tag, title: e.title, desc: e.desc + (CM.Eras ? CM.Eras.fxNote(e) : '') }); this.emit('histEvent', { y: e.y, m: e.m, tag: e.tag, title: e.title, desc: e.desc, fx: e.fx || null }); if (CM.Milestones) CM.Milestones.onEvent(this, e, k); }
     });
     // 提前布局的回报（v2.6）与片区规划变化（码头关闭后改作商务区）
     if (CM.Eras) for (const x of CM.Eras.foresightMonth(this, y, m)) {
@@ -587,7 +604,12 @@
     let r;
     try { r = fn(d.net); } catch (e) { console.error(e); r = { error: '操作未能完成，已撤回（' + e.message + '）' }; }
     if (!(r && r.error)) { const bad = M.validate(d.net); if (bad) r = { error: '操作已撤回：' + bad }; }
-    if (r && r.error) { d.net = JSON.parse(snap); return r; }
+    if (r && r.error) {
+      d.net = JSON.parse(snap); d.ver++;
+      // 编译和运行中的预测可能仍引用编辑期间被改过的对象，回滚数据后一起作废。
+      this.invalidatePrediction(); this.emit('draft');
+      return r;
+    }
     d.undo.push(snap); if (d.undo.length > 120) d.undo.shift();
     d.redo = [];
     d.ver++;
@@ -672,11 +694,22 @@
       const sn = this.congSnapshot();
       if (sn) { const names = Array.from(ev.affectedLines).map(function (lid) { return d.net.lines[lid] && d.net.lines[lid].name; }).filter(Boolean); sn.label = names.length ? names.slice(0, 2).join('、') + (names.length > 2 ? ' 等' : '') : newSt.length + ' 座新站'; (this.congRef || (this.congRef = {})).build = sn; }
     }
+    // 线网成长回放（v2.7）：记下本次拆除的车站、区段和线路，回放时按当时的样子画出来
+    { const off = this.net, gone = this.netGone || { stations: {}, segments: {}, lines: {} }, at = [this.clock.y, this.clock.m]; let any = false;
+      const keepLine = function (lid) { const L = off.lines[lid]; if (L) gone.lines[lid] = { id: lid, name: L.name, color: L.color }; };
+      for (const id in off.segments) if (!d.net.segments[id]) { const s = off.segments[id]; gone.segments[id] = { id: id, line: s.line, a: s.a, b: s.b, type: s.type, pts: s.pts || undefined, curve: s.curve || undefined, built: s.built || null, lh: s.lh || undefined, gone: at }; any = true; keepLine(s.line); }
+      for (const id in off.stations) if (!d.net.stations[id]) { const s = off.stations[id]; gone.stations[id] = Object.assign(M.clone(s), { built: s.built || null, gone: at }); any = true; }
+      // 贯通、拆开、拆出支线：轨道不变，区段改归另一条线路。lh 记下每次改归前属于哪条线 [年, 月, 原线路]；被并掉的线路记下名称和颜色
+      for (const id in d.net.segments) { const o = off.segments[id], s = d.net.segments[id]; if (!o || o.line === s.line) continue; s.lh = (o.lh || []).concat([[at[0], at[1], o.line]]); keepLine(o.line); any = true; }
+      for (const id in off.lines) if (!d.net.lines[id]) { keepLine(id); any = true; }
+      if (any) this.netGone = gone; }
+    const netBefore = this.net;
     this.net = d.net;
     this.netVersion++;
     this.rev++;
     this.compiled = M.compile(this.net, this.city);
     if (CM.Fleet && this.fleet) { CM.Fleet.applyAdd(this, ev.fleetAdd); CM.Fleet.sync(this); this.fleet.ver++; }   // 随线配车落实；拆除线路的列车回到车辆段
+    if (CM.OpsAlerts) { try { CM.OpsAlerts.restructure(this, netBefore); } catch (e) { console.error(e); } }   // 贯通、拆开后地铁芯的历史记录跟着调整（只影响显示）
     this.model.cancelPredict();
     // 沿线拆迁减少了人口与就业：立即重算小区人口岗位与出行需求，不等到月度结算
     if (ev.demolitions.length) { this.model.buildZones(); this.model.buildDemand(); }
@@ -735,6 +768,22 @@
   };
 
   // ---------------- 查询 ----------------
+  // 跨境附加费（v2.7，城市连接）：按接驳口单独设，折合成接驳口车站的进站成本后重新计算出行选择；0 表示不收
+  Game.prototype.setCrossFee = function (id, v) {
+    const c = this.econ.cross, old = c[id] || 0;
+    if (!Number.isFinite(+v) || !CM.Fac.list(this.city).some(f => f.id === id && f.ext && f.ext.gate)) return false;
+    v = Math.max(0, +v);
+    if (v === old) return false;
+    if (v > 0) c[id] = v; else delete c[id];
+    this.rev++;
+    this.model.cancelPredict();
+    this.model.setNetwork(this.compiled, true);
+    this.invalidatePrediction('跨境附加费已修改，建设预测需要重新计算');
+    this.touch();
+    return true;
+  };
+
+
   Game.prototype.zoneName = function (z) {
     const m = this.model;
     const x = m.zCx[z], y = m.zCy[z];
@@ -846,6 +895,8 @@
       opsNote: this.opsNote || undefined,   // 地铁芯的过载提醒：持续月数与静默期（v2.5）
       events: this.events.slice(-300),
       history: this.history.slice(-1200),
+      netGone: this.netGone || undefined,   // 成长回放：拆除与线路改归的历史，旧档可缺省
+      xlNoted: this.xlNoted || undefined, cityReview: this.cityReview || undefined, foresight: this.foresight || undefined,
       firedEvents: this.firedEvents, trafficYear: this.model.year, trafficChangedYm: this.trafficChangedYm,
       unlockAll: this.unlockAll || undefined, startYear: this.startYear || undefined, eraLog: this.eraLog || undefined,
       eraBase: this.eraBase || undefined, startBase: this.startBase || undefined,
@@ -890,16 +941,17 @@
         if (k >= 0 && !g.city.regionOpen[k] && g.city.regions[k].open != null && g.city.regions[k].open <= g.clock.y) { g.city.openRegion(k, g.clock.y, g.clock.m); airportOpened = g.city.regions[k]; }
       }
       // 先设置存档年份，再构建一次需求，避免构造器按开局年完整求一遍后立即丢弃。
+      g.econ = CM.Economy.restore(s.econ);
       g.model = new CM.Model(g.city, {deferDemand:true});
       g.model.habitAge = Game.habitAge(g);
+      g.model.fare = g.econ.fare; g.model.crossFee = g.econ.cross;
       g.model.setYear(s.trafficYear != null ? s.trafficYear : g.clock.y + (g.clock.m - 1) / 12);   // 不刷新的月份里，交通结果对应的年份早于当前日期（v2.6）
       g.model.setDayType(CM.Model.dayType(g.clock.y, g.clock.m, g.clock.d));
       g.model.buildZones(); g.model.buildDemand();
       g.net = s.net;
       g.compiled = M.compile(g.net, g.city);
       g.model.setNetwork(g.compiled);
-      g.econ = CM.Economy.restore(s.econ);
-      g.model.fare = g.econ.fare;
+      g.model.fare = g.econ.fare; g.model.crossFee = g.econ.cross;
       g.tasks = CM.Tasks.restore(s.tasks);
       g.corp = s.corp && Array.isArray(s.corp.contracts) ? s.corp : null;
       g.fleet = s.fleet && Array.isArray(s.fleet.trains) ? s.fleet : null;
@@ -907,6 +959,7 @@
       g.opsNote = s.opsNote || null;
       g.trafficChangedYm = s.trafficChangedYm ?? null;
       g.events = s.events || []; g.history = s.history || []; g.firedEvents = s.firedEvents || {};
+      g.xlNoted = !!s.xlNoted; g.netGone = s.netGone || null; g.cityReview = s.cityReview || null; g.foresight = s.foresight || null; g.city.foresight = g.foresight;
       g.favs = { stations: (s.favs && s.favs.stations) || [], lines: (s.favs && s.favs.lines) || [], names: (s.favs && s.favs.names) || {} };
       g.mapInit = s.mapInit || null;
       g.unlockAll = !!s.unlockAll && g.mode === 'free'; g.city.unlockAll = g.unlockAll;
@@ -917,7 +970,7 @@
       g.impactReport = !(s.mapUpgrade && !s.mapUpgrade.displayOnly) && Game.validImpact(s.impactReport) ? s.impactReport : null;
       g.milestones = s.milestones || null;
       lp(0.42, '恢复交通模型');
-      const cacheHit = !upgrade && !airportOpened && !s.__mapMigratedFrom && !s.mapUpgrade && CM.TrafficCache && CM.TrafficCache.restore(g, s.__trafficState);
+      const cacheHit = !upgrade && !rulesUpgrade && !airportOpened && !s.__mapMigratedFrom && !s.mapUpgrade && CM.TrafficCache && CM.TrafficCache.restore(g, s.__trafficState);
       if (!cacheHit) {
         g.model.onSolveProgress = f => lp(0.42 + 0.53 * f, '恢复居民出行');
         try { if (sync) g.model.solveNow(4); else yield* g.model.solveGen(4); } finally { g.model.onSolveProgress = null; }

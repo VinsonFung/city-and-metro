@@ -45,6 +45,26 @@
   const defense = poly([[48.8962, 2.2285], [48.8962, 2.2470], [48.8908, 2.2535], [48.8866, 2.2505], [48.8866, 2.2290]]);
 
   const data = {
+    // 城市特色（traits.js，规则见《地图设计与城市特色机制.md》）。新条目加在末尾，已触发事件按序号记录
+    traits: [
+      { use: 'conserve', level: 'mid', star: true, icon: 'building', label: '历史城区', text: '中心区只能走地下，圣母院、卢浮宫等古建周围另有保护范围，造价和拆迁都更贵', regions: ['centre'],
+        guards: ['pa_notredame', 'pa_louvre', 'pa_invalides', 'pa_arc', 'pa_sacrecoeur', 'pa_pantheon'], why: '巴黎地铁从一开始就以地下为主，高架只出现在外围的 2 号线和 6 号线部分路段；中心区古建密集。' },
+      { use: 'war', star: true, icon: 'flag', label: '两次世界大战', text: '大战期间拨款锐减、造价上涨；1940 年大逃亡让城区几乎一空',
+        events: [{ y: 1914, m: 8, level: 'mid', years: 4.25, tableGrant: true }, { y: 1940, m: 6, level: 'mid', years: 4.25, tableGrant: true, regions: ['centre', 'grandsbd', 'rivegauche', 'faubourgs', 'sud', 'ouest', 'nord'] }],
+        why: '1940 年 6 月德军入城前，约四分之三的巴黎人已经离开；两次大战期间地铁建设都明显放缓。' },
+      { use: 'rival', star: true, icon: 'road', label: '步行、电车与郊区铁路', text: '地铁一直要和电车、郊区铁路和步行抢乘客，比重随年代变化', why: '1900 年的巴黎步行和电车比重很高，电车运营到 1937 年，郊区铁路至今承担大量通勤。' },
+      { use: 'foresight', level: 'mid', label: '拉德芳斯提前布局', id: 'pa-defense', at: 'pa_cnit', ym: [1958, 9], before: 1950, r: 7, region: 'defense', title: '拉德芳斯开发启动',
+        hit: '政府决定在城西开发新的商务区，早已通车的{st}站让拉德芳斯一开始就和市中心连在一起。', miss: '政府决定在城西开发新的商务区，这里还没有地铁，要尽快把线路延伸过来。', why: '1958 年成立拉德芳斯开发机构，同年 CNIT 展览馆落成。' },
+      { use: 'transition', level: 'mid', label: '圣但尼平原转型', region: 'nordind', close: { y: 1975, m: 1, title: '北郊工厂开始外迁', desc: '1970 年代起，圣但尼平原一带的工厂陆续关闭外迁，工业岗位大量流失。' }, renew: { y: 1993, m: 10, title: '法兰西体育场选址圣但尼平原', desc: '1998 年世界杯的主体育场选址圣但尼平原，这片老工业区开始再开发。' }, replan: [{ year: 1994, region: 'nordind', plan: 'mix' }], why: '圣但尼平原 19 世纪起就是工业区，1985 年开始筹划更新，1993 年世界杯体育场选址于此。' },
+      { use: 'investWindow', existing: true, span: [1965, 1977], label: '大区快铁时期', why: '1965 年的巴黎地区规划提出大区快铁，RER A 线 1969 年起分段开通，1977 年贯通市中心。' },
+      { use: 'investWindow', existing: true, span: [2010, 2020], label: '“大巴黎”', why: '2010 年通过“大巴黎”法案，规划环绕近郊的新地铁线。' },
+      { use: 'megaEvent', existing: true, label: '世博会、奥运会与世界杯', why: '巴黎举办过 1900 年与 1937 年世博会、1924 年奥运会和 1998 年世界杯决赛。' },
+      { use: 'crossing', label: '塞纳河', why: '塞纳河横贯城市，过河段可以建隧道或桥梁。' },
+      { use: 'scenic', label: '布洛涅与万塞讷森林', why: '城市东西两侧的森林不能开发。' },
+      { use: 'currency', label: '新法郎与欧元', why: '1960 年改用新法郎，2002 年欧元现钞流通。' },
+      { use: 'heightCap', why: '巴黎市内长期限高，1977 年起再度收紧。' },
+      { use: 'finance', flavor: 'fr' },
+    ],
     city: '巴黎', riverName: '塞纳河', hsrYear: 1989,
     stages: [[1914, '美好年代'], [1919, '第一次世界大战'], [1939, '两次大战之间'], [1946, '第二次世界大战与解放'], [1975, '辉煌三十年'], [2000, '危机与转型']], stageLast: '大巴黎时代',
     // 历史发展阶段（v2.2，eras.js）：summary 中「史实」可查证，「估算」为模型设定的发展倾向；grow 只改变人口与岗位增长的去向（总量仍按人口曲线），
@@ -419,7 +439,7 @@
         oldRegionIds: ['boulogne', 'vincennes', 'defense', 'centre', 'grandsbd', 'rivegauche', 'faubourgs', 'sud', 'ouest', 'nord', 'nordind', 'nordouest', 'sudouest', 'sudproche', 'estproche', 'boucle', 'sudloin', 'marne', 'nordest', 'nordloin', 'yvelines', 'ouestloin', 'montmorency', 'sarcelles', 'clichysb', 'sevran', 'noisy', 'brie', 'antony', 'rungis', 'outer'] }], scenario: 'pa-1900',
     region: '法国', tagline: '在美好年代挖下第一条隧道', difficulty: 3, tags: ['无地铁开局', '百年跨度', '货币改革'],
     intro: '1900 年，巴黎正为世界博览会做最后的准备。城墙以内挤着 270 万人，马车与电车塞满林荫大道，第一条地铁还没有通车。你将从这里开始，经历两次世界大战、辉煌三十年与「大巴黎」，一百多年里物价上涨数千倍，货币先后换成新法郎和欧元。',
-    features: [['bridge', '穿越塞纳河', '塞纳河横贯城市，过河段可以建隧道或桥梁'], ['map', '19 个区域逐步开放', '近郊市镇按两次大战之间与战后的发展开放，拉德芳斯 1958 年开放'], ['building', '37 处真实地标', '埃菲尔铁塔、圣母院、新凯旋门按落成年份出现'], ['coin', '三种货币', '1960 年换新法郎、2002 年换欧元，账目自动按当期货币显示']],
+    features: [['coin', '三种货币', '1960 年换新法郎、2002 年换欧元，账目自动按当期货币显示']],
     highlights: [[1900, '世界博览会'], [1924, '巴黎奥运会'], [1960, '新法郎'], [1989, '卢浮宫金字塔与新凯旋门'], [2002, '欧元现钞流通']],
     geo: G, data: data,
     cfg: {

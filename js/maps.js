@@ -49,6 +49,11 @@
     if (m.econ) Object.assign(cfg, CM.deriveChoice(m.econ.devOffset || 0, m.econ.money || 1));
     Object.assign(cfg, m.cfg);
     if (m.cfg.ZONE == null) cfg.ZONE = autoZone(cfg.W, cfg.H);
+    // 超大型站（v2.7）：各图的造价与运营费表只写到大型，按大型的倍数补齐（造价约 1.6 倍、运营费约 1.7 倍）。
+    // 早期巴黎、伦敦的单价很小，这里保留有效数字而不是小数位，否则会被舍成 0
+    { const CS = cfg.cost && cfg.cost.station, OP = cfg.ops && cfg.ops.stationDaily;
+      if (CS) for (const t in CS) if (CS[t].XL == null) { const v = CS[t].L * 1.6; CS[t].XL = v >= 100 ? Math.round(v / 100) * 100 : +v.toPrecision(3); }
+      if (OP && OP.XL == null) OP.XL = +(OP.L * 1.7).toPrecision(3); }
     // 城市经济：只在真实城市启用；没有专门参数的真实地图使用通用参数（'auto'），教程等虚构地图不启用
     cfg.macro = m.kind === 'real' ? (m.cfg.macro || 'auto') : null;
     m.cfg = cfg;
@@ -80,6 +85,10 @@
       for (const e of m.data.eras || []) for (const t of e.goals || []) anchors(t.anchors);
     }
   })();
+  // 城市特色机制（traits.js）：展开成底层字段。广州是开局默认地图，useMap 不会再切换，要同步到当前配置
+  for (const id in MAPS) if (CM.Traits) CM.Traits.compile(MAPS[id]);
+  Object.assign(CM.DATA, MAPS.gz.data);
+  for (const k of CFG_KEYS) if (k !== 'START') CFG[k] = MAPS.gz.cfg[k];
   // 地图范围扩展的存档迁移（地图版本升级）：spec = { from, dx, dy, oldW, oldH, oldRegionIds, oldLandmarkIds, note }。
   // dx / dy 为新格网中原地图左上角的位置（格，须为交通小区边长 4 的倍数，投影系数不变）。只改解析出的存档副本：
   //  · 城市逐格数据放入新格网对应位置，新增范围标记为待生成（载入时按存档年份生成，见 City.fillNewCells）；
@@ -121,8 +130,11 @@
       // 坐标平移
       // 车站的上次付费选址（site）随坐标一起平移，否则迁移后的微调会被误算为搬迁
       const sh = function (o) { if (o && typeof o.x === 'number') { o.x += dx; o.y += dy; } if (o && Array.isArray(o.site)) o.site = [o.site[0] + dx, o.site[1] + dy]; };
-      for (const id in p.net.stations) sh(p.net.stations[id]);
-      for (const id in p.net.segments) { const s = p.net.segments[id]; if (s.pts) s.pts = s.pts.map(function (q) { return [q[0] + dx, q[1] + dy]; }); }
+      // 回放里的已拆除设施与现存线网一起迁移，日期和线路归属记录不变。
+      for (const net of [p.net, p.netGone]) if (net) {
+        for (const id in net.stations) sh(net.stations[id]);
+        for (const id in net.segments) { const s = net.segments[id]; if (s.pts) s.pts = s.pts.map(function (q) { return [q[0] + dx, q[1] + dy]; }); }
+      }
       // 片区编号
       const oZW = oW / ZN, nZW = W / ZN, zmap = function (z) { return ((z / oZW) | 0) * nZW + (z % oZW) + dx / ZN + (dy / ZN) * nZW; };
       const fixTask = function (t) { if (!t) return; if (t.anchors) t.anchors.forEach(sh); if (typeof t.zone === 'number') t.zone = zmap(t.zone); if (typeof t.coolKey === 'string') t.coolKey = t.coolKey.replace(/^(cong|cov):(\d+)$/, function (s0, a, z) { return a + ':' + zmap(+z); }); };
@@ -207,8 +219,8 @@
     let n = 0;
     const poly = function* (rows, col) {
       c.fillStyle = col; c.beginPath();
-      for (const row of rows) { for (let k = 1; k < row.length; k++) { if (typeof row[k] !== 'string') continue; const p = dec(row[k], 1); c.moveTo(p[0], p[1]); for (let q = 2; q < p.length; q += 2) c.lineTo(p[q], p[q + 1]); } if (++n % 150 === 0) { sync(); yield; } }
-      c.fill('evenodd');
+      for (const row of rows) { for (let k = 1; k < row.length; k++) { if (typeof row[k] !== 'string') continue; const p = CM.Geo.orient(dec(row[k], 1), row[k][0] === 'o'); c.moveTo(p[0], p[1]); for (let q = 2; q < p.length; q += 2) c.lineTo(p[q], p[q + 1]); } if (++n % 150 === 0) { sync(); yield; } }
+      c.fill('nonzero');   // 环方向已统一（geo.js orient），重叠的水面、林地叠加而不抵消
     };
     const line = function (p) { c.beginPath(); c.moveTo(p[0], p[1]); for (let q = 2; q < p.length; q += 2) c.lineTo(p[q], p[q + 1]); c.stroke(); };
     yield* poly(G.woods || [], dark ? '#22362f' : '#dbe9dc');

@@ -233,6 +233,26 @@
       return { meta: meta, text: text };
     });
   }
+  // 对岸城市的只读线网预览；沿用网页存储重连与迁移校验。
+  const previews = new Map();
+  Save.linePreview = function (slotId) {
+    const meta = Save.slotInfo(slotId);
+    if (!meta) return Promise.reject(new Error('存档不存在'));
+    if (previews.has(meta.key)) return Promise.resolve(previews.get(meta.key));
+    return readSlotText(slotId).then(function (r) {
+      const pl = Save.parseEnvelope(r.text).payload, net = pl.net, q = function (v) { return Math.round(v * 10) / 10; };
+      const out = { segs: [], st: [], lines: Object.keys(net.lines || {}).length, stations: Object.keys(net.stations || {}).length, clock: pl.clock ? [pl.clock.y, pl.clock.m] : null };
+      for (const id in net.segments) {
+        const s = net.segments[id], a = net.stations[s.a], b = net.stations[s.b], L = net.lines[s.line]; if (!a || !b) continue;
+        const pts = [q(a.x), q(a.y)]; for (const p of s.pts || []) pts.push(q(p[0]), q(p[1])); pts.push(q(b.x), q(b.y));
+        out.segs.push([L && L.color || '#8a94a6', s.type || 'underground', pts]);
+      }
+      for (const id in net.stations) { const s = net.stations[id]; out.st.push(q(s.x), q(s.y)); }
+      if (previews.size > 24) previews.clear();
+      previews.set(r.meta.key, out);
+      return out;
+    });
+  };
   // 进度重命名保存在索引中，不重写每个历史快照；读取与导出时将最新名称应用到副本。
   function parseSlot(r) {
     const parsed = Save.parseEnvelope(r.text);

@@ -6,6 +6,25 @@
   const h = U.h, I = CM.ICON, ic = CM.icon;
   const snd = function (name) { if (CM.Sound) CM.Sound.play(name); };
 
+  // 滑块的已选部分着色（v2.7 界面打磨）：浏览器的滑块没有「已填充轨道」，用 CSS 变量 --p 画出来。
+  // 拖动时由 input 事件更新；代码改值（el.value = …）时由下面替换的 value 写入器更新；新加入页面的滑块由观察器补上
+  const fillRange = function (el) {
+    const min = el.min === '' ? 0 : +el.min, max = el.max === '' ? 100 : +el.max, v = +el.value;
+    el.style.setProperty('--p', (max > min ? U.clamp((v - min) / (max - min), 0, 1) * 100 : 0).toFixed(2) + '%');
+  };
+  (function () {
+    const P = HTMLInputElement.prototype, d = Object.getOwnPropertyDescriptor(P, 'value');
+    if (d && d.set && !P.__rangeFill) {
+      Object.defineProperty(P, 'value', { configurable: true, enumerable: d.enumerable, get: d.get, set: function (v) { d.set.call(this, v); if (this.type === 'range') fillRange(this); } });
+      P.__rangeFill = true;
+    }
+    document.addEventListener('input', function (e) { if (e.target && e.target.type === 'range') fillRange(e.target); }, true);
+    const scan = function (n) { if (n.nodeType !== 1) return; if (n.tagName === 'INPUT' && n.type === 'range') fillRange(n); else if (n.querySelectorAll) n.querySelectorAll('input[type=range]').forEach(fillRange); };
+    const start = function () { new MutationObserver(function (list) { for (const m of list) m.addedNodes.forEach(scan); }).observe(document.body, { childList: true, subtree: true }); scan(document.body); };
+    if (document.body) start(); else document.addEventListener('DOMContentLoaded', start);
+  })();
+  CM.fillRange = fillRange;   // 只改了 min / max 时手动刷新
+
   // 分析图层（v1.9 起分为三组）：城市（人口、职住、设施出行需求、发展）· 交通（拥堵、出行方向、通勤时间、乘地铁比例）· 地铁（覆盖、车站客流、服务缺口、商业开发）
   const LAYER_GROUPS = [['city', '城市'], ['traffic', '交通'], ['metro', '地铁']];
   const LAYERS = [
@@ -258,7 +277,7 @@
     const f = this.feed; if (!f) return;
     if (this.compact()) { f.style.left = ''; f.style.maxWidth = ''; }
     else {
-      const z = CM.Settings.get('uiScale') || 1;
+      const z = CM.Settings.scale();
       const rw = Math.max(368 * z, this.right ? this.right.getBoundingClientRect().width : 0) + 24 * z;
       // 左侧与右侧对称（居中于窗口）；教程时让开左上的引导卡片
       const dock = document.body.classList.contains('has-coach') ? 460 * z : rw, avail = window.innerWidth - rw - dock;
@@ -267,7 +286,7 @@
     }
     // 剪报：贴在地图右下角，右侧面板打开时让开面板（短时出现的卡片，不盖住面板内容）；
     // 满意度入口在面板下沿之下（面板最低到窗口底部 100px 处），位置固定不动
-    if (this.newsHost) { const zz = CM.Settings.get('uiScale') || 1, op = this.right && !this.right.classList.contains('closed') && !this.right.classList.contains('hidden'), rx = ((op && window.innerWidth > 760 ? this.right.getBoundingClientRect().width + 24 : 14) / zz) + 'px'; this.newsHost.style.right = rx; }
+    if (this.newsHost) { const zz = CM.Settings.scale(), op = this.right && !this.right.classList.contains('closed') && !this.right.classList.contains('hidden'), rx = ((op && window.innerWidth > 760 ? this.right.getBoundingClientRect().width + 24 : 14) / zz) + 'px'; this.newsHost.style.right = rx; }
     // 空间不足时收起重复的暂停提示；顶栏暂停/继续按钮仍保留，图层标题和选项不被覆盖。
     const chip = this.pauseChip, card = this.legendCard;
     if (chip) {
@@ -325,10 +344,10 @@
     px('--mobile-panel-bottom', Math.max(0, innerHeight - controlsTop + 8));
     // 底部抽屉出现后，图层图例与教程只使用上方剩余空间。
     // 使用布局位置，避免抽屉入场动画的临时位移让地图控件占用抽屉空间。
-    const panelTop = this.compact() && innerHeight >= innerWidth && visible(this.right) ? this.right.offsetTop * (CM.Settings.get('uiScale') || 1) : controlsTop;
+    const panelTop = this.compact() && innerHeight >= innerWidth && visible(this.right) ? this.right.offsetTop * (CM.Settings.scale()) : controlsTop;
     const sidePanel = this.compact() && innerWidth > innerHeight && visible(this.right) ? this.right.getBoundingClientRect() : null;
     let sideBottom = panelTop;
-    const z = CM.Settings.get('uiScale') || 1, scaleEdge = Math.min(controlsTop, panelTop);
+    const z = CM.Settings.scale(), scaleEdge = Math.min(controlsTop, panelTop);
     const scaleWidth = Math.max(0, (sidePanel ? sidePanel.left : v.right) - v.left - 68 * z);
     const scaleTight = this.compact() && (scaleEdge - hud.bottom < 72 || scaleWidth < 80 || (document.getElementById('coach') && scaleEdge - hud.bottom < 220));
     root.classList.toggle('mobile-scale-tight', scaleTight);
@@ -340,7 +359,7 @@
       if (!scaleTight && CM.Settings.get('scaleBar') !== false && visible(this.scaleBar)) sideBottom = Math.min(sideBottom, this.scaleBar.getBoundingClientRect().top - 8);
     } else this._scaleMaxPx = null;
     px('--mobile-side-bottom', sideBottom);
-    px('--mobile-left-width', sidePanel ? Math.max(0, sidePanel.left - v.left - 68 * (CM.Settings.get('uiScale') || 1)) : v.right - v.left);
+    px('--mobile-left-width', sidePanel ? Math.max(0, sidePanel.left - v.left - 68 * (CM.Settings.scale())) : v.right - v.left);
     px('--mobile-feed-right', sidePanel ? innerWidth - sidePanel.left + 8 : innerWidth - v.right + 8);
     const coach = document.getElementById('coach');
     px('--mobile-legend-top', visible(coach) ? coach.getBoundingClientRect().bottom + 8 : hud.bottom + 6);
@@ -348,7 +367,7 @@
     for (const el of [document.getElementById('coach'), this.legendCard]) if (visible(el)) feedTop = Math.max(feedTop, el.getBoundingClientRect().bottom + 8);
     px('--mobile-feed-top', feedTop);
     px('--mobile-feed-height', Math.max(0, Math.min(v.h * .35, sideBottom - feedTop - 8)));
-    const noticeLeft = v.left + 60 * (CM.Settings.get('uiScale') || 1), noticeBottom = Math.min(controlsTop, sideBottom);
+    const noticeLeft = v.left + 60 * (CM.Settings.scale()), noticeBottom = Math.min(controlsTop, sideBottom);
     px('--mobile-notice-left', noticeLeft);
     px('--mobile-notice-width', Math.max(0, (sidePanel ? sidePanel.left : v.right) - noticeLeft - 8));
     px('--mobile-notice-bottom', innerHeight - noticeBottom + 8);
@@ -363,18 +382,13 @@
   UI.prototype.layoutHud = function () {
     this.closeTimeOptions(); this.unfoldMetrics();
     this.placeFeed();
-    const w = window.innerWidth / (CM.Settings.get('uiScale') || 1);
+    const w = window.innerWidth / (CM.Settings.scale());
     for (const b of [1540, 1400, 1260, 1080, 960, 820, 400, 360, 300]) this.top.classList.toggle('lt' + b, w < b);
     for (const k in this.pills) this.pills[k].el.classList.remove('squeezed');
     this.queueLayout();
   };
   // 指标栏放不下时，按优先级从低到高收起（经济 → 满意度 → 分担率 → 人口 → 拥堵）
   const METRIC_ORDER = ['money', 'econ', 'pop', 'share', 'cong'];
-  UI.prototype.metricEl = function (key) {
-    const p = this.pills[key]; if (!p) return null;
-    if (p.el.dataset.fold && this.mMore.classList.contains('off')) return this.mFold;
-    return p.el;
-  };
   UI.prototype.fitHud = function () {
     const m = this.top.querySelector('.cluster.metrics'); if (!m || !m.clientWidth) return;
     const over = function () { return m.scrollWidth > m.clientWidth + 1; };
@@ -534,7 +548,7 @@
   // App 是模态窗口；Tab 不进入背景 HUD，内层对话框先处理键盘。
   UI.prototype.appKey = function (e, app, close) {
     if (e.key !== 'Tab' && e.key !== 'Escape') return;
-    if (!this.screen.classList.contains('hidden') || Array.from(document.querySelectorAll('.qpop,.dropdown')).some(function (p) { return !app.contains(p) && p.getClientRects().length; })) return;
+    if (!this.screen.classList.contains('hidden') || Array.from(document.querySelectorAll('.qpop,.dropdown,.dd-pop')).some(function (p) { return !app.contains(p) && p.getClientRects().length; })) return;
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); return; }
     const items = Array.from(app.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),a[href],[tabindex="0"]')).filter(function (el) { return el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden' && !el.closest('[inert]'); });
     const active = document.activeElement, first = items[0], last = items[items.length - 1];
@@ -560,7 +574,7 @@
     g.on('toast', function (t) {
       const go = function (tab) { return function () { self.taskTab = tab; self.openPage('tasks', tab, { root: true }); }; };
       if (t.ppp && t.kind === 'good') snd('contract');
-      self.toast(t.text, t.kind, t.offer ? { label: '查看挑战', fn: go('active') } : (t.ppp ? { label: '查看合同', fn: go('ppp') } : (t.fleet ? { label: '列车运营', fn: function () { self.openObj('line', t.fleet, 'ops'); } } : (t.models ? { label: '查看车型', fn: function () { self.openPage('fleet', null, { root: true }); } } : (t.fare ? { label: '调整票价', fn: function () { self.openPage('finance', 'ov', { root: true }); } } : undefined)))));
+      self.toast(t.text, t.kind, t.offer ? { label: '查看挑战', fn: go('active') } : (t.ppp ? { label: '查看合同', fn: go('ppp') } : (t.fleet ? { label: '列车运营', fn: function () { self.openObj('line', t.fleet, 'ops'); } } : (t.models ? { label: '查看车型', fn: function () { self.openPage('fleet', null, { root: true }); } } : (t.fare ? { label: '调整票价', fn: function () { self.openOpsApp('fare'); } } : undefined)))));
     });
     // 车队变化（v2.5）：正在看的线路页与车队页随之刷新
     g.on('fleet', function () { const top = self.stack[self.stack.length - 1]; if (top && (top.kind === 'line' || top.kind === 'fleet')) self.rerenderPage(); else if (self.opsApp) self.opsApp.refresh(); });
@@ -654,7 +668,7 @@
     const on = CM.Settings.get('scaleBar') !== false;
     if (on !== this._sbOn) { this._sbOn = on; el.style.display = on ? '' : 'none'; }
     if (!on) return;
-    const cx = R.w / 2, cy = R.h / 2, a = R.unproject(cx - 50, cy, 0), b = R.unproject(cx + 50, cy, 0), zm = CM.Settings.get('uiScale') || 1;
+    const cx = R.w / 2, cy = R.h / 2, a = R.unproject(cx - 50, cy, 0), b = R.unproject(cx + 50, cy, 0), zm = CM.Settings.scale();
     const mpp = U.dist(a.x, a.y, b.x, b.y) * CFG.CELL_M / 100 * zm;
     if (!(mpp > 0) || !isFinite(mpp)) return;
     const maxWidth = this._scaleMaxPx == null ? 120 : Math.min(120, this._scaleMaxPx / zm);
@@ -739,9 +753,9 @@
       if (on && kind === 'finance') on = (top.id === 'econ') === (k === 'econ');
       c[k].el.classList.toggle('on', on);
     }
+    this.mFold.classList.toggle('has-on', !!this.mMore.querySelector('.pill.on'));
     this.hbtns.tasks.classList.toggle('on', !!top && top.kind === 'tasks');
   };
-  function fmtHM(t) { if (!t) return ''; const d = new Date(t); return U.pad2(d.getHours()) + ':' + U.pad2(d.getMinutes()); }
   // 存档状态：注明已保存的是哪个游戏时刻，避免把旧快照当作当前进度
   UI.prototype.saveStatusText = function () {
     const s = this.save;
@@ -1155,7 +1169,7 @@
       return [h('span', { class: 'to-sep' }), h('div', { class: 'seg-ctl sm' }, b)];
     };
     const typeCtl = grp('方式', segc(T.buildType, [['underground', '地下', '造价最高；越江为隧道，可穿越山体与保护建筑'], ['surface', '地面', '造价最低；越江为桥梁，两条地面线不能平交'], ['elevated', '高架', '造价居中；越江为桥梁']], function (v) { T.buildType = v; }));
-    const sizeCtl = function (label) { return grp(label, segc(T.stationSize, ['S', 'M', 'L'].map(function (sz) { return [sz, mc.sizeName[sz].replace('型', ''), mc.sizeName[sz] + '车站：' + U.fmtInt(mc.stationCap[sz]) + ' 人次/时 · 编组上限 ' + mc.carsBySize[sz] + ' 节 · 约 ' + U.fmtMoney(M.stationCost(T.buildType, sz, y))]; }), function (v) { T.stationSize = v; })); };
+    const sizeCtl = function (label) { return grp(label, segc(T.stationSize, M.sizeList(y, T.stationSize).map(function (sz) { return [sz, mc.sizeName[sz].replace('型', ''), mc.sizeName[sz] + '车站：' + U.fmtInt(mc.stationCap[sz]) + ' 人次/时 · 编组上限 ' + mc.carsBySize[sz] + ' 节 · 约 ' + U.fmtMoney(M.stationCost(T.buildType, sz, y))]; }), function (v) { T.stationSize = v; })); };
     this._replacingToolOpts = true;
     try { el.innerHTML = ''; } finally { this._replacingToolOpts = false; }
     if (T.tool === 'line') {
@@ -1240,7 +1254,7 @@
     };
     document.body.appendChild(box);
     box._place = function () {
-      const v = self.viewport(), z = CM.Settings.get('uiScale') || 1, q = self.R.P(s.x, s.y, 0);
+      const v = self.viewport(), z = CM.Settings.scale(), q = self.R.P(s.x, s.y, 0);
       const top = self.compact() ? self.top.getBoundingClientRect().bottom + 6 : v.top + 8;
       const bottom = self.compact() ? Math.min(v.bottom, self.toolbar.getBoundingClientRect().top - 8) : v.bottom;
       box.style.maxWidth = Math.max(0, v.right - v.left - 16) / z + 'px';
@@ -1528,7 +1542,7 @@
   UI.prototype.placeLayerPanel = function () {
     const p = this.layerPanel;
     // 在按钮旁展开；同时检查图例、草案、工具栏、教程及手机安全视区。
-    const z = CM.Settings.get('uiScale') || 1, r = this.layerBtn.getBoundingClientRect(), v = this.viewport();
+    const z = CM.Settings.scale(), r = this.layerBtn.getBoundingClientRect(), v = this.viewport();
     const root = getComputedStyle(document.documentElement), compact = this.compact();
     const lo = compact ? parseFloat(root.getPropertyValue('--mobile-hud-bottom')) || v.top + 8 : v.top + 8;
     const hi = compact ? parseFloat(root.getPropertyValue('--mobile-side-bottom')) || v.bottom : v.bottom;
@@ -1710,6 +1724,7 @@
   };
   UI.prototype.openPage = function (kind, id, opts) {
     opts = opts || {};
+    if (kind === 'finance' && id === 'fare') { this.openOpsApp('fare'); return; }
     // 居民满意度详情（v2.3）融入「地铁圈」App 的满意度视图，不再从右侧面板打开
     if (kind === 'metric' && id === 'sat' && this.openVoicesApp) { this.openVoicesApp('sat'); return; }
     const top = this.stack[this.stack.length - 1];
@@ -1739,10 +1754,6 @@
     this.placeFeed();
   };
   UI.prototype.rerenderPage = function () { if (this.stack.length) this.renderPage(false); if(this.opsApp)this.opsApp.refresh(); };
-  UI.prototype.refreshBuild = function () {
-    const top = this.stack[this.stack.length - 1];
-    if (top && top.kind === 'build') this.renderPage(false);
-  };
   UI.prototype.refreshPrediction = function () {
     const top = this.stack[this.stack.length - 1];
     if (!top || top.kind !== 'build' || !this.predBox) return;
@@ -1975,7 +1986,7 @@
   // 车站规模卡片：容量、编组上限、建设费、日运营费。
   // opts：{ type, cur（当前选择）, base（既有车站的已建规模，新建时为空）, rebuild（建设方式已改，按改建计费）, onPick }
   UI.prototype.sizeCards = function (opts) {
-    const g = this.g(), y = g.clock.y, mc = CFG.metro, oi = g.econ.opsIndex(y), ord = ['S', 'M', 'L'];
+    const g = this.g(), y = g.clock.y, mc = CFG.metro, oi = g.econ.opsIndex(y), ord = M.sizeList(y, opts.base === 'XL' || opts.cur === 'XL' ? 'XL' : null);
     const wrap = h('div');
     const cards = h('div', { class: 'size-cards' });
     const costOf = function (sz) { return M.stationCost(opts.type, sz, y); };
@@ -2333,6 +2344,77 @@
     }
   };
   UI.prototype.cardHead = function (icon, badge, title) { return h('div', { class: 'card-head' }, h('span', { class: 'badge ' + badge }, ic(icon)), h('h2', null, title)); };
+  // 游戏风格的下拉菜单（v2.7）：代替系统下拉框，外观跟随主题和界面缩放。用法与系统下拉框相同：读写 el.value，监听 'change'。
+  // o.items：[[值, 文字, 线路（可选，显示线路色块）]]；o.value 当前值；o.label 无障碍名称；o.cls 附加样式。键盘 ↑↓ 选择、Enter 确定、Esc 收起
+  UI.dropdown = function (o) {
+    const items = (o.items || []).map(function (it) { return [String(it[0]), it[1], it[2] || null]; });
+    let val = o.value != null ? String(o.value) : (items[0] ? items[0][0] : ''), pop = null;
+    const sw = function (L) { return L ? h('span', { class: 'dd-sw', style: { background: AX.line(L) } }) : null; };
+    const txt = h('span', { class: 'dd-t' });
+    const btn = h('button', { type: 'button', class: 'dd' + (o.cls ? ' ' + o.cls : ''), 'aria-haspopup': 'listbox', 'aria-expanded': 'false', 'aria-label': o.label || null, 'data-silent': '1' }, txt, h('i', { class: 'dd-c' }, ic('chev', 13)));
+    const sync = function () {
+      const it = items.find(function (x) { return x[0] === val; });
+      txt.replaceChildren.apply(txt, [sw(it && it[2]), h('span', null, it ? it[1] : '')].filter(Boolean));
+      if (CM.I18n) CM.I18n.localize(btn);
+    };
+    // 只在菜单内部滚动（scrollIntoView 会连带滚动后面的面板，触发「滚动即收起」）
+    const reveal = function (el) { if (!pop || !el) return; el.focus({ preventScroll: true }); if (el.offsetTop < pop.scrollTop) pop.scrollTop = el.offsetTop - 4; else if (el.offsetTop + el.offsetHeight > pop.scrollTop + pop.clientHeight) pop.scrollTop = el.offsetTop + el.offsetHeight - pop.clientHeight + 4; };
+    const onKey = function (e) {
+      if (!pop) return;
+      const opts = Array.from(pop.querySelectorAll('.dd-o')), i = opts.indexOf(document.activeElement);
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true); }
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); e.stopPropagation(); const n = opts.length; if (n) reveal(opts[i < 0 ? 0 : (i + (e.key === 'ArrowDown' ? 1 : n - 1)) % n]); }
+      else if ((e.key === 'Enter' || e.key === ' ') && i >= 0) { e.preventDefault(); e.stopPropagation(); opts[i].click(); }
+      else if (e.key === 'Tab') close(true);
+    };
+    const outside = function (e) { if (pop && !pop.contains(e.target) && !btn.contains(e.target)) close(false); };
+    const away = function (e) { if (e && e.type === 'scroll' && pop && pop.contains(e.target)) return; close(false); };
+    let watch = 0;   // 所在界面重画、按钮被移走时一并收起
+    function close(focus) {
+      if (!pop) return;
+      clearInterval(watch);
+      pop.remove(); pop = null;
+      btn.classList.remove('open'); btn.setAttribute('aria-expanded', 'false');
+      window.removeEventListener('pointerdown', outside, true); window.removeEventListener('resize', away); document.removeEventListener('scroll', away, true); document.removeEventListener('keydown', onKey, true);
+      if (focus) btn.focus({ preventScroll: true });
+    }
+    const pick = function (v) {
+      const changed = v !== val; val = v; sync(); close(true);
+      if (changed) { snd('soft'); btn.dispatchEvent(new Event('change')); if (o.onChange) o.onChange(v); }
+    };
+    const open = function () {
+      if (pop) { close(true); return; }
+      if (btn.disabled || !items.length) return;
+      pop = h('div', { class: 'dd-pop', role: 'listbox', 'aria-label': o.label || null }, items.map(function (it) {
+        const on = it[0] === val;
+        return h('button', { type: 'button', class: 'dd-o' + (on ? ' on' : ''), role: 'option', 'aria-selected': on ? 'true' : 'false', 'data-silent': '1', onclick: function () { pick(it[0]); } }, sw(it[2]), h('span', { class: 'grow' }, it[1]), on ? ic('check', 14) : null);
+      }));
+      document.body.appendChild(pop);
+      if (CM.I18n) CM.I18n.localize(pop);
+      // 放在按钮下方，下方放不下且上方更宽时放到上方；不超出窗口。菜单随界面缩放（zoom），位置和尺寸按缩放换算
+      const z = (CM.Settings && CM.Settings.scale()) || 1, r = btn.getBoundingClientRect();
+      const v = CM.ui ? CM.ui.viewport() : { left: 0, top: 0, right: innerWidth, bottom: innerHeight };
+      pop.style.maxWidth = Math.max(0, (v.right - v.left - 16) / z) + 'px';
+      pop.style.minWidth = (Math.min(r.width, v.right - v.left - 16) / z) + 'px';
+      const want = Math.min(pop.scrollHeight * z, 320 * z), below = v.bottom - r.bottom - 10, above = r.top - v.top - 10, up = below < want && above > below;
+      const ht = Math.max(0, Math.min(want, up ? above : below));
+      pop.style.maxHeight = (ht / z) + 'px';
+      pop.style.left = (U.clamp(r.left, v.left + 8, Math.max(v.left + 8, v.right - pop.offsetWidth * z - 8)) / z) + 'px';
+      pop.style.top = ((up ? r.top - ht - 4 : r.bottom + 4) / z) + 'px';
+      if (up) pop.classList.add('up');
+      btn.classList.add('open'); btn.setAttribute('aria-expanded', 'true');
+      window.addEventListener('pointerdown', outside, true); window.addEventListener('resize', away); document.addEventListener('scroll', away, true); document.addEventListener('keydown', onKey, true);
+      watch = setInterval(function () { if (!btn.isConnected) close(false); }, 250);
+      reveal(pop.querySelector('.dd-o.on') || pop.querySelector('.dd-o'));
+      snd('soft');
+    };
+    btn.addEventListener('click', open);
+    btn.addEventListener('keydown', function (e) { if (!pop && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); open(); } });
+    Object.defineProperty(btn, 'value', { get: function () { return val; }, set: function (v) { val = String(v); sync(); } });
+    btn.ddClose = close;
+    sync();
+    return btn;
+  };
   UI.prototype.confirm = function (title, text, okLabel, onOk, danger, icon) {
     const self = this;
     const prevCls = this.screen.className;
@@ -2591,10 +2673,8 @@
       h('div', { class: 'modal-actions' }, h('button', { class: 'btn primary sm', onclick: close }, '返回')));
     this.openScreen(card, close);
   };
-  // 开始游戏 → 选择地图：每张地图可开始新游戏（选择模式）、继续该地图最近的进度，或读取该地图的存档
-  UI.prototype.showNewGame = function () { this.showMapSelect(); };
   // mapId：只显示该地图的进度（从地图选择页进入时）
-  // onBack（v2.5）：返回时回到打开它的界面（如世界地图办公桌上的档案盒）
+  // onBack：返回时回到打开它的界面。
   UI.prototype.showSaveManager = function (inGame, mapId, onBack) {
     const self = this;
     const fileIn = h('input', { type: 'file', accept: '.json,.cmsave,application/json', style: { display: 'none' }, onchange: function (e) { const f = e.target.files[0]; if (f) self.importFile(f, true); e.target.value = ''; } });
@@ -2934,7 +3014,7 @@
     const g = this.g(), self = this;
     const card = h('div', { class: 'card' }, this.cardHead('error', 'b-red', '经营挑战失败'),
       this.callout('bad', 'error', h('div', null, f.reasons.map(function (r) { return h('div', null, '· ' + r); }))),
-      this.kv([['资金', U.fmtMoney(g.econ.funds)], ['满意度', Math.round(g.econ.sat) + ''], ['连续负余额', g.econ.negMonths + ' 个月'], ['满意度过低', g.econ.lowSatMonths + ' 个月']]),
+      this.kv([['资金', U.fmtMoney(f.funds != null ? f.funds : g.econ.funds)], ['满意度', Math.round(g.econ.sat) + ''], ['连续负余额', g.econ.negMonths + ' 个月'], ['满意度过低', g.econ.lowSatMonths + ' 个月']]),
       h('div', { class: 'note', style: { marginTop: '8px' } }, '可以查看财政与指标详情了解恶化原因；读取之前的存档重新经营，或转为自由建造继续发展这座城市（城市经济照常模拟）。'),
       h('div', { class: 'modal-actions' },
         h('button', { class: 'btn', onclick: function () { self.closeScreen(); self.openPage('finance', null, { root: true }); } }, ic('coin'), '财政详情'),
@@ -2977,7 +3057,7 @@
     for (const k of Object.keys(this.timeOptions)) if (k !== kind) this.toggleTimeOptions(k, false);
     this.toggleMetricsMore(false);
     if (this.tools) this.tools.keys.clear();
-    const r = o.button.getBoundingClientRect(), z = CM.Settings.get('uiScale') || 1, w = o.menu.offsetWidth * z, hh = o.menu.offsetHeight * z;
+    const r = o.button.getBoundingClientRect(), z = CM.Settings.scale(), w = o.menu.offsetWidth * z, hh = o.menu.offsetHeight * z;
     o.menu.style.left = (U.clamp(r.right - w, 8, Math.max(8, window.innerWidth - w - 8)) / z) + 'px';
     o.menu.style.top = (U.clamp(r.bottom + 8, 8, Math.max(8, window.innerHeight - hh - 8)) / z) + 'px';
     o.menu.querySelector('button').focus();

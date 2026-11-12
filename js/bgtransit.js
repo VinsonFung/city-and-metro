@@ -7,7 +7,7 @@
   const U = CM.U;
   const BG = { trains: [], boats: [], key: '', routes: [], ferries: [] };
   CM.BgTransit = BG;
-  const REGION_KEY = { '中国内地': 'cn', '中国香港': 'hk', '中国台湾': 'tw', '日本': 'jp', '法国': 'eu' };
+  const REGION_KEY = { '中国内地': 'cn', '中国香港': 'hk', '中国台湾': 'tw', '日本': 'jp', '法国': 'eu', '英国': 'eu' };
   const TRAIN_COL = { jp: ['#3a9a4a', '#f08a24', '#2a8fd0', '#c9c3b6'], eu: ['#2f4f3f', '#6b2f2a', '#3a4a6a'], hk: ['#7a2e2a', '#2f5a8a'], cn: ['#2f6b3a', '#3a5a8a'], tw: ['#e9eef2', '#2f5a8a'] };
   const CAR_L = 0.09, CAR_GAP = 0.012;   // 车厢长度与间隙（格）
   const pick = function (a) { return a[Math.floor(Math.random() * a.length)]; };

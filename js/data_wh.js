@@ -19,6 +19,22 @@
   const wangjiadun = poly([[30.6215, 114.2465], [30.6215, 114.2600], [30.6110, 114.2700], [30.5995, 114.2690], [30.5995, 114.2515], [30.6105, 114.2445]]);
 
   const data = {
+    // 城市特色（traits.js，规则见《地图设计与城市特色机制.md》）。新条目加在末尾，已触发事件按序号记录
+    traits: [
+      { use: 'crossing', star: true, icon: 'bridge', label: '两江三镇', text: '长江与汉江把城市分成三镇，越江线路最贵，也最有价值', why: '2012 年以前武汉没有过江地铁，三镇之间只靠桥梁、隧道和轮渡。' },
+      { use: 'disaster', level: 'mid', star: true, icon: 'wave', label: '2016 年特大内涝', text: '一周暴雨让城区大面积积水，出行骤降、满意度下滑',
+        on: { y: 2016, m: 7, title: '特大暴雨与内涝', desc: '6 月底到 7 月初，武汉一周降雨超过 560 毫米，破了气象记录，城区大面积积水，交通严重受阻。' }, why: '2016 年 6 月 30 日至 7 月 6 日，武汉周降雨量超过 560 毫米，为有气象记录以来最高。' },
+      { use: 'foresight', level: 'mid', star: true, icon: 'chart', label: '光谷提前布局', text: '光谷爆发前就通地铁，能得到开发商出资，片区也长得更快', id: 'wh-gg', pos: [112.96, 135.96], ym: [2010, 1], before: 2008, r: 7, region: 'guanggu', title: '东湖成为国家自主创新示范区',
+        hit: '东湖高新区获批国家自主创新示范区，早已通车的{st}站让光谷的企业和人才一下子多了起来。', miss: '东湖高新区获批国家自主创新示范区，光谷的人越来越多，可这里还没有地铁。',
+        why: '2009 年 12 月，东湖高新区获批国家自主创新示范区，光谷进入快速增长期。' },
+      { use: 'foresight', level: 'light', label: '武汉站提前布局', id: 'wh-st', at: 'wh_station', ym: [2009, 12], before: 2008, r: 7, region: 'hongshan', title: '武汉站启用',
+        hit: '武广高铁开通，早已通车的{st}站让旅客一下车就能换乘地铁。', miss: '武广高铁开通，武汉站还没有地铁，旅客只能换公交和出租车。', why: '2009 年 12 月武广高铁开通，武汉站同时启用。' },
+      { use: 'guard', level: 'light', label: '三镇古建', guards: ['wh_yhl', 'wh_customs', 'wh_qingchuan', 'wh_guiyuan', 'wh_baotong'], why: '黄鹤楼、晴川阁、归元寺和宝通寺是武汉的历史名胜，汉口保留着江汉关等近代建筑。不划整片历史城区，因为真实的轻轨 1 号线就是高架穿过汉口。' },
+      { use: 'transition', level: 'light', label: '硚口古田转型', region: 'qiaokou', close: { y: 2013, m: 3, title: '古田老工业区转型', desc: '硚口古田一带曾是化工企业密集的老工业区，工厂陆续外迁，片区转向总部办公和文化创意园区。' }, replan: [{ year: 2014, region: 'qiaokou', plan: 'mix' }], why: '古田曾是武汉化工企业密集的地区，2010 年代逐步转型。' },
+      { use: 'megaEvent', level: 'light', label: '2019 军运会', bid: { y: 2015, m: 5, title: '武汉获得世界军人运动会承办权', desc: '国际军体理事会决定由武汉承办 2019 年第七届世界军人运动会，地铁建设随之提速。' }, open: [2019, 10], why: '2015 年 5 月，武汉获得 2019 年第七届世界军人运动会承办权。' },
+      { use: 'scenic', label: '东湖', why: '东湖风景区不能开发，线路要绕湖或从地下穿过。' },
+      { use: 'finance', flavor: 'cn' },
+    ],
     city: '武汉', terrainRevision: 2, riverName: '长江', hsrYear: 2009,
     terrainCorrection: {
       title: '武汉水域校正', summary: '武汉水域已校正，原有车站和线路保留',
@@ -257,7 +273,7 @@
         oldRegionIds: ['donghu', 'guanggu', 'airport', 'hankou', 'houhu', 'jiangan', 'qiaokou', 'sixin', 'hanyang', 'wuchang', 'qingshan', 'hongshan', 'zhuankou', 'dongxihu', 'caidian', 'tianhe', 'xiaogan', 'panlong', 'outer'] }], scenario: 'wh-2000',
     region: '中国内地', tagline: '两江三镇，用地铁连成一城', difficulty: 2, tags: ['无地铁开局', '越江', '湖泊'],
     intro: '2000 年的武汉，长江与汉江把城市分成汉口、武昌、汉阳三镇，过江只能挤上两座长江大桥或轮渡。东湖与大大小小的湖泊占去许多土地，光谷、武汉站与王家墩商务区就要出现。你的任务是用越江线路把三镇连成一座城。',
-    features: [['bridge', '两江三镇', '长江与汉江越江段可以建隧道或桥梁'], ['wave', '百湖之市', '东湖风景区不可开发，线路要绕湖或穿湖'], ['building', '光谷与王家墩', '新的产业中心与商务区按年份出现'], ['flag', '7 项历史任务', '从汉口轻轨到军运会']],
+    features: [['wave', '百湖之市', '东湖风景区不可开发，线路要绕湖或穿湖']],
     highlights: [[2001, '「中国光谷」获批'], [2007, '王家墩商务区开发'], [2008, '武汉长江隧道通车'], [2009, '武汉站启用'], [2019, '城市更新']],
     geo: G, data: data,
     econ: { devOffset: -6, money: 1 },   // 出行选择参数：武汉 2000 年约对应广州样本 1994 年的发展阶段

@@ -138,8 +138,8 @@
     let s = FAC_KIND[f.t].slice(), style = null;
     if (f.t === 'scenic') {
       if (/迪士尼|乐园/.test(n)) { s = ['themepark', 820, 660, 60]; style = 'castle'; }   // 东京迪士尼乐园约 51 公顷
-      else if (/动物园/.test(n)) { s = ['garden', 240, 200, 8]; style = 'zoo'; }
-      else if (/湿地|公园|风景区|山|森林|江滩|公墓/.test(n)) s = ['garden', 220, 180, 8];
+      else if (/动物园|飞禽/.test(n)) { s = ['garden', 240, 200, 8]; style = 'zoo'; }
+      else if (/湿地|公园|风景区|山|森林|江滩|海滩|沙滩|公墓/.test(n)) s = ['garden', 220, 180, 8];
       else if (/博物馆|美术馆|文化|创意|坊|宋城/.test(n)) s = ['museum', 160, 120, 16];
       else if (pa) s = ['palace', 160, 120, 20];
     } else if (f.t === 'stadium' && /马场/.test(n)) { s = ['stadium', 620, 380, 18]; style = 'race'; }
@@ -162,16 +162,21 @@
     };
     this._facFoot = foot;
     for (const f of Fac.list(city)) {
-      if (f.lmK >= 0 || f.ext || !FAC_KIND[f.t] || !Fac.active(f, yr, city)) continue;
+      if (f.lmK >= 0 || f.ext || f.noModel || !FAC_KIND[f.t] || !Fac.active(f, yr, city)) continue;
+      const c0 = city.cellAt(f.x, f.y), inScenic = c0 >= 0 && !!city.regions[city.region[c0]].scenic;
       // 附近已有地标代表这个设施（片区类按片区半径，点状设施只看是否重叠）
       const area = f.t === 'shop' || f.t === 'cbd' || f.t === 'venue' || f.r >= 1.5, near = area ? Math.max(1, Math.min(f.r, 2)) : 0.7;
       let taken = false;
       for (let k = 0; k < lms.length && !taken; k++) if (city.landmarkOn[k] && U.dist(lms[k].x, lms[k].y, f.x, f.y) < near) taken = true;
+      // 同一风景区的同名地标已代表设施，不再生成第二座示意建筑。
+      if (inScenic) for (let k = 0; k < lms.length && !taken; k++) if (city.landmarkOn[k] && (lms[k].name.indexOf(f.name) >= 0 || f.name.indexOf(lms[k].name) >= 0) && city.region[city.cellAt(lms[k].x, lms[k].y)] === city.region[c0]) taken = true;
       if (taken) continue;
       const sp = this.facModelSpec(f), big = Math.max(sp.w, sp.d) > 260;
-      // 选址：场地半径内道路最少、离设施最近的陆地格（避开地标、机场、水面与山体）；大场地以设施位置为中心
+      // 风景区本身就是公园；其中的博物馆、动物园等建筑保留真实位置。
+      if (inScenic && sp.kind === 'garden' && !sp.style) continue;
+      // 选址：一般设施寻找邻近空地，大场地与景区内设施保持原位。
       let x = f.x, y = f.y;
-      if (!big) {
+      if (!big && !inScenic) {
         // 片区生成的商业、医院与公园同在片区中心：已被其他设施模型占用的格跳过，范围内没有空位时向外放宽
         let best = Infinity;
         for (const R of [Math.max(0.7, Math.min(f.r, 1.5)), 2.2]) {

@@ -395,6 +395,10 @@
     for (const id in net.segments) { const s = net.segments[id]; if (s.line === lid && (s.a === sid || s.b === sid)) { const t = M.stationTangent(net, s, sid); let a = Math.atan2(t[1], t[0]) % Math.PI; if (a < 0) a += Math.PI; return a; } }
     return null;
   };
+  // 车站规模（v2.7）：超大型站在城市进入最后一个历史阶段后解锁，教程地图没有；已有的超大型站一直可选
+  M.xlYear = function () { const D = CM.DATA, S = D.stages; return D.fictional || !S || !S.length ? Infinity : S[S.length - 1][0]; };
+  M.xlUnlocked = function (y) { return y >= M.xlYear(); };
+  M.sizeList = function (y, cur) { return M.xlUnlocked(y) || cur === 'XL' ? ['S', 'M', 'L', 'XL'] : ['S', 'M', 'L']; };
   // 站台方向相对已建是否有实质变化（v2.6.1）：接新区段时自动锁定的方向等于原来的方向，不算改动，也不算既有区段改线
   M.platDirChanged = function (off, draft, sid, lid) {
     const a0 = draft.stations[sid], b0 = off.stations[sid], a = a0 && a0.pd && a0.pd[lid], b = b0 && b0.pd && b0.pd[lid];
@@ -881,7 +885,11 @@
   M.checkSite = function (city, x, y, type) {
     const c = city.cellAt(x, y);
     if (c < 0) return { ok: false, msg: '超出地图范围', how: '把车站移回地图内。' };
-    if (city.waterDistAt(x, y) < 0.05) return { ok: false, msg: '车站不能建在水面上（' + city.riverNameAt(x, y) + '）', how: '把车站移到岸边；跨江请用两岸的车站之间的轨道（地下为隧道、高架为桥梁）。' };
+    if (city.waterDistAt(x, y) < 0.05) {
+      // 窄河道（溪流、水渠、小河）上可以建地下或高架车站；湖面、宽河和海面上都不行
+      if (!city.narrowWaterAt(x, y)) return { ok: false, msg: '车站不能建在水面上（' + city.riverNameAt(x, y) + '）', how: '把车站移到岸边；跨江请用两岸的车站之间的轨道（地下为隧道、高架为桥梁）。' };
+      if (type === 'surface') { const nm = city.riverNameAt(x, y); return { ok: false, msg: '地面车站不能建在河道上' + (nm === '河道' ? '' : '（' + nm + '）'), how: '改成地下或高架车站，或把车站移到岸边。' }; }
+    }
     let rg = city.regions[city.region[c]];
     const lockedHere = city.cellLocked(c);   // 可建设范围按格判断（v2.2，见 City.lockState）
     if (rg.scenic && lockedHere) rg = city.regions[city.lockRegion(c)];   // 未开放区域中的风景区按所在区域算（v2.2）
@@ -889,7 +897,7 @@
     let gate = null;
     if (rg.scenic) {
       gate = M.scenicGate(city, x, y);
-      if (!gate) return { ok: false, msg: rg.name + '：山地风景区不能设站', how: '把车站移出风景区，轨道可以地下穿越（需支付风景区环境保护费）；景点约 600 m 内可建地下「景区站」。' };
+      if (!gate) return { ok: false, msg: rg.name + '：风景保护区不能设站', how: '把车站移出保护区，轨道可以地下穿越（需支付风景区环境保护费）；景点约 600 m 内可建地下「景区站」。' };
       if (type !== 'underground') return { ok: false, msg: rg.name + '：风景区内只能建地下车站（「' + gate.name + '」景区站）', how: '把建设方式改为「地下」即可在景点附近设站。' };
     }
     if (!gate && lockedHere) {
@@ -1127,7 +1135,7 @@
         } else if (moved > 1) {
           res.changes.mod.push('车站「' + s.name + '」微调位置 ' + Math.round(moved) + ' m（免费' + (Math.abs(fromSite - moved) > 5 ? '，距原选址 ' + Math.round(fromSite) + ' m' : '') + '）');
         }
-        const ord = { S: 0, M: 1, L: 2 };
+        const ord = { S: 0, M: 1, L: 2, XL: 3 };
         if (ord[s.size] > ord[o.size] && s.type === o.type) {
           res.changes.mod.push('车站「' + s.name + '」升级为' + CFG.metro.sizeName[s.size]);
           item('upgrade', '升级车站 ' + s.name + '（' + CFG.metro.sizeName[o.size] + '→' + CFG.metro.sizeName[s.size] + '）', (M.stationCost(s.type, s.size, year) - M.stationCost(s.type, o.size, year)) * C.upgradeFactor, id);

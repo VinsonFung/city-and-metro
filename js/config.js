@@ -2,9 +2,9 @@
 // 全局参数。PRD 中标注"待确认"的数值在此给出可调整的默认值（DEFAULT），评审确认后只需修改本文件。
 (function (CM) {
   CM.CFG = {
-    GAME_VERSION: '2.5.1',
+    GAME_VERSION: '2.7.0',
     TRAFFIC_MODEL: 4,      // 轻量交通更新；与显示版本独立，确保 v3 存档仍触发安全迁移
-    RULES_REVISION: 7,     // Web v2.5.1: fare and alignment fixes; protect original saves before upgrade.
+    RULES_REVISION: 10,    // v2.7: stopped services, access and task settlement; back up earlier rules before upgrade.
     SAVE_FORMAT: 'city-metro-save',
     SAVE_VERSION: 2,
     SAVE_MIN_VERSION: 2,   // 1.1 起地图改为真实地理，旧版存档的城市数据与之不兼容
@@ -89,11 +89,11 @@
       accel: 0.9, dwell: 30, turnaround: 150,
       latAccel: 0.8,            // 弯道横向加速度上限 → 弯道限速
       carCap: 310,              // 每节车厢定员
-      carsBySize: { S: 4, M: 6, L: 8 }, // 列车编组受沿线最小站台限制
+      carsBySize: { S: 4, M: 6, L: 8, XL: 8 }, // 列车编组受沿线最小站台限制
       fMin: [8, 6, 8, 4],       // 各时段最低发车频率（列/小时）DEFAULT
       fMax: 30,                 // 最小间隔 2 分钟
       targetLF: 0.85,
-      stationCap: { S: 15000, M: 35000, L: 70000 }, // 车站每小时进出站+换乘能力 DEFAULT
+      stationCap: { S: 15000, M: 35000, L: 70000, XL: 140000 }, // 车站每小时进出站+换乘能力 DEFAULT
       minSpacingM: 100,         // 独立车站最小间距；站外换乘仍按实际步行路径上限判断
       // 线形约束（参考城市轨道交通设计规范的量级，DEFAULT）
       minRadiusM: 250,          // 正线最小曲线半径：低于此值不允许
@@ -112,7 +112,7 @@
       levelM: { underground: -15, surface: 0, elevated: 12 }, // 轨面高程（米）
       levelFactor: 0.6,         // 天地换乘：同站增设另一层站台按该建设方式车站造价的 60% 计（共用站厅与出入口）DEFAULT
       levelXferMin: 1.5,        // 天地换乘：进出非主站台层多走的垂直通道时间（分钟，上下车各计一次）DEFAULT
-      sizeName: { S: '小型', M: '中型', L: '大型' },
+      sizeName: { S: '小型', M: '中型', L: '大型', XL: '超大型' },
       typeName: { underground: '地下', surface: '地面', elevated: '高架' },
       height: { underground: -0.11, surface: 0.0, elevated: 0.075 }, // 视觉高度（格）
     },
@@ -145,7 +145,7 @@
 
     ops: {
       carKmCost: 0.0009,        // 万元/车厢公里（≈9 元）
-      stationDaily: { S: 1.5, M: 2.6, L: 4.5 }, // 万元/天
+      stationDaily: { S: 1.5, M: 2.6, L: 4.5, XL: 7.6 }, // 万元/天
       serviceHours: 18,
       inflation: 0.04,
     },

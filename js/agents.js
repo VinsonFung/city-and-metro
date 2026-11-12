@@ -26,7 +26,7 @@
     tw: [[1980, [0.28, 0.10, 0.06, 0.12, 0.04, 0.40]], [2000, [0.36, 0.10, 0.05, 0.10, 0.02, 0.37]], [2020, [0.44, 0.08, 0.05, 0.09, 0.03, 0.31]]],
     jp: [[1950, [0.10, 0.18, 0.16, 0.38, 0.12, 0.06]], [1965, [0.34, 0.18, 0.10, 0.30, 0.05, 0.03]], [1990, [0.62, 0.12, 0.06, 0.18, 0.01, 0.01]], [2020, [0.70, 0.10, 0.05, 0.14, 0.01, 0]]],
   };
-  const REGION_KEY = { '中国内地': 'cn', '中国香港': 'hk', '中国台湾': 'tw', '日本': 'jp', '法国': 'eu' };
+  const REGION_KEY = { '中国内地': 'cn', '中国香港': 'hk', '中国台湾': 'tw', '日本': 'jp', '法国': 'eu', '英国': 'eu' };
   const VCOL = {
     taxi: { cn: ['#c8372d', '#e8b62c', '#2f7fd0'], hk: ['#d0312d', '#d0312d', '#3a9a4a'], tw: ['#f1c232'], jp: ['#2f7a4f', '#f0c419', '#1f2a44', '#e8e8e8'], eu: ['#2d3748', '#1f2a44', '#c8ccd2'] },
     bus: { cn: ['#2e7bd1', '#3a9a5a', '#e0b13a'], hk: ['#c8102e', '#e8d9a8', '#f3c300'], tw: ['#2f6fb6', '#e04a3a'], jp: ['#3a8f4e', '#e8e0c8', '#2e6eb5'], eu: ['#3e7d5a', '#e8e0c8', '#2f8f6a'] },
@@ -224,14 +224,6 @@
     if (!rt.loop) { const lo = Math.min(head, rear), hi = Math.max(head, rear), sh = lo < 0 ? -lo : (hi > total ? total - hi : 0); head += sh; rear += sh; }
     out.head = head; out.rear = rear; out.dir = dir; out.Lt = Lt; out.total = total; out.loop = rt.loop;
     return out;
-  };
-  // 三维每节车厢以自身前后端确定位置和朝向，弯道时不跟着某个折线顶点突然转头。
-  Agents.prototype.trainCar = function (t, k, count, span, out) {
-    const rt=t.g.rt,step=count===1?span.Lt:CAR_M/CFG.CELL_M,gap=GAP_M/CFG.CELL_M*.5,a={},b={};
-    const d0=span.head-span.dir*(k*step+gap),d1=span.head-span.dir*((k+1)*step-gap);
-    U.posAt(rt.pts,rt.cum,wrapD(d0,span.total,span.loop),a);U.posAt(rt.pts,rt.cum,wrapD(d1,span.total,span.loop),b);
-    out.x=(a.x+b.x)/2;out.y=(a.y+b.y)/2;out.a=Math.atan2(a.y-b.y,a.x-b.x);out.h=(heightAt(rt,a)+heightAt(rt,b))/2;
-    out.length=Math.max(1,U.dist(a.x,a.y,b.x,b.y)*CFG.CELL_M);return out;
   };
   // 列车中点的世界坐标（线路调整时判断是否需要淡出）
   Agents.prototype.trainWorld = function (t, out) { const pos = this.trainPos(t, {}); return U.posAt(t.g.rt.pts, t.g.rt.cum, pos.d, out); };
@@ -649,6 +641,8 @@
     const colorFor = (kind) => {
       if (kind === 'tram') return pick(VCOL.tram[rk] || VCOL.tram.eu);
       if (kind === 'taxi' && this.horseTaxi) return pick(VCOL.horse);
+      if (CM.mapId === 'ld' && kind === 'bus') return '#c8102e';   // 伦敦的红色巴士
+      if (CM.mapId === 'ld' && kind === 'taxi') return '#23272e';  // 伦敦的黑色出租车
       if (kind === 'taxi' || kind === 'bus') return pick(VCOL[kind][rk] || VCOL[kind].cn);
       if (kind === 'car') return pick(this.oldCars ? CAR_COLORS_OLD : CAR_COLORS);
       return pick(VCOL[kind]);

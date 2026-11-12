@@ -38,6 +38,8 @@
   Fac.portal = function (f) {
     if (!f || !f.ext) return null;
     if (f._portal && f._portalW === CM.CFG.W) return f._portal;
+    // 城市连接的接驳口（v2.7）：边境在地图中间，接驳口就在设施自己的位置
+    if (f.ext.gate) { f._portal = { x: f.x, y: f.y, ex: f.x, ey: f.y }; f._portalW = CM.CFG.W; return f._portal; }
     const v = f.ext.v, s = Fac.edgeDist(f.x, f.y, v), ex = f.x + v[0] * s, ey = f.y + v[1] * s;
     f._portal = { x: ex - v[0] * 0.1, y: ey - v[1] * 0.1, ex: ex, ey: ey }; f._portalW = CM.CFG.W;
     return f._portal;
@@ -48,24 +50,31 @@
     return !!p && U.dist(st.x, st.y, p.x, p.y) < 1.2;   // 车站被拖离接驳口后不再算接通
   };
   Fac.shortName = function (f) { return f.name.replace(/（.*）/, ''); };
-  // 地铁接通地图外（v2.1）：接驳口有运营中的车站，或接驳点约 800 m 内有运营中的车站，即视为线路在地图边缘接通该设施，
+  // 接驳点或接驳口附近的普通车站（玩家反馈：大兴机场的接驳点周围没有人行道，车站显示已接通却没有旅客）：
+  // 直线距离在范围内就算接通，不要求有路。界面（extLink）和客流（sim.js computeAccess）都用这一条。
+  // 返回到较近一处的距离（格），不算接通时为 -1；口岸只认建在接驳口上的车站，这里总是 -1
+  Fac.extNear = function (f, st) {
+    if (!f.ext || f.ext.gate) return -1;
+    const P = Fac.portal(f), d = Math.min(U.dist(st.x, st.y, f.x, f.y), U.dist(st.x, st.y, P.x, P.y));
+    return d <= 0.8 * CM.CFG.walk.maxAccessM / CM.CFG.CELL_M ? d : -1;
+  };
+  // 地铁接通地图外（v2.1）：接驳口有运营中的车站，或接驳点、接驳口约 800 m 内有运营中的车站，即视为线路在地图边缘接通该设施，
   // 接驳需求由地铁满足。返回车站（编译后网络中的序号、车站、经过的线路），未接通时为 null；按运营网络缓存
   Fac.extLink = function (f, g) {
     if (!f.ext || !g || !g.compiled) return null;
     const C = g.compiled;
     if (C._ext && C._ext.has(f.id)) return C._ext.get(f.id);
-    const R = 0.8 * CM.CFG.walk.maxAccessM / CM.CFG.CELL_M;
-    let best = -1, bd = R, portal = false;
+    let best = -1, bd = Infinity, portal = false;
     C.stations.forEach(function (s, i) {
       if (!C.serviced[i] || portal) return;
       if (Fac.isPortalStation(s, f)) { best = i; bd = 0; portal = true; return; }
-      const d = U.dist(s.x, s.y, f.x, f.y); if (d <= bd) { bd = d; best = i; }
+      const d = Fac.extNear(f, s); if (d >= 0 && d <= bd) { bd = d; best = i; }
     });
     const r = best < 0 ? null : { i: best, st: C.stations[best], lines: Array.from(C.stationLines[best]), d: bd, portal: portal };
     (C._ext || (C._ext = new Map())).set(f.id, r);
     return r;
   };
-  Fac.extText = function (f) { return f.ext ? '在地图' + (EXT_NAME[f.ext.dir] || '') + '侧外约 ' + f.ext.km + ' km' : ''; };
+  Fac.extText = function (f) { return !f.ext ? '' : f.ext.gate ? '通往' + (f.ext.to || '对岸') : '在地图' + (EXT_NAME[f.ext.dir] || '') + '侧外约 ' + f.ext.km + ' km'; };
   const yrOf = function (v) { return v == null ? null : (Array.isArray(v) ? v[0] + ((v[1] || 1) - 1) / 12 : v); };
   const curve = function (v) { return typeof v === 'number' ? [[0, v]] : v; };
 
@@ -94,7 +103,7 @@
       const T = TYPES[s.t]; if (!T) return;
       const f = { k: out.length, id: s.id || ('f' + i), name: s.n, label: s.label || s.n, t: s.t, T: T, x: 0, y: 0, r: s.r != null ? s.r : T.r, lmK: -1,
         open: null, close: yrOf(s.y1), w: s.w != null ? curve(s.w) : null, pax: s.pax || null, p: s.p || T.p, we: s.we || null, note: s.note || '', src: s.src || null,
-        ext: s.ext ? { dir: s.ext[0], km: s.ext[1], v: EXT_DIR[s.ext[0]] || [0, 0] } : null, rw: s.rw || null };   // rw：机场自己的跑道（格坐标，v2.2，用于模型选址）
+        ext: s.ext ? { dir: s.ext[0], km: s.ext[1], v: EXT_DIR[s.ext[0]] || [0, 0], gate: !!s.gate, to: s.to || null } : null, rw: s.rw || null, noModel: !!s.noModel };   // rw：机场自己的跑道（格坐标，v2.2，用于模型选址）
       if (s.lm) {
         const k = lms.findIndex(function (l) { return l.id === s.lm; });
         if (k < 0) return;
@@ -160,7 +169,7 @@
     if (D.fictional || !city.region) return;
     const km = CFG.CELL_M / 1000, popRef = U.interp(CFG.growth.popCurve, CFG.growth.histEnd);
     regs.forEach(function (rg, k) {
-      if (rg.scenic || rg.hub || rg.open == null || !rg.cells || rg.cx == null || rg === D.defaultRegion) return;   // 不含风景区、机场等枢纽、永久不开放的片区与「外围地区」
+      if (rg.scenic || rg.hub || rg.noGen || rg.open == null || !rg.cells || rg.cx == null || rg === D.defaultRegion) return;   // 不含风景区、机场等枢纽、纯工业区（noGen，v2.8）、永久不开放的片区与「外围地区」
       let ctAt = null, best = -1;
       for (const ct of D.centers || []) {
         const c = city.cellAt(ct.x, ct.y);
