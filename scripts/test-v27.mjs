@@ -12,7 +12,7 @@ for(const[,src]of(await readFile(new URL('index.html',root),'utf8')).matchAll(/<
 const C=c.CM,M=C.Metro,copy=v=>JSON.parse(JSON.stringify(v));
 C.UI=function(){};for(const f of ['settings','corp','fleet','netlayout','netreplay','review'])await load('js/'+f+'.js');
 const F=C.Fleet;
-assert.equal(C.CFG.GAME_VERSION,'2.7.0');assert.equal(C.CFG.RULES_REVISION,10);
+assert.equal(C.CFG.GAME_VERSION,'2.7.1');assert.equal(C.CFG.RULES_REVISION,11);
 assert.equal(C.MAP_ORDER.length,12);assert.equal(F.MODELS.length,56);
 assert.equal(F.MODELS.filter(m=>m.maps?.includes('ld')).length,11);
 assert.equal(F.MODELS.filter(m=>m.maps?.includes('sz')).length,2);
@@ -56,7 +56,8 @@ const gate=C.Fac.list(sz.city).find(f=>f.ext?.gate&&f.open<=2020),P=C.Fac.portal
 assert.ok(gate);assert.equal(C.CityLink.connected(sz),false);
 const lid=M.newLine(sz.net),a=M.addStation(sz.net,P.x,P.y,{size:'M',type:'underground'},sz.city),b=M.addStation(sz.net,P.x+4,P.y+4,{size:'M',type:'underground'},sz.city);
 M.addSegment(sz.net,lid,a,b,[],'underground');sz.compiled=M.compile(sz.net,sz.city);
-assert.equal(C.Fac.extLink(gate,sz),null,'nearby ordinary station must not open a border gate');
+assert.equal(C.Fac.isPortalStation({...sz.net.stations[a], x: P.x + 1.1},gate),false);
+assert.equal(C.Fac.extLink(gate,sz).st.id,a,'A station at the border portal must connect even without the snap tag');
 sz.net.stations[a].portal=gate.id;sz.compiled=M.compile(sz.net,sz.city);sz.model.setNetwork(sz.compiled);
 assert.equal(C.CityLink.connected(sz),true);assert.ok(C.Fac.extLink(gate,sz).portal);
 assert.equal(sz.setCrossFee(gate.id,Infinity),false);assert.equal(sz.setCrossFee('unknown',2),false);
@@ -69,7 +70,7 @@ const gateWalk=(g)=>g.model.net.acc.zl[g.model.Z+g.model.fn.ids.indexOf(gate.id)
 assert.ok(Math.abs(gateWalk(restored)-(1+restored.model.crossMin(gate)))<1e-6,'restored access cost must use the saved custom fare from its first calculation');
 restored.econ.fare.flat=6;restored.model.wake(2);
 assert.ok(Math.abs(gateWalk(restored)-(1+restored.model.crossMin(gate)))<1e-6,'fare changes must refresh cached border costs without rebuilding walking paths');
-console.log('PASS Shenzhen, actual portal-only border access, fare cost, income and save restoration');
+console.log('PASS Shenzhen, border access with and without snapping, fare cost, income and save restoration');
 
 // Choose newest normal save across progress groups, preserving the mode boundary.
 const list=C.Save.list;C.Save.list=()=>[{mode:'challenge',slots:[{slotId:'old',savedAt:5},{slotId:'backup',kind:'backup',savedAt:100}]},{mode:'free',slots:[{slotId:'free',savedAt:200}]},{mode:'challenge',slots:[{slotId:'new',savedAt:20}]}];

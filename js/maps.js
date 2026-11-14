@@ -63,7 +63,8 @@
   for (const id in MAPS) {
     const m = MAPS[id], G = m.geo;
     m.mapVersion = m.mapVersion || 1;
-    m.fp = U.fnv([id, m.cfg.W, m.cfg.H, (G.water || []).length, (G.roads || []).length, (G.names || []).length, (m.data.regions || []).map(function (r) { return r.id; }).join(',')].join('|'));
+    const count = G.count || {};
+    m.fp = U.fnv([id, m.cfg.W, m.cfg.H, count.water ?? (G.water || []).length, count.roads ?? (G.roads || []).length, (G.names || []).length, (m.data.regions || []).map(function (r) { return r.id; }).join(',')].join('|'));
   }
   // 位置校正（v2.3 玩家反馈：杭州站位置错位）：部分手填坐标取自国内地图（GCJ-02 坐标系），比 OSM（WGS-84）偏东南 400–600 m。
   // 铁路车站地标、铁路枢纽设施对齐 OSM 同名火车站（800 m 内）；任务与阶段目标的锚点对齐 OSM 同名地铁站（750 m 内）。
@@ -166,10 +167,52 @@
   CM.MAP_ORDER = mapOrder.filter(function (id) { return MAPS[id]; }).sort(function (a, b) {
     return (MAPS[a].difficulty || 2) - (MAPS[b].difficulty || 2) || mapRank.get(a) - mapRank.get(b);
   });
+  // ---------------- 地理数据按需载入（v2.7.1 内存） ----------------
+  // 开始界面背景（广州）的地理数据随页面载入；其他地图启动时只有索引（js/geo-index.js：投影、地名、名称表、要素数量），
+  // 水系、道路、铁路、绿地等完整数据在进入该地图（开局、读档）或画缩略图时由 loadGeo 载入，补进同一个对象（各处持有的引用不变）。
+  // 离开该地图、缩略图画完后由 releaseGeo 释放；地面块线程自行载入同一文件。避免全部城市同时常驻内存
+  const GEO_HEAVY = ['water', 'roads', 'streets', 'rail', 'parks', 'reserves', 'woods', 'admin'], geoLoads = {}, geoHold = {};
+  const GEO_LOAD_TIMEOUT = 60000;
+  CM.geoReady = function (id) { const m = MAPS[id]; return !!(m && m.geo && (!m.geo.file || m.geo.water)); };
+  CM.loadGeo = function (id) {
+    const m = MAPS[id];
+    if (!m || CM.geoReady(id)) return Promise.resolve(m || null);
+    if (geoLoads[id]) return geoLoads[id];
+    const stub = m.geo;
+    return (geoLoads[id] = new Promise(function (res, rej) {
+      const s = document.createElement('script');
+      const timer = setTimeout(function () { end(false); }, GEO_LOAD_TIMEOUT);
+      const end = function (ok) {
+        clearTimeout(timer);
+        s.onload = s.onerror = null;
+        s.remove(); delete geoLoads[id];
+        const full = CM.GEOS[id]; CM.GEOS[id] = stub;   // 数据文件整体替换 CM.GEOS[id]：取出完整数据补进原对象
+        if (ok && full && full !== stub) for (const k of GEO_HEAVY) stub[k] = full[k];
+        if (stub.water) res(m); else rej(new Error('地图数据载入失败：' + (m.data.city || id) + '（' + stub.file + '）'));
+      };
+      s.onload = function () { end(true); }; s.onerror = function () { end(false); };
+      s.src = stub.file; document.head.appendChild(s);
+    }));
+  };
+  // 占用期间（缩略图绘制中）不释放；当前地图与正在进行的进度所在地图始终保留（载入别的存档失败时要切回）
+  CM.holdGeo = function (id) {
+    geoHold[id] = (geoHold[id] || 0) + 1;
+    return CM.loadGeo(id).catch(function (e) { CM.unholdGeo(id); throw e; });
+  };
+  CM.unholdGeo = function (id) { geoHold[id] = Math.max(0, (geoHold[id] || 0) - 1); CM.releaseGeo(id); };
+  CM.releaseGeo = function (id) {
+    const m = MAPS[id], G = m && m.geo;
+    if (!G || !G.file || !G.water || id === CM.mapId || geoHold[id] > 0 || (CM.game && CM.game.mapId === id)) return;
+    for (const k of GEO_HEAVY) delete G[k];
+    if (CM.Geo && CM.Geo.forget) CM.Geo.forget(G);   // 已解码的几何同样释放
+  };
+  // 进入新进度、回到主菜单时释放其余地图（main.js）
+  CM.releaseGeos = function () { for (const id in MAPS) CM.releaseGeo(id); };
   CM.mapId = 'gz';
   CM.useMap = function (id) {
     const m = MAPS[id] || MAPS.gz;
     if (CM.mapId === m.id && CM.GEO === m.geo) return m;
+    if (!CM.geoReady(m.id)) throw new Error('地图数据尚未载入：' + m.name);
     CM.mapId = m.id;
     for (const k of Object.keys(CM.DATA)) delete CM.DATA[k];
     Object.assign(CM.DATA, m.data);
@@ -244,31 +287,42 @@
     const key = id + ':' + theme;
     if (thumbs[key]) return thumbs[key];
     if (!MAPS[id]) return null;
+    if (!CM.geoReady(id)) { CM.mapThumbAsync(id, theme); return null; }
     thumbs[key] = finish(drawThumb(id, theme)).toDataURL('image/jpeg', 0.9);
     return thumbs[key];
   };
   CM.mapThumbReady = function (id, theme, hd) { return thumbs[id + ':' + theme + (hd ? ':hd' : '')] || null; };
   // 后台生成：空闲时分段画图，toBlob 编码，结果为对象 URL
   const idle = window.requestIdleCallback ? function (f) { window.requestIdleCallback(f, { timeout: 400 }); } : function (f) { setTimeout(function () { f({ timeRemaining: function () { return 6; } }); }, 16); };
-  // 画图（不编码）：结果是画布，可直接绘制或后台编码。每段至少做几毫秒——画面持续动画、
+  // 画图（不编码）：结果是画布，世界地图可以直接画上去，不必等编码与解码。每段至少做几毫秒——画面持续动画、
   // 空闲回调只能超时触发时（剩余时间为 0）也照常推进（v2.4 以前此时每 0.4 秒才画一小段，城市画面要等好几秒）
   const drawn = {}, pendDraw = {};
+  let thumbQueue = Promise.resolve();
   CM.mapThumbDraw = function (id, theme, hd) {
     const key = id + ':' + theme + (hd ? ':hd' : '');
     if (drawn[key]) return Promise.resolve(drawn[key]);
     if (pendDraw[key]) return pendDraw[key];
     if (!MAPS[id]) return Promise.resolve(null);
-    const it = drawThumb(id, theme, hd);
-    return (pendDraw[key] = new Promise(function (res) {
-      const step = function (dl) {
-        const t0 = performance.now(), budget = dl.didTimeout ? 8 : Math.max(4, dl.timeRemaining() - 1);
-        let r = it.next();
-        while (!r.done && performance.now() - t0 < budget) r = it.next();
-        if (!r.done) { idle(step); return; }
-        drawn[key] = r.value; delete pendDraw[key]; res(r.value);
-      };
-      idle(step);
-    }));
+    // 画图期间占用该地图的地理数据（未载入时先载入），画完释放（当前地图除外）；载入失败时没有缩略图
+    const draw = thumbQueue.then(function () { return CM.holdGeo(id); }).then(function () {
+      const it = drawThumb(id, theme, hd);
+      return new Promise(function (res) {
+        const step = function (dl) {
+          let r;
+          try {
+            const t0 = performance.now(), budget = dl.didTimeout ? 8 : Math.max(4, dl.timeRemaining() - 1);
+            r = it.next();
+            while (!r.done && performance.now() - t0 < budget) r = it.next();
+          } catch (e) { console.error(e); CM.unholdGeo(id); delete pendDraw[key]; res(null); return; }
+          if (!r.done) { idle(step); return; }
+          CM.unholdGeo(id);
+          drawn[key] = r.value; delete pendDraw[key]; res(r.value);
+        };
+        idle(step);
+      });
+    }, function () { delete pendDraw[key]; return null; });
+    thumbQueue = pendDraw[key] = draw;
+    return draw;
   };
   CM.mapThumbAsync = function (id, theme, hd) {
     const key = id + ':' + theme + (hd ? ':hd' : '');
@@ -276,8 +330,9 @@
     if (pend[key]) return pend[key];
     if (!MAPS[id]) return Promise.resolve(null);
     return (pend[key] = CM.mapThumbDraw(id, theme, hd).then(function (cv) {
+      if (!cv) { delete pend[key]; return null; }
       return new Promise(function (res) {
-        // 编码完成后画布不再保留（展示使用对象 URL）
+        // 编码完成后画布不再保留（对象 URL 足够；世界地图打开期间自己持有画布）
         const done = function (url) { thumbs[key] = url; delete pend[key]; delete drawn[key]; res(url); };
         if (cv.toBlob) cv.toBlob(function (b) { done(b ? URL.createObjectURL(b) : cv.toDataURL('image/jpeg', 0.9)); }, 'image/jpeg', 0.9);
         else done(cv.toDataURL('image/jpeg', 0.9));
@@ -292,9 +347,9 @@
     CM.mapThumbAsync(id, theme).then(function (url) { if (url) { img.src = url; img.classList.remove('thumb-wait'); } });
     return img;
   };
-  // 主菜单空闲时依次预生成全部地图的缩略图
+  // 主菜单只预绘默认地图和教程，其他缩略图打开选图页时生成。
   CM.prewarmThumbs = function (theme) {
-    const ids = CM.MAP_ORDER.slice(); let i = 0;
+    const ids = ['gz', 'tutorial']; let i = 0;
     const next = function () { if (i < ids.length) CM.mapThumbAsync(ids[i++], theme).then(next); };
     next();
   };

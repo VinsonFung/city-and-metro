@@ -32,8 +32,7 @@
     { id: 'jobs', group: 'city', name: '住宅与就业', icon: 'lyJobs', color: '#6447dc', desc: '居住与岗位的分布' },
     { id: 'fac', group: 'city', name: '设施出行需求', icon: 'lyFac', color: '#c2410c', desc: '重要设施与各片区吸引的出行（按目的）' },
     { id: 'cong', metric: true, group: 'traffic', name: '道路拥堵', icon: 'lyCong', color: '#df3030', desc: '主要道路当前的拥堵程度' },
-    { id: 'flow', group: 'traffic', name: '出行方向', icon: 'lyFlow', color: '#2557d6', desc: '各片区的主要出行方向' },
-    { id: 'commute', group: 'traffic', name: '通勤时间', icon: 'timer', color: '#8a4fd3', desc: '住在各片区的人上班要花多久（门到门）' },
+    { id: 'flow', group: 'traffic', name: '出行与通勤', icon: 'lyFlow', color: '#2557d6', desc: '箭头显示主要出行方向，底色显示各片区的通勤时间' },
     { id: 'mshare', group: 'traffic', name: '乘地铁比例', icon: 'metro', color: '#0f7fb0', desc: '各片区居民的出行有多少乘地铁' },
     { id: 'cover', group: 'metro', name: '地铁覆盖', icon: 'lyCover', color: '#14a252', desc: '步行可达车站的范围与阻隔', metric: true },
     { id: 'station', group: 'metro', name: '车站客流', icon: 'lyStation', color: '#109e90', desc: '客流与运力负荷' },
@@ -562,6 +561,7 @@
 
   // ======================== 游戏接入 ========================
   UI.prototype.attachGame = function (g) {
+    this._opsYm = null; this._opsDaily = null;
     const self = this;
     this.toggleLayerPanel(false);
     this._tot = null; this._totCity = null; this._popShown = null; this._funds = null; this._congT = 0;
@@ -577,7 +577,7 @@
       self.toast(t.text, t.kind, t.offer ? { label: '查看挑战', fn: go('active') } : (t.ppp ? { label: '查看合同', fn: go('ppp') } : (t.fleet ? { label: '列车运营', fn: function () { self.openObj('line', t.fleet, 'ops'); } } : (t.models ? { label: '查看车型', fn: function () { self.openPage('fleet', null, { root: true }); } } : (t.fare ? { label: '调整票价', fn: function () { self.openOpsApp('fare'); } } : undefined)))));
     });
     // 车队变化（v2.5）：正在看的线路页与车队页随之刷新
-    g.on('fleet', function () { const top = self.stack[self.stack.length - 1]; if (top && (top.kind === 'line' || top.kind === 'fleet')) self.rerenderPage(); else if (self.opsApp) self.opsApp.refresh(); });
+    g.on('fleet', function () { if (g.draft) self.renderDraftbar(); const top = self.stack[self.stack.length - 1]; if (top && (top.kind === 'line' || top.kind === 'fleet')) self.rerenderPage(); else if (self.opsApp) self.opsApp.refresh(); });
     g.on('draft', function () { self.lastDraftChange = performance.now(); self.tools.syncDraft(); self.syncSelection(); self.renderDraftbar(); self.renderToolOpts(); self.refreshObjectPage(); if (self.opsApp) self.opsApp.refresh(); });
     g.on('draftLive', function () { self.lastDraftChange = performance.now(); });
     g.on('prediction', function () { self.refreshPrediction(); self.renderDraftbar(); });
@@ -736,6 +736,7 @@
     if (c.sat.ico !== sk) { c.sat.ico = sk; c.sat.badge.className = 'badge ' + (sk === 'smile' ? 'b-green' : (sk === 'meh' ? 'b-orange' : 'b-red')); c.sat.badge.innerHTML = ''; c.sat.badge.appendChild(ic(sk)); }
     if (CM.Voices && this.updateSatDock) this.updateSatDock(g);
     if (this.tickOps) this.tickOps(g);
+    if (this.layer === 'tod' && this.R.layerOpt.todMode === 'rev' && this._revenueLegend !== this.R.stationRevenue() && !this.legendCard.contains(document.activeElement)) this.renderDock();
     const n = g.tasks.active.length;
     this.taskCnt.textContent = n; this.taskCnt.style.display = n ? '' : 'none';
     const s = this.save;
@@ -1201,7 +1202,7 @@
         : segc(T.newLineSpeed || 80, mc.speedGrades.filter(function (x) { return !CM.Fleet || CM.Fleet.speedOpen(g.mapId, y, x.kmh).ok; }).map(function (x) { return [x.kmh, String(x.kmh), x.kmh + ' km/h：最小转弯半径 ' + x.minR + ' m，运营成本 ×' + x.ops.toFixed(2)]; }), function (v) { T.newLineSpeed = v; }));
       el.append(colorGroup, h('span', { class: 'to-sep' }), typeCtl, sizeCtl('新站'), curveCtl, speedCtl);
       el.append.apply(el, snapCtl());
-      if (T.chain) el.appendChild(h('button', { class: 'btn sm ghost', 'data-tip': '结束本次绘线', 'data-key-pre': '右键', 'data-act': 'build.finish', onclick: function () { T.endChain(); } }, ic('check'), '完成'));
+      if (T.chain) el.appendChild(h('button', { class: 'btn sm ghost', 'data-tip': '结束本次绘线', 'data-key-pre': self.compact() ? null : '右键', 'data-act': 'build.finish', onclick: function () { T.endChain(); } }, ic('check'), '完成'));
     } else if (T.tool === 'station') {
       el.append(hint('station', '点击空地建站 · 点击轨道插入车站'), h('span', { class: 'to-sep' }), typeCtl, sizeCtl('规模'));
       el.append.apply(el, snapCtl());
@@ -1293,7 +1294,7 @@
     const g = this.g(); const bar = this.draftbar;
     if (!g || !g.draft) { bar.classList.add('hidden'); this._dbKey = null; return; }
     const ev = g.draftEval(), can = g.canConfirm();
-    const key = g.draft.ver + '|' + can.ok + '|' + Math.round(g.econ.funds) + '|' + g.draft.pred.state + '|' + g.draft.undo.length + '|' + g.draft.redo.length;
+    const key = g.draft.ver + '|' + (g.fleet && g.fleet.ver) + '|' + g.clock.y + '|' + can.ok + '|' + Math.round(g.econ.funds) + '|' + g.draft.pred.state + '|' + g.draft.undo.length + '|' + g.draft.redo.length;
     if (key === this._dbKey) return;
     this._dbKey = key;
     bar.classList.remove('hidden');
@@ -1479,15 +1480,20 @@
     const hidden = !L || !this.g();
     card.inert = hidden; card.setAttribute('aria-hidden', hidden ? 'true' : 'false');
     if (hidden) { card.classList.add('hidden'); this.placeFeed(); return; }
+    const previousBody = card.querySelector('.lc-body');
+    const scrollTop = previousBody ? previousBody.scrollTop : 0;
     card.innerHTML = '';
     const self = this;
     const badge = h('span', { class: 'badge lc-badge' }, ic(L.icon)); badge.style.background = L.color;
+    this._revenueLegend = L.id === 'tod' ? this.R.stationRevenue() : null;
     card.append(h('div', { class: 'lc-head' }, badge, h('div', { class: 'p-title' }, L.name), h('button', { class: 'iconbtn', 'data-tip': '关闭图层', onclick: function () { self.setLayer('none'); } }, ic('close'))),
       h('div', { class: 'lc-body' }, this.legend(L.id)));
+    card.lastElementChild.scrollTop = scrollTop;
     card.classList.remove('hidden');
     this.placeFeed();
   };
   UI.prototype.setLayer = function (id) {
+    if (id === 'commute') id = 'flow';
     const changed = id !== this.layer;
     if (changed) snd('soft');
     this.layer = id; this.R.layer = id; this.R.heatKey = ''; this.renderDock();
@@ -1620,7 +1626,17 @@
         seg([['now', '当前时刻'], ['am', '工作日早高峰']], v, function (k) { R.layerOpt.cong = k; });
         li(CC[0], AX.enabled() ? '畅通 · 实线' : '畅通', 'line'); li(CC[1], AX.enabled() ? '缓行 · 长虚线' : '缓行', 'line'); li(CC[2], AX.enabled() ? '拥堵 · 点线' : '拥堵', 'line'); li(CC[3], AX.enabled() ? '严重拥堵 · 点划线' : '严重拥堵', 'line'); note = '颜色按实际行驶时间 ÷ 自由流时间：<1.15 畅通，1.15–1.35 缓行，1.35–1.60 拥堵，≥1.60 严重拥堵；显示较拥堵方向。可切换工作日早高峰，与任务和建设效果使用同一口径；「拥堵变化」显示地铁开通以来道路的缓解。'; break;
       }
-      case 'flow': opts('flow', [['all', '全部'], ['car', CM.DATA.bg ? '非地铁' : '汽车'], ['metro', '地铁']]); if (R.layerOpt.flow === 'all') { li('#80869a', CM.DATA.bg ? '非地铁出行' : '汽车出行', 'line'); li('#2166cc', '其中乘地铁（箭头中间的蓝色部分）', 'line'); } note = '每个片区当前时段最主要的出行方向（第二方向接近时也画出）：箭头从片区指向目的地，尖端标出目的地名称；两个片区互为主要方向时画成双向箭头。线越粗出行越多，新区域开放、修建地铁后会随之变化。'; break;
+      case 'flow': {
+        opts('flow', [['all', '全部'], ['car', CM.DATA.bg ? '非地铁' : '汽车'], ['metro', '地铁']]);
+        if (R.layerOpt.flow === 'all') {
+          li('#80869a', CM.DATA.bg ? '非地铁出行' : '汽车出行', 'line');
+          li('#2166cc', '其中乘地铁（箭头中间的蓝色部分）', 'line');
+        }
+        note = '每个片区当前时段最主要的出行方向（第二方向接近时也画出）：箭头从片区指向目的地，尖端标出目的地名称；两个片区互为主要方向时画成双向箭头。线越粗出行越多，新区域开放、修建地铁后会随之变化。';
+        const sc = R.rateScales && R.rateScales.flow || { lo: 15, hi: 45 };
+        grad(['#40aa78', '#f5c850', '#cd3232'], sc.lo + ' 分钟以内', sc.hi + ' 分钟以上'); note += ' 底色为工作日早高峰门到门通勤时间。';
+        break;
+      }
       case 'cover': opts('cover', [['time', '步行时间'], ['station', '所属车站']]);
         if (R.layerOpt.cover === 'station') { li('rgba(20,162,82,0.5)', '每个颜色块为步行最近的车站（细线为分界）'); li('#d73027', '人口密集但无地铁'); }
         else { li('#1b7837', '步行 5 分钟内'); li('#5aae61', '步行 10 分钟内'); li('#acdc8c', '步行 15 分钟内'); li('#d73027', '人口密集但无地铁'); }
@@ -1670,24 +1686,37 @@
         }
         break;
       }
-      case 'commute': {
-        const sc = (R.rateScales && R.rateScales.commute) || { lo: 15, hi: 45 };
-        grad(['#40aa78', '#f5c850', '#cd3232'], sc.lo + ' 分钟以内', sc.hi + ' 分钟以上');
-        const dw = self.g() && self.g().model.dailyWk;
-        note = '工作日早高峰，住在该片区的人从家到工作地点的门到门时间（含步行、候车、换乘、停车）' + (dw && dw.commute ? '。全市平均 ' + U.fmtNum(dw.commute, 1) + ' 分钟' : '') + '。';
-        break;
-      }
       case 'mshare': opts('shareDt', [['wd', '工作日'], ['we', '周末']]);
         grad(['#d6e8f5', '#5aa0dc', '#14469f'], '很少', U.fmtPct(R.rateScales && R.rateScales.mshare ? R.rateScales.mshare.hi : 0.2, 0) + ' 以上');
         note = '该片区居民全天的出行中乘地铁的比例；浅色片区是地铁还有潜力的地方。';
         break;
-      case 'tod':
-        li('#c9971c', '已开发：数字为等级，圈越大每月净收益越高');
-        li('#d63031', '已开发但每月净亏损');
-        li('#2fa36b', '尚未开发、开发后能盈利：圈越大收益越高', 'ring');
-        li('#78808c', '尚未开发、开发后暂不盈利', 'ring');
-        note = '车站接入运营线路后才会显示。点击车站，在详情中开发或升级商业空间。';
+      case 'tod': {
+        // v2.7.1：默认看各站每月营收（票款 + 商业），另一页仍是开发等级与值得开发的车站
+        if (!R.layerOpt.todMode) R.layerOpt.todMode = 'rev';
+        opts('todMode', [['rev', '车站营收'], ['tod', '商业开发']]);
+        const g = self.g();
+        if (R.layerOpt.todMode === 'rev') {
+          li('#2f7dd1', '票款：进站人次 × 平均票价（估算）'); li('#d9a514', '车站商业收入'); li('#2fa36b', '扣除车站运营费后有结余'); li('#d63031', '扣除车站运营费后亏损');
+          const RV = g && R.stationRevenue ? R.stationRevenue() : null;
+          if (RV && RV.list.length) {
+            box.appendChild(h('div', { class: 'lg-sum' }, h('span', null, '全网每月 ' + U.fmtMoney(RV.fare + RV.com)), h('small', null, '票款 ' + U.fmtMoney(RV.fare) + ' · 商业 ' + U.fmtMoney(RV.com) + ' · 车站运营 ' + U.fmtMoney(RV.cost))));
+            const list = h('div', { class: 'lg-rank' });
+            RV.list.slice(0, 6).forEach(function (o, i) {
+              list.appendChild(h('button', { class: 'lg-rank-i', 'data-silent': '1', onclick: function () { self.flyTo(o.x, o.y, Math.max(R.cam.zoom, 20)); } },
+                h('b', null, String(i + 1)), h('span', { class: 'grow' }, o.name), h('em', { class: o.net < 0 ? 'bad' : '' }, U.fmtMoney(o.rev))));
+            });
+            box.appendChild(list);
+          }
+          note = '柱越高，这座车站每月营收越多；蓝色是票款，金色是商业收入。票款按进站人次和全网平均票价估算，换乘不重复计。圆点为扣除车站日常运营费与商业运营成本后的结余，不含列车运营。点击车站可开发或升级商业空间。';
+        } else {
+          li('#c9971c', '已开发：数字为等级，圈越大每月净收益越高');
+          li('#d63031', '已开发但每月净亏损');
+          li('#2fa36b', '尚未开发、开发后能盈利：圈越大收益越高', 'ring');
+          li('#78808c', '尚未开发、开发后暂不盈利', 'ring');
+          note = '车站接入运营线路后才会显示。点击车站，在详情中开发或升级商业空间。';
+        }
         break;
+      }
       case 'gap': opts('gapDt', [['wd', '工作日'], ['we', '周末']]);
         li('#c62828', '出行多，但步行 15 分钟内没有地铁站'); li('#ef8a3a', '已有地铁，但车站或区间高峰超载'); li('#7a1f1f', '重要设施：步行 15 分钟内没有地铁站', 'ring');
         note = '缺口 = 片区出发与到达的出行量 ×（1 − 地铁步行覆盖比例），按面积折算；颜色越深缺口越大。超载按高峰小时计。';

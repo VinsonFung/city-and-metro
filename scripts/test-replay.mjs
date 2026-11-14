@@ -7,7 +7,7 @@ for(const[,src]of(await readFile(new URL('index.html',root),'utf8')).matchAll(/<
 const C=c.CM,M=C.Metro,copy=x=>JSON.parse(JSON.stringify(x));C.UI=function(){};await load('js/settings.js');
 // Observe the pure timeline/estimator functions inside this VM without adding test APIs to the game.
 vm.runInContext((await readFile(new URL('js/corp.js',root),'utf8')).replace('  const makeTender =','  Corp.testUpgradeCandidate = upgradeCand;\n  const makeTender ='),c);
-vm.runInContext((await readFile(new URL('js/netreplay.js',root),'utf8')).replace('  CM.NetReplay = {','  CM.testReplay = {collect, subnet, keyTimes, timeWarp, newsList, schedule, prepare, useAPI: api => A = api};\n  CM.NetReplay = {'),c);
+vm.runInContext((await readFile(new URL('js/netreplay.js',root),'utf8')).replace('  CM.NetReplay = {','  CM.testReplay = {collect, subnet, timeWarp, newsList, schedule, prepare, useAPI: api => A = api};\n  CM.NetReplay = {'),c);
 await load('js/netlayout.js');
 vm.runInContext((await readFile(new URL('js/netmap.js',root),'utf8')).replace('  CM.NetMap = NetMap;','  CM.testMapAPI = API; CM.testMapMode = v => geographic = v; CM.NetMap = NetMap;'),c);
 C.useMap('tutorial');const g=C.Game.create({mode:'free',tutorial:true,seed:20000101});let sample;
@@ -54,6 +54,7 @@ const recentH=R.collect(recent),warp=R.timeWarp(recentH);R.schedule(recentH,warp
 assert.ok(recentH.segs.every(s=>s.p0+s.gd<=1),'A line built this month must finish growing before the end of replay');
 R.useAPI(C.testMapAPI);
 for(const geographic of[true,false]){C.testMapMode(geographic);const prepared=R.prepare(g);assert.ok(prepared.km.get(endSeg.id)>0,'Retired track length must be included in historical mileage');}
+const fixed=R.prepare(g);assert.equal(fixed.layout.route.size,R.collect(g).segs.length);assert.ok(fixed.W.dur>=30&&fixed.W.dur<=150);
 console.log('PASS current-month construction finishes in replay and demolished track lengths survive in both layouts');
 // An XL station must never reduce the contract estimate for the smaller stations on the same route.
 const sizes=['M','L','XL'],candidate={mapId:'bj',clock:{y:2020,m:1},ym:()=>24240,econ:{costIndex:()=>1},net:{lines:{l:{name:'Fixture'}}},tasks:{active:[],offers:[]},compiled:{stations:sizes.map(size=>({size,type:'underground'})),routes:[{lineId:'l',stIdx:[0,1,2]},{lineId:'l',stIdx:[0,1,2]}]}};

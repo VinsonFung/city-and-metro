@@ -7,7 +7,7 @@ let time=0,year=2020,connected=true,meta={slotId:'hk-1',savedAt:1,name:'Fixture'
 const memory=new Map(),proj={lon0:0,lat0:100,kx:1,ky:1},gate={id:'gate',open:2020.25,ext:{gate:true}};
 const game={id:'sz-1',mode:'free',netVersion:1,city:{},compiled:{},year:()=>year,econ:{cross:{}},model:{}};
 const C={CFG:{W:100,H:100},DATA:{cityLink:{map:'hk'}},GEO:{proj},MAPS:{hk:{geo:{proj}}},game,
- Fac:{list:()=>[gate],extLink:()=>connected?{}:null},
+ Fac:{list:()=>[gate],active:(f,y)=>y>=f.open&&(f.close==null||y<f.close),extLink:()=>connected?{}:null},
  Save:{list:()=>meta?[{mode:'free',slots:[meta]}]:[],linePreview:()=>{const req=deferred();reads.push(req);return req.promise}}};
 const ctx={CM:C,console:{warn(){}},performance:{now:()=>time},localStorage:{getItem:k=>memory.get(k),setItem:(k,v)=>memory.set(k,v)}};ctx.window=ctx;vm.createContext(ctx);vm.runInContext(await source('js/citylink.js'),ctx);
 const canvas=new Proxy({},{get:(t,k)=>t[k]||(()=>{}),set:(t,k,v)=>(t[k]=v,true)}),renderer={game,z:5,lineWidthPx:()=>2,P:(x,y)=>({x,y})};

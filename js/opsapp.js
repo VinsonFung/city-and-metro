@@ -258,10 +258,15 @@
   };
   // 随界面刷新调用：换月且当月交通结果已发布时做一次月度检查，打开的 App 随之刷新
   CM.UI.prototype.tickOps = function (g) {
+    // 客流结果更新（确认建设、改规模、改票价后重算完成）时刷新打开着的 App（v2.7.1 玩家反馈：改完车站后客流一直显示「—」）
+    if (this.opsApp && !g.jumping && !g.pending && !g.model.dailyStale && g.model.daily && this._opsDaily !== g.model.daily) {
+      this._opsDaily = g.model.daily;
+      this.opsApp.refresh();
+    }
     const ym = g.ym();
-    if (this._opsYm === ym && this._opsG === g) return;
+    if (this._opsYm === ym) return;
     if (g.jumping || g.pending || !g.model.trafficReady()) return;
-    this._opsYm = ym; this._opsG = g;
+    this._opsYm = ym;
     try { A.record(g); A.monthly(g, this); } catch (e) { console.error(e); }
     if (this.opsApp) this.opsApp.refresh();
   };
@@ -302,15 +307,19 @@
     svg += '<polygon class="mc-area" points="0,' + H + ' ' + coords + ' ' + W + ',' + H + '"/><polyline class="mc-line" points="' + coords + '"/></svg>';
     const last = pts[pts.length - 1], dot = h('i', { class: 'mc-dot', style: { left: '100%', top: (Y(last[1]) * 100).toFixed(1) + '%' } }), cross = h('i', { class: 'mc-cross', style: { display: 'none' } }), tip = h('div', { class: 'mc-tip', style: { display: 'none' } });
     const plot = h('div', { class: 'mc-plot', html: svg }); plot.append(cross, dot, tip);
-    plot.addEventListener('pointermove', function (e) {
+    const track = function (e) {
       const r = plot.getBoundingClientRect(), ym = x0 + (e.clientX - r.left) / r.width * (x1 - x0);
       let p = pts[0]; for (const q of pts) if (Math.abs(q[0] - ym) < Math.abs(p[0] - ym)) p = q;
       const px = X(p[0]) * 100, py = Y(p[1]) * 100, marked = (o.marks || []).indexOf(p[0]) >= 0;
       cross.style.display = ''; cross.style.left = px + '%'; dot.style.left = px + '%'; dot.style.top = py + '%';
       tip.style.display = ''; tip.style.left = Math.min(72, px) + '%'; tip.style.top = Math.max(0, py - 26) + '%';
       tip.textContent = local(ymText(p[0])) + ' · ' + local(o.fmt(p[1])) + (marked ? ' · ' + local('改造') : '');
-    });
-    plot.addEventListener('pointerleave', function () { cross.style.display = 'none'; tip.style.display = 'none'; dot.style.left = '100%'; dot.style.top = (Y(last[1]) * 100).toFixed(1) + '%'; });
+    };
+    plot.addEventListener('pointerdown', track);
+    plot.addEventListener('pointermove', track);
+    const reset = function () { cross.style.display = 'none'; tip.style.display = 'none'; dot.style.left = '100%'; dot.style.top = (Y(last[1]) * 100).toFixed(1) + '%'; };
+    plot.addEventListener('pointerleave', reset);
+    plot.addEventListener('pointercancel', reset);
     return h('div', { class: 'mc-chart', style: null },
       h('div', { class: 'mc-yax' }, [mx, mx / 2, 0].map(function (v) { return h('span', null, v ? o.fmt(v) : '0'); })), plot,
       h('div', { class: 'mc-xax' }, h('span', null, ymText(x0)), o.ref ? h('span', { class: 'mc-reflb' }, o.refLabel || '') : null, h('span', null, ymText(x1))));
@@ -383,7 +392,7 @@
     if (this.opsApp) { if (view) this.opsApp.go(view, id); else this.opsApp.close(); return; }
     const self = this, reduce = CM.Settings.reducedMotion(), F = CM.Fleet, I18 = function (el) { if (CM.I18n) CM.I18n.localize(el); return el; };
     const st = { root: 'home', view: 'home', id: null, hist: [], page: 0, f: { lines: 'all', stations: 'all' }, q: { lines: '', stations: '' }, tab: { line: 'info', station: 'info', fare: 'fare' }, lineF: 'all', sel: new Set(), batch: false, ask: 0, metric: {}, sort: { lines: ['ord', 1], stations: ['flow', -1], stops: ['n', 1] } };
-    let closing = false, endGateHold = null;
+    let closing = false, endGateHold = null, refreshAfterEdit = false, refreshTimer = 0, editPointer = null;
     const back = h('div', { class: 'mc-back', onclick: function () { close(); } });
     const app = h('div', { class: 'mc-app', role: 'dialog', 'aria-modal': 'true', 'aria-label': '地铁芯 · 线网管理系统', tabindex: '-1' });
     const bar = h('header', { class: 'mc-bar' }), content = h('main', { class: 'mc-content' }), draftBar = h('div', { class: 'mc-draft hidden' });
@@ -392,6 +401,7 @@
     const then = function (fn) { return function () { close(fn); }; };
     const show = function (s, top) {
       if (endGateHold) endGateHold();
+      refreshAfterEdit = false;
       st.view = s.view; st.id = s.id || null; st.root = ROOT_OF[s.view] || s.view;
       app.classList.remove('quiet');
       draw(); content.scrollTop = top || 0;
@@ -404,16 +414,17 @@
     const go = function (v, target) {
       if (v === 'lines' || v === 'stations') { setRoot(v); if (target) (v === 'lines' ? openLine : openStation)(target); return; }
       if (v === 'fare') { setRoot('fare'); return; }
-      if (v === 'gates' && navs.gates) { setRoot('gates'); return; }
+      if (v === 'gates' && !navs.gates.hidden) { setRoot('gates'); return; }
       setRoot(v === 'fleet' && g.fleet ? 'fleet' : 'home');
     };
 
     // ---------------- 导航 ----------------
-    const nav = function (v, icon, label) { return h('button', { class: 'mc-nav', 'data-v': v, 'data-silent': '1', onclick: function () { if (st.root !== v || st.view !== v) sfx('tab'); setRoot(v); } }, ic(icon, 18), h('span', { class: 'lb' }, label), h('em', { style: { display: 'none' } })); };
+    const nav = function (v, icon, label) { return h('button', { class: 'mc-nav', 'aria-label': label, 'data-v': v, 'data-silent': '1', onclick: function () { if (st.root !== v || st.view !== v) sfx('tab'); setRoot(v); } }, ic(icon, 18), h('span', { class: 'lb' }, label), h('em', { style: { display: 'none' } })); };
     const navs = { home: nav('home', 'chart', '总览'), lines: nav('lines', 'route', '线路管理'), stations: nav('stations', 'metro', '车站管理') };
     if (g.fleet) navs.fleet = nav('fleet', 'train', '列车管理');
     navs.fare = nav('fare', 'ticket', '票价管理');
-    if (CM.CityLink.gates(g).some(function (q) { return q.open; })) navs.gates = nav('gates', 'bridge', '口岸管理');   // 声明了城市连接、且已有口岸开放才出现
+    navs.gates = nav('gates', 'bridge', '口岸管理');
+    navs.gates.hidden = !CM.CityLink.gates(g).some(function (q) { return q.open; });
     const stateEl = h('div', { class: 'mc-state' });
     const count = function (b, n, alert) { const e = b.querySelector('em'); e.textContent = n ? String(n) : ''; e.className = alert ? 'alert' : ''; e.style.display = n ? '' : 'none'; };
     const drawRail = function () {
@@ -421,16 +432,18 @@
       const al = A.active(g).length;
       count(navs.home, al, true); count(navs.lines, Object.keys(g.net.lines).length); count(navs.stations, Object.keys(g.net.stations).length);
       if (navs.fleet) count(navs.fleet, g.fleet.trains.length);
-      if (navs.gates) count(navs.gates, CM.CityLink.gates(g).filter(function (q) { return q.link; }).length);
+      const gates = CM.CityLink.gates(g);
+      navs.gates.hidden = !gates.some(function (q) { return q.open; });
+      count(navs.gates, gates.filter(function (q) { return q.link; }).length);
       stateEl.className = 'mc-state' + (al ? ' warn' : '');
       stateEl.replaceChildren(h('i'), h('span', null, al ? al + ' 项待处理' : '线网运行平稳'));
       I18(stateEl);
     };
     const rail = h('nav', { class: 'mc-rail' },
       h('div', { class: 'mc-brand' }, h('span', { class: 'mc-logo' }, ic('chip', 20)), h('div', null, h('b', null, '地铁芯'), h('small', null, '线网管理系统'))),
-      Object.values(navs),
-      h('span', { class: 'grow' }), stateEl,
-      h('button', { class: 'mc-exit', onclick: function () { close(); } }, ic('back', 16), h('span', { class: 'lb' }, '回到城市')));
+      h('div', { class: 'mc-nav-list' }, Object.values(navs)),
+      stateEl,
+      h('button', { class: 'mc-exit', 'aria-label': '回到城市', onclick: function () { close(); } }, ic('back', 16), h('span', { class: 'lb' }, '回到城市')));
     // 顶栏：当前位置（详情页带返回箭头）与城市、日期
     const setBar = function (crumbs) {
       const nodes = [];
@@ -459,7 +472,8 @@
       const C = g.model.net ? g.model.net.C : g.compiled, sd = g.model.dailyStale ? null : g.model.stDailyWk || g.model.stDaily;
       return M.sortIds(Object.keys(g.net.stations)).map(function (sid) {
         const s = g.net.stations[sid], k = C.sIndex.get(sid), ok = k !== undefined && sd && k < sd.peak.length;
-        return { sid: sid, s: s, lines: M.stationLines(g.net, sid), live: k !== undefined && !!C.serviced[k], flow: ok ? sd.inn[k] + sd.out[k] + sd.xfer[k] : 0, load: ok ? sd.peak[k] / CFG.metro.stationCap[s.size] : 0 };
+        const ds = g.draft && g.draft.net.stations[sid], next = ds && ds.size !== s.size ? ds.size : null;   // 草案里改了规模（v2.7.1 玩家反馈：批量改大型后列表看不出变化）
+        return { sid: sid, next: next, s: s, lines: M.stationLines(g.net, sid), live: k !== undefined && !!C.serviced[k], flow: ok ? sd.inn[k] + sd.out[k] + sd.xfer[k] : 0, load: ok ? sd.peak[k] / CFG.metro.stationCap[s.size] : 0 };
       });
     };
     const ends = function (r, net) {
@@ -748,7 +762,7 @@
     // ---------------- 车站管理 ----------------
     const stationCols = [
       { key: 'name', label: '车站', value: function (r) { return r.s.name; }, cell: function (r) { return h('b', { class: 'mc-trunc' }, r.s.name); } },
-      { key: 'size', label: '规模', desc: true, value: function (r) { return SIZE_ORDER[r.s.size]; }, cell: function (r) { return CFG.metro.sizeName[r.s.size]; } },
+      { key: 'size', label: '规模', desc: true, value: function (r) { return SIZE_ORDER[r.next || r.s.size]; }, cell: function (r) { return r.next ? h('span', { class: 'mc-next', 'data-tip': '已加入草案，确认建设后生效' }, CFG.metro.sizeName[r.s.size] + ' → ' + CFG.metro.sizeName[r.next], h('small', null, '草案')) : CFG.metro.sizeName[r.s.size]; } },
       { key: 'xfer', label: '线路', desc: true, value: function (r) { return r.lines.length; }, cell: function (r) { return h('span', { class: 'mc-lbs' }, r.lines.slice(0, 6).map(function (l) { return g.net.lines[l] ? lb(g.net.lines[l]) : null; })); } },
       { key: 'flow', label: '日客流', cls: 'num', desc: true, value: function (r) { return r.flow; }, cell: function (r) { return r.flow ? U.fmtPeople(r.flow) : '—'; } },
       { key: 'load', label: '高峰负荷', desc: true, value: function (r) { return r.load; }, cell: function (r) { return loadBar(r.load); } },
@@ -781,7 +795,7 @@
         if (r && r.error) { self.toast(r.error, 'bad'); return; }
         if (!n) { self.toast('所选车站已经都是' + mc.sizeName[sz] + '车站', 'info'); return; }
         const cost = g.draftEval().total - was;
-        self.toast('已把 ' + n + ' 座车站改为' + mc.sizeName[sz] + '车站，加入草案' + (cost > 0 ? '（约 ' + U.fmtMoney(cost) + '）' : '') + '，确认建设后生效，可以撤销', 'good');
+        self.toast('已把 ' + n + ' 座车站改为' + mc.sizeName[sz] + '车站，加入草案' + (cost > 0 ? '（约 ' + U.fmtMoney(cost) + '）' : '') + '，确认建设后生效，可以撤销', 'good', { label: '确认建设', fn: function () { const can = g.canConfirm(); if (can.ok) self.confirmDraft(); else self.toast(can.reason, 'bad'); } });
       };
       const T = CM.TOD, levels = T.LEVELS.map(function (L, l) { return l; }).filter(Boolean);
       const applyDecor = function (patch, renov) {
@@ -893,10 +907,12 @@
     };
 
     // ---------------- 票价管理（v2.7）：只管票价；收支、财政和融资在顶栏「资金」打开的右侧面板 ----------------
+    let fareEditor;
     const fareView = function () {
       st.tab.fare = 'fare';
       setBar([['票价管理']]);
-      const body = h('section', { class: 'mc-card mc-fare' }, self.fareEditor());
+      fareEditor = self.fareEditor();
+      const body = h('section', { class: 'mc-card mc-fare' }, fareEditor);
       setContent([body, h('button', { class: 'linkbtn mc-fin-link', onclick: then(function () { self.finTab = 'ov'; self.openPage('finance', 'ov', { root: true }); }) }, ic('coin', 14), '收支、财政和融资在顶栏「资金」', ic('chev', 14))]);
     };
 
@@ -967,14 +983,12 @@
     const VIEWS = { home: overview, lines: linesView, stations: stationsView, fleet: fleetView, line: lineDetail, station: stationDetail, fare: fareView, gates: gatesView };
     const draw = function () {
       if (CM.game !== g) { close(null, true); return; }
-      const hadQ = document.activeElement && document.activeElement.classList.contains('mc-q');
       const keepLive = self.live;   // 详情面板的定时刷新项不受影响；App 内容按月与操作刷新
       self.live = [];
       // 界面只读线网：绘制期间共用线路与区段索引（v2.6），线路多时打开和翻页不再一次次遍历全网
       M.withSegIndex([g.net, g.draft && g.draft.net], VIEWS[st.view] || overview);
       self.live = keepLive;
       drawRail(); drawDraft();
-      if (hadQ) { const q = content.querySelector('.mc-q'); if (q) { q.focus({ preventScroll: true }); q.setSelectionRange(q.value.length, q.value.length); } }
     };
     // 打开 / 收回动画与「地铁圈」相同：窗口在入口按钮与居中位置之间缩放（入口隐藏时原地淡入淡出）
     const flyFrom = function () {
@@ -987,6 +1001,9 @@
       if (closing) return; closing = true;
       if (endGateHold) endGateHold();
       document.removeEventListener('keydown', key, true);
+      window.removeEventListener('pointerup', endEditPointer, true);
+      window.removeEventListener('pointercancel', endEditPointer, true);
+      clearTimeout(refreshTimer);
       if (self.opsApp === api) self.opsApp = null;
       document.body.classList.remove('ops-open');
       if (self.opsDock) self.opsDock.classList.remove('vx-on');
@@ -1004,10 +1021,36 @@
       // 页面缩放、动画取消或后台节流时也清掉遮罩，避免已关闭窗口仍拦截地图触摸。
       cleanupTimer = setTimeout(done, 450);
     };
+    const activeEditor = function () {
+      const el = document.activeElement;
+      return content.contains(el) && el.matches('.mc-q, .mc-name') ? el : null;
+    };
     // 数据刷新（买车、换月等）不重放进场动画，也不改变滚动位置
     // 票价分页有没应用的滑块、正在拖动附加费时，只刷新侧栏和草案栏，不重画内容
-    const api = { close: close, go: go, refresh: function () { if (closing) return; if (st.hold || st.view === 'fare') { drawRail(); drawDraft(); return; } app.classList.add('quiet'); const t = content.scrollTop; draw(); content.scrollTop = t; },
-      el: app, state: function () { return { root: st.root, view: st.view, id: st.id, tab: st.view === 'line' ? st.tab.line : (st.view === 'station' ? st.tab.station : (st.view === 'fare' ? st.tab.fare : null)) }; } };
+    const api = { close: close, go: go, refresh: function () {
+      if (closing) return;
+      if (st.view === 'fare' && fareEditor) fareEditor.refreshFare();
+      const editing = activeEditor();
+      if (editing) refreshAfterEdit = true;
+      if (editing || (refreshAfterEdit && editPointer != null) || st.hold || st.view === 'fare') { drawRail(); drawDraft(); return; }
+      app.classList.add('quiet'); const top = content.scrollTop; draw(); content.scrollTop = top;
+    }, el: app, state: function () { return { root: st.root, view: st.view, id: st.id, tab: st.view === 'line' ? st.tab.line : (st.view === 'station' ? st.tab.station : (st.view === 'fare' ? st.tab.fare : null)) }; } };
+    const scheduleEditorRefresh = function () {
+      if (!refreshAfterEdit || editPointer != null) return;
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(function () {
+        if (!refreshAfterEdit || activeEditor() || editPointer != null) return;
+        refreshAfterEdit = false; api.refresh();
+      }, 0);
+    };
+    const endEditPointer = function (e) {
+      if (editPointer !== e.pointerId) return;
+      editPointer = null; scheduleEditorRefresh();
+    };
+    app.addEventListener('pointerdown', function (e) { if (activeEditor()) editPointer = e.pointerId; }, true);
+    window.addEventListener('pointerup', endEditPointer, true);
+    window.addEventListener('pointercancel', endEditPointer, true);
+    content.addEventListener('focusout', scheduleEditorRefresh);
     this.opsApp = api;
     sfx('appOpen');
     document.body.classList.add('ops-open');

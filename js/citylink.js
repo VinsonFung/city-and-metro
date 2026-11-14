@@ -12,12 +12,12 @@
   const gates = function (g) {
     const yr = g.year();
     return facs(g).map(function (f) {
-      const open = yr >= f.open, lk = open ? CM.Fac.extLink(f, g) : null;
+      const open = CM.Fac.active(f, yr, g.city), lk = open ? CM.Fac.extLink(f, g) : null;
       const s = open ? g.model.facStats(f.id, 'avg') : null;
       return { f: f, open: open, link: lk, fee: g.econ.cross[f.id] || 0, riders: s ? s.innM + s.outM : 0, total: s ? s.inn + s.out : 0 };
     });
   };
-  const connected = function (g) { const yr = g.year(); return facs(g).some(function (f) { return yr >= f.open && !!CM.Fac.extLink(f, g); }); };
+  const connected = function (g) { const yr = g.year(); return facs(g).some(function (f) { return CM.Fac.active(f, yr, g.city) && !!CM.Fac.extLink(f, g); }); };
   // 当天的跨境附加费（元）：没接通的接驳口没有地铁乘客，自然是 0。每天都要算，不收费时不做任何查询
   const dayIncome = function (g, dt) {
     const c = g.econ.cross; let sum = 0;
@@ -132,7 +132,7 @@
   };
   CM.CityLink = {
     info: info, gates: gates, connected: connected, dayIncome: dayIncome, latest: latest, modeName: modeName, switchTo: switchTo, at: at, hoverTip: hoverTip, offer: offer,
-    draw: draw, visible: visible, setVisible: setVisible, overlay: function () { return st.data; }, loading: function () { return !!st.loading; },
+    draw: draw, clear: function () { st.g = null; st.nv = -1; st.ym = -1; clearPreview(); }, visible: visible, setVisible: setVisible, overlay: function () { return st.data; }, loading: function () { return !!st.loading; },
     // 附加费滑块的范围：跟票价滑块同一套，按当年物价放大
     feeRange: function (g) { const R = CM.fareRangeNow(g); return { min: 0, max: Math.max(R.step, R.max), step: R.step }; },
   };

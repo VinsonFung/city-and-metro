@@ -15,6 +15,7 @@
     this.chain = null; this.bends = [];
     this.cursor = null; this.hover = null; this.hint = null; this.meas = { pts: [], done: false };
     this.ptr = null; this.drag = null;
+    this.touches = new Map(); this.pinch = null; this.multiTouch = false;
     this.keys = new Set();
     this.bind();
   }
@@ -53,73 +54,104 @@
     cv.addEventListener('pointerdown', function (e) { if (self.touchDown(e)) return; self.onDown(e); });
     window.addEventListener('pointermove', function (e) { if (self.touchMove(e)) return; self.onMove(e); });
     window.addEventListener('pointerup', function (e) { if (self.touchUp(e)) return; self.onUp(e); });
-    window.addEventListener('pointercancel', function (e) { if (self.touchUp(e)) return; self.cancelDrag(); });
+    const cancelPointer = function (e) {
+      if (self.touchUp(e)) return;
+      if (self.ptr && self.ptr.id === e.pointerId) self.cancelDrag();
+    };
+    window.addEventListener('pointercancel', cancelPointer);
+    cv.addEventListener('lostpointercapture', cancelPointer);
     cv.addEventListener('wheel', function (e) { e.preventDefault(); if (!self.game()) return; const k = e.deltaMode === 1 ? 40 : 1; self.R.zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * k * 0.0016)); }, { passive: false });
     cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
     cv.addEventListener('dblclick', function (e) { self.onDbl(e); });
     window.addEventListener('keydown', function (e) { self.onKey(e); });
     window.addEventListener('keyup', function (e) { self.keys.delete(e.code); self.keyMods = { ctrl: e.ctrlKey || e.metaKey, alt: e.altKey, shift: e.shiftKey }; });
-    window.addEventListener('blur', function () { self.keys.clear(); self.keyMods = {}; });
-    window.addEventListener('blur', function () { self.keys.clear(); self.cancelDrag(); if (self.touches) self.touches.clear(); self.pinch = null; });
+    window.addEventListener('blur', function () { self.keys.clear(); self.keyMods = {}; self.cancelDrag(); self.resetTouches(); });
+    document.addEventListener('visibilitychange', function () { if (document.hidden) { self.cancelDrag(); self.resetTouches(); } });
   };
-  // ---------------- 触屏：双指缩放与平移 ----------------
-  // 第二根手指按下时进入缩放：取消单指的点击 / 拖动，按两指距离缩放、按中点平移；返回 true 表示事件已处理
+  // 双指操作期间只跟踪地图上的触点。替换任一触点时，以新触点的位置重新计算起始距离。
+  const touchPair = function (points) {
+    const [a, b] = points.entries(), p = a[1], q = b[1];
+    return { a: a[0], b: b[0], d: Math.hypot(p.x - q.x, p.y - q.y) || 1, x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 };
+  };
+  Tools.prototype.resetTouches = function () { this.touches.clear(); this.pinch = null; this.multiTouch = false; };
   Tools.prototype.touchDown = function (e) {
     if (e.pointerType !== 'touch') return false;
-    const T = this.touches || (this.touches = new Map());
-    T.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (T.size < 2) return false;
-    this.cancelDrag();
-    this.ptr = null; this.ui.setTooltip(null);
-    const p = Array.from(T.values());
-    this.pinch = { d: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1, mx: (p[0].x + p[1].x) / 2, my: (p[0].y + p[1].y) / 2 };
-    if (CM.Follow && CM.Follow.active()) CM.Follow.stop();
+    if (!this.game() || this.ui.blocking()) return true;
+    const points = this.touches;
+    points.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (points.size < 2) return false;
+    this.capturePointer(e.pointerId);
+    if (points.size === 2) {
+      this.cancelDrag();
+      this.ui.setTooltip(null);
+      this.multiTouch = true;
+      this.pinch = touchPair(points);
+      if (CM.Follow && CM.Follow.active()) CM.Follow.stop();
+    }
     return true;
   };
   Tools.prototype.touchMove = function (e) {
-    const T = this.touches;
-    if (e.pointerType !== 'touch' || !T || !T.has(e.pointerId)) return false;
-    T.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (!this.pinch || T.size < 2 || !this.game()) return false;
-    const p = Array.from(T.values()), d = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1, mx = (p[0].x + p[1].x) / 2, my = (p[0].y + p[1].y) / 2;
-    this.R.panBy(mx - this.pinch.mx, my - this.pinch.my);
-    this.R.zoomAt(mx, my, d / this.pinch.d);
-    this.pinch.d = d; this.pinch.mx = mx; this.pinch.my = my;
-    return true;
+    const points = this.touches;
+    if (e.pointerType !== 'touch') return false;
+    if (!points.has(e.pointerId)) return true;
+    points.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const p = this.pinch;
+    if (p && !this.ui.blocking() && (e.pointerId === p.a || e.pointerId === p.b)) {
+      const next = touchPair(points);
+      this.R.panBy(next.x - p.x, next.y - p.y);
+      this.R.zoomAt(next.x, next.y, next.d / p.d);
+      this.pinch = next;
+    }
+    return this.multiTouch;
   };
   Tools.prototype.touchUp = function (e) {
-    const T = this.touches;
-    if (e.pointerType !== 'touch' || !T) return false;
-    T.delete(e.pointerId);
-    if (!this.pinch) return false;
-    if (T.size < 2) this.pinch = null;   // 松开一指后不再把剩下的手指当作点击
-    this.ptr = null;
-    return true;
+    const points = this.touches;
+    if (e.pointerType !== 'touch') return false;
+    if (!points.delete(e.pointerId)) return true;
+    const multiple = this.multiTouch;
+    if (!points.size) this.resetTouches();
+    else if (points.size < 2) this.pinch = null;
+    else if (this.pinch && (e.pointerId === this.pinch.a || e.pointerId === this.pinch.b)) this.pinch = touchPair(points);
+    return multiple;
+  };
+  Tools.prototype.capturePointer = function (id) {
+    try { this.R.cv.setPointerCapture(id); } catch (err) { /* 指针已结束。 */ }
+  };
+  Tools.prototype.startExtension = function (p) {
+    this.ui.startDraw(p.extend.station, p.extend.line, false);
+    p.extending = this.tool === 'line' && this.chain === p.extend.station;
   };
   Tools.prototype.onDown = function (e) {
     const g = this.game(); if (!g || this.ui.blocking()) return;
-    try { if (this.R.cv.setPointerCapture) this.R.cv.setPointerCapture(e.pointerId); } catch (err) { /* 指针已失效时忽略 */ }
-    this.ptr = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, button: e.button, moved: false, shift: e.shiftKey, alt: e.altKey, t: performance.now() };
+    if (this.ptr) return;
+    this.capturePointer(e.pointerId);
+    this.ptr = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, button: e.button, moved: false, shift: e.shiftKey, alt: e.altKey, t: performance.now() };
     if (e.button === 1) { this.ptr.pan = true; e.preventDefault(); return; }
     if (e.button === 0 && e.shiftKey && this.tool === 'demolish' && !g.jumping) { this.ptr.box = true; return; }   // 拆除工具：Shift + 拖动框选
     // 延长手柄：进入绘线，拖到目标位置松开即连线（只点击则从该端点开始逐站绘制）
     const ext = e.button === 0 ? this.pickExtend(e.clientX, e.clientY) : null;
-    if (ext) { this.ui.startDraw(ext.station, ext.line, false); this.ptr.extend = true; return; }
+    if (ext) { this.ptr.extend = ext; return; }
     if (e.button === 0 && (this.tool === 'edit' || this.tool === 'line') && !g.jumping && !e.shiftKey) {
       const h = this.pickHandle(e.clientX, e.clientY);
       if (h && (this.tool === 'edit' || h.kind === 'bend' || h.kind === 'mid')) { this.drag = h; this.drag.changed = false; g.beginLive(); this.ptr.handle = true; }
     }
   };
   Tools.prototype.onMove = function (e) {
-    const g = this.game(); if (!g) return;
+    const g = this.game(); if (!g || (this.ptr && this.ptr.id !== e.pointerId)) return;
+    if (this.ui.blocking()) { if (this.ptr) this.cancelDrag(); return; }
     const R = this.R;
     this.mouse = { x: e.clientX, y: e.clientY };
     if (this.ptr) {
       const dx = e.clientX - this.ptr.x, dy = e.clientY - this.ptr.y;
       if (!this.ptr.moved && Math.hypot(e.clientX - this.ptr.sx, e.clientY - this.ptr.sy) > (e.pointerType === 'touch' ? 10 : 4)) this.ptr.moved = true;
-      if (this.drag) { this.dragTo(e.clientX, e.clientY, e.shiftKey); }
+      if (this.drag) { if (this.ptr.moved) this.dragTo(e.clientX, e.clientY, e.shiftKey); }
       else if (this.ptr.box) { if (this.ptr.moved) { this.boxSel = this.boxHits(this.ptr.sx, this.ptr.sy, e.clientX, e.clientY); this.hover = null; this.ui.setTooltip(null); this.ptr.x = e.clientX; this.ptr.y = e.clientY; return; } }
-      else if (this.ptr.extend) { /* 拖动延长手柄：只更新绘线预览 */ }
+      else if (this.ptr.extend && this.ptr.moved && !this.ptr.extending) {
+        const p = this.ptr;
+        this.startExtension(p);
+        this.ptr = p;   // 切到绘线工具时会清理前一个工具的指针状态。
+      }
+      else if (this.ptr.extend) { /* 拖动延长手柄时只更新绘线预览。 */ }
       else if (this.ptr.moved || this.ptr.pan) { if (CM.Follow && CM.Follow.active()) CM.Follow.stop(); R.panBy(dx, dy); this.ptr.pan = true; }
       this.ptr.x = e.clientX; this.ptr.y = e.clientY;
     }
@@ -128,13 +160,19 @@
     if (e.pointerType === 'touch') this.ui.setTooltip(null);   // 触屏没有悬停：拖动地图时不显示提示
   };
   Tools.prototype.onUp = function (e) {
-    const g = this.game(); const p = this.ptr; this.ptr = null;
-    if (!g || !p) return;
+    const g = this.game(), p = this.ptr;
+    if (!p || p.id !== e.pointerId) return;
+    if (!g || this.ui.blocking()) { this.cancelDrag(); return; }
+    this.ptr = null;
     if (this.drag) {
       const ch = this.drag.changed && p.moved; this.drag = null; this.snapPt = null; g.endLive(ch); if (ch) sfx('place');
       if (ch || this.tool !== 'line') return;   // 绘线工具里只是点了一下控制点（没拖动）：照常当作绘线点击
     }
-    if (p.extend) { if (p.moved && this.tool === 'line' && this.chain) this.onClick(e.clientX, e.clientY, false); return; }
+    if (p.extend) {
+      if (!p.extending) this.startExtension(p);
+      if (p.moved && p.extending) this.onClick(e.clientX, e.clientY, false);
+      return;
+    }
     if (p.box && p.moved) { const b = this.boxSel; this.boxSel = null; if (b && (b.stations.length || b.segs.length)) this.ui.addMulti(b.stations, b.segs); return; }
     if (p.pan && p.moved) return;
     if (p.orbit && p.moved) return;   // 拖动旋转结束，不当作点击
@@ -181,8 +219,8 @@
       if (d < bd) { bd = d; best = p; }
     }
     if (!best) return null;
-    // 城市连接的接驳口没到开放年份前不能接
-    if (best.f.ext.gate && this.game().year() < best.f.open) return null;
+    // 口岸只在运营期间开放建设接驳。
+    if (best.f.ext.gate && !CM.Fac.active(best.f, this.game().year(), this.game().city)) return null;
     const P = CM.Fac.portal(best.f);
     let sid = null;
     for (const id in net.stations) if (CM.Fac.isPortalStation(net.stations[id], best.f)) { sid = id; break; }

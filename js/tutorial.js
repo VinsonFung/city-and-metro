@@ -58,12 +58,12 @@
   const southStats = function () {
     const m = g.model, city = g.city, od = m.od, Z = m.Z;
     if (!m.trafficReady() || !od || !od.t) return null;
-    const P = m.resultsFor('wd').per[0], sk = P.skimT || m.ctxs.wd.per[0].skimT, rid = function (z) { const rg = city.regions[m.zReg[z]]; return rg ? rg.id : ''; };
+    const P = m.resultsFor('wd').per[0], rid = function (z) { const rg = city.regions[m.zReg[z]]; return rg ? rg.id : ''; };
     let cross = 0, tt = 0, trips = 0, metro = 0;
     for (let z = 0; z < Z; z++) {
       if (SOUTH.indexOf(rid(z)) < 0) continue;
       trips += P.zTrips[z] || 0; metro += P.zMetro[z] || 0;
-      for (let k = od.start[z]; k < od.start[z + 1]; k++) { const dz = od.dest[k], w = od.t[0][k] || 0; if (dz < Z && w > 0 && NORTH.indexOf(rid(dz)) >= 0) { cross += w; tt += w * (sk ? sk[z * Z + dz] || 0 : 0); } }
+      for (let k = od.start[z]; k < od.start[z + 1]; k++) { const dz = od.dest[k], w = od.t[0][k] || 0; if (dz < Z && w > 0 && NORTH.indexOf(rid(dz)) >= 0) { cross += w; tt += w * m.carSkim(z, dz, P.skimLay ? P : m.ctxs.wd.per[0]); } }
     }
     return { cross: Math.round(cross), carMin: cross > 0 ? tt / cross : 0, share: trips > 0 ? metro / trips : 0 };
   };

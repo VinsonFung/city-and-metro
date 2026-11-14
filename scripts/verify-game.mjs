@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import vm from 'node:vm';
+import { geoIndex } from './geo-index.mjs';
 
 export const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const gameEntries = ['index.html', 'css', 'img', 'js', 'LICENSE.txt', 'THIRD_PARTY_NOTICES.txt', 'licenses'];
@@ -58,6 +59,7 @@ export async function inspectGame(root = projectRoot) {
   if (scripts.indexOf('js/scenery.js') <= scripts.indexOf('js/sites.js') || scripts.indexOf('js/settings.js') <= scripts.indexOf('js/scenery.js')) throw new Error('Canvas 场景扩展必须在 sites.js 之后、settings.js 之前加载');
   const { simulationStamp } = await import('./sim-stamp.mjs');
   await simulationStamp(false, root);
+  await geoIndex(root);
   for (const [, ref] of html.matchAll(/(?:src|href)=["']([^"']+)["']/g)) requireAsset(root, ref);
   for (const { rel, bytes } of files.values()) {
     const text = bytes.toString();
@@ -77,7 +79,8 @@ export async function inspectGame(root = projectRoot) {
   let loaded = false;
   for (const file of scripts) {
     // 数据检查不启动DOM、渲染、工作线程或存储。
-    if (!/^js\/(?:util|config|news|legal|geo(?:_\w+)?|data_\w+|traits|maps)\.js$/.test(file)) continue;
+    if (!/^js\/(?:util|config|news|legal|geo(?:_\w+|-index)?|data_\w+|traits|maps)\.js$/.test(file)) continue;
+    if (html.includes('<script src="' + file + '" type="application/city-metro-geo">')) continue;
     const asset = requireAsset(root, file);
     vm.runInContext(files.get(asset).bytes.toString(), context, { filename: file, timeout: 10000 });
     if (file === 'js/maps.js') loaded = true;

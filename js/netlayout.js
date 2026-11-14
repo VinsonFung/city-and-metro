@@ -233,16 +233,18 @@
         }
       }
     }
-    // 中间车站沿走廊均匀排开；走廊没能对齐时走两段（先沿主方向，再转到相邻方向）
+    // 中间车站沿走廊均匀排开；走廊没能对齐时走两段（先沿主方向，再转到相邻方向）。
+    // 走廊一端是交叉点（不是车站）时，那一头只留半个站距，与走廊长度下限的算法一致（v2.7.1 修复：两头都是交叉点的走廊里，站距只有约三分之二）
     for (const e of E) {
       const n = e.nodes.length; if (!n) continue;
+      const ga = e.a >= N0 ? 0.5 : 1, gW = ga + (n - 1) + (e.b >= N0 ? 0.5 : 1), tOf = function (k) { return (ga + k) / gW; };
       const ax = px[e.a], ay = py[e.a], bx = px[e.b], by = py[e.b], d = DIRS[e.d], vx = bx - ax, vy = by - ay, off = Math.abs(vx * d[1] - vy * d[0]);
-      if (off < 6) { for (let k = 0; k < n; k++) { const t = (k + 1) / (n + 1), id = e.nodes[k]; px[id] = ax + vx * t; py[id] = ay + vy * t; } continue; }
+      if (off < 6) { for (let k = 0; k < n; k++) { const t = tOf(k), id = e.nodes[k]; px[id] = ax + vx * t; py[id] = ay + vy * t; } continue; }
       // 拆成主方向 + 相邻方向两段
       const sideK = vx * d[1] - vy * d[0] > 0 ? (e.d + 7) % 8 : (e.d + 1) % 8, s = DIRS[sideK], det = d[0] * s[1] - d[1] * s[0], l1 = (vx * s[1] - vy * s[0]) / det, l2 = (d[0] * vy - d[1] * vx) / det;
       const total = Math.abs(l1) + Math.abs(l2);
       for (let k = 0; k < n; k++) {
-        const u = total * (k + 1) / (n + 1), id = e.nodes[k];
+        const u = total * tOf(k), id = e.nodes[k];
         if (u <= Math.abs(l1)) { px[id] = ax + d[0] * u * Math.sign(l1); py[id] = ay + d[1] * u * Math.sign(l1); }
         else { const rest = u - Math.abs(l1); px[id] = ax + d[0] * l1 + s[0] * rest * Math.sign(l2); py[id] = ay + d[1] * l1 + s[1] * rest * Math.sign(l2); }
       }

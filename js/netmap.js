@@ -1039,40 +1039,71 @@
       const d = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
       zoomAt(Math.exp(U.clamp(d, -240, 240) * 0.0022), e.clientX, e.clientY);
     }, { passive: false });
-    let drag = null, pinch = null;
-    const pts = new Map();   // 触屏：两指缩放
-    const two = function () { const p = Array.from(pts.values()); return { d: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1, x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 }; };
+    let drag = null, pinch = null, multiTouch = false;
+    const points = new Map();
+    const pair = function () {
+      const [a, b] = points.entries(), p = a[1], q = b[1];
+      return { a: a[0], b: b[0], d: Math.hypot(p.x - q.x, p.y - q.y) || 1, x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 };
+    };
     canvas.addEventListener('pointerdown', function (e) {
-      if (onControl(e)) return;
-      if (tgt) { tgt = null; }
-      if (e.pointerType === 'touch') { pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (pts.size === 2) { pinch = two(); drag = null; return; } }
-      drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, moved: false }; canvas.setPointerCapture(e.pointerId);
-    });
-    const lift = function (e) { pts.delete(e.pointerId); if (pts.size < 2 && pinch) { pinch = null; if (!tgt) setView(true); } };
-    canvas.addEventListener('pointercancel', function (e) { lift(e); if (drag && drag.moved && !tgt) setView(true); drag = null; canvas.classList.remove('grabbing'); });
-    canvas.addEventListener('pointermove', function (e) {
-      if (pts.has(e.pointerId)) pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (pinch && pts.size >= 2) {
-        const t = two(), r = box(), s = Math.max(view.w / r.width, view.h / r.height);
-        view.x -= (t.x - pinch.x) / r.scale * s; view.y -= (t.y - pinch.y) / r.scale * s; setView();
-        zoomAt(pinch.d / t.d, t.x, t.y);
-        pinch = t; return;
+      if (onControl(e) || e.button !== 0) return;
+      canvas.setPointerCapture(e.pointerId);
+      tgt = null;
+      if (e.pointerType === 'touch') {
+        points.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (points.size > 1) {
+          if (points.size === 2) { pinch = pair(); drag = null; multiTouch = true; }
+          return;
+        }
       }
-      if (!drag) return;
-      const r = box(), s = Math.max(view.w / r.width, view.h / r.height);
-      if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 4) drag.moved = true;
-      if (drag.moved) { if (CM.NetReplay) CM.NetReplay.userMoved(); view.x = drag.vx - (e.clientX - drag.x) / r.scale * s; view.y = drag.vy - (e.clientY - drag.y) / r.scale * s; setView(); canvas.classList.add('grabbing'); }
+      if (!drag) drag = { id: e.pointerId, x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, moved: false };
     });
-    canvas.addEventListener('pointerup', function (e) {
-      const wasPinch = !!pinch || pts.size > 1; lift(e);
-      if (wasPinch) { drag = null; return; }
+    canvas.addEventListener('pointermove', function (e) {
+      if (points.has(e.pointerId)) points.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinch && (e.pointerId === pinch.a || e.pointerId === pinch.b)) {
+        const next = pair(), r = box();
+        if (!r.width || !r.height) return;
+        if (CM.NetReplay) CM.NetReplay.userMoved();
+        const scale = Math.max(view.w / r.width, view.h / r.height) / r.scale;
+        const cx = r.left + r.width * r.scale / 2, cy = r.top + r.height * r.scale / 2;
+        const wx = view.x + view.w / 2 + (pinch.x - cx) * scale, wy = view.y + view.h / 2 + (pinch.y - cy) * scale;
+        const width = U.clamp(view.w * pinch.d / next.d, Math.min(view.W * 0.5, 480), view.W * 2);
+        const ratio = width / view.w, height = view.h * ratio;
+        view.x = wx - width / 2 - (next.x - cx) * scale * ratio;
+        view.y = wy - height / 2 - (next.y - cy) * scale * ratio;
+        view.w = width; view.h = height;
+        pinch = next; setView();
+        return;
+      }
+      if (!drag || drag.id !== e.pointerId) return;
+      const r = box(), dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if (!r.width || !r.height) return;
+      if (Math.hypot(dx, dy) > (e.pointerType === 'touch' ? 8 : 4)) drag.moved = true;
+      if (drag.moved) {
+        if (CM.NetReplay) CM.NetReplay.userMoved();
+        const scale = Math.max(view.w / r.width, view.h / r.height) / r.scale;
+        view.x = drag.vx - dx * scale; view.y = drag.vy - dy * scale; setView(); canvas.classList.add('grabbing');
+      }
+    });
+    const lift = function (e) {
+      if (points.delete(e.pointerId) && multiTouch) {
+        if (pinch && (e.pointerId === pinch.a || e.pointerId === pinch.b)) {
+          pinch = points.size >= 2 ? pair() : null;
+          if (!pinch && !tgt) setView(true);
+        }
+        if (!points.size) multiTouch = false;
+        canvas.classList.remove('grabbing');
+        return;
+      }
+      if (!drag || drag.id !== e.pointerId) return;
       const d = drag; drag = null; canvas.classList.remove('grabbing');
-      if (d && d.moved && !tgt) setView(true);   // 松手立即按新视野重画
-      if (!d || d.moved) return;
+      if (d.moved && !tgt) setView(true);
+      if (e.type !== 'pointerup' || d.moved) return;
       const t = document.elementFromPoint(e.clientX, e.clientY);
       const el = t && t.closest ? t.closest('[data-st]') : null;
       if (el && !(CM.NetReplay && CM.NetReplay.active())) locate(el.getAttribute('data-st'));
-    });
+    };
+    for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(name, lift);
   }
   function locate(sid) {
     const g = game(); if (!g) return;

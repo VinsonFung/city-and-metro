@@ -10,6 +10,14 @@ export async function runV27Checks({evaluate:E,send,until,screenshot,delay,task,
  if(process.env.CM_V27_FIXES_ONLY){const{runFixChecks}=await import('./v27-fix-browser-cases.mjs');await runFixChecks({E,send,until,screenshot,delay,settle,tap,audit,close,report});await fs.writeFile(path.join(task,'report.json'),JSON.stringify(report,null,2));return;}
  if(process.env.CM_V27_REPLAY_ONLY){const{runReplayChecks}=await import('./replay-browser-cases.mjs');await runReplayChecks({E,send,until,screenshot,delay,settle,tap,audit,close,report});await fs.writeFile(path.join(task,'report.json'),JSON.stringify(report));return;}
  if(!process.env.CM_V27_GATES_ONLY) {
+ await E('if(CM.geoReady("tk")||CM.geoReady("sz"))throw Error("Inactive geography was loaded at startup");if(!CM.geoReady("bj"))throw Error("Active geography unavailable");CM.ui.setLayer("tod");true');await settle();
+ if(!await E('!!document.querySelector(".lg-rank-i")&&CM.R.stationRevenue().list.length>0'))throw Error('Station revenue layer did not render');
+ await audit('station revenue phone','#legendCard button');
+ await E('const body=document.querySelector("#legendCard .lc-body");body.scrollTop=body.scrollHeight;true');await audit('station revenue ranking phone','#legendCard button');
+ await E('CM.ui.setLayer("commute");true');await until('CM.R.layer==="flow"&&!!CM.R.rateScales?.flow');
+ await audit('trips and commute phone','#legendCard button');
+ await E('CM.ui.setLayer("none");true');
+ console.log('PASS deferred geography, station revenue and trips & commute layers');
  // Batch changes are drafts, filtering is keyboard accessible, and cancelled changes cost nothing.
  await E('CM.ui.openOpsApp("stations");window.batchOriginal=JSON.stringify(CM.game.net);window.batchFunds=CM.game.econ.funds;true');await settle();
  await tap('.mc-sel');await audit('station dropdown','.dd-pop button');
@@ -56,7 +64,7 @@ export async function runV27Checks({evaluate:E,send,until,screenshot,delay,task,
  await E('CM.newGame({map:"ld",mode:"challenge",seed:18600101});true');await until('!CM.isLoading()&&CM.game?.mapId==="ld"&&!CM.game.pending',180000);await close();
  await E('CM.game.setSpeed(0);CM.ui.openOpsApp("fare");true');await settle();
  if(!await E('CM.CFG.money.pence&&/d|s/.test(document.querySelector(".fare-v").textContent)'))throw Error('Missing pre-decimal London fare');
- await audit('London fare','.mc-app button');await screenshot('v26-london-fare');report.cities.push('ld');await close();
+ await audit('London fare','.mc-app button');await screenshot('v26-london-fare');report.cities.push('ld');if(await E('CM.geoReady("bj")'))throw Error('Inactive Beijing geography retained after switching');await close();
  }
  // Save a Hong Kong network, then load Shenzhen and check the same-mode read-only overlay.
  for(const map of (process.env.CM_V27_GATES_ONLY?['sz']:['hk','sz'])) {
@@ -81,5 +89,19 @@ export async function runV27Checks({evaluate:E,send,until,screenshot,delay,task,
  }
  // The review is stored in its own progress and does not appear in a different city.
  if(await E('!!CM.game.cityReview'))throw Error('Previous city review leaked into another city');
+ // A failed geography request must allow retry, and concurrent consumers share the same request.
+ await E(`(async()=>{
+  const id='tk',stub=CM.MAPS[id].geo,head=document.head,append=head.appendChild;
+  if(CM.geoReady(id))throw Error('Tokyo unexpectedly resident');
+  head.appendChild=function(node){if(node.tagName==='SCRIPT'&&node.src.endsWith('/geo_tk.js')){queueMicrotask(()=>node.onerror());return node;}return append.call(this,node);};
+  try{const first=CM.loadGeo(id);if(first!==CM.loadGeo(id))throw Error('Duplicate geography request');
+   const outcomes=await Promise.allSettled([first]);if(outcomes[0].status!=='rejected')throw Error('Geography failure was ignored');
+  }finally{head.appendChild=append;}
+  await CM.loadGeo(id);if(!CM.geoReady(id)||CM.MAPS[id].geo!==stub||CM.GEOS[id]!==stub)throw Error('Geography retry lost the map reference');
+  CM.releaseGeo(id);if(CM.geoReady(id))throw Error('Retry data remained resident');
+  CM.endGame();return true;
+ })()`);
+ await until('!CM.game&&[CM.CarPool,CM.OdPool,CM.SkimPool].every(p=>!p.list)',15000);
+ console.log('PASS geography retry, request coalescing and idle worker release');
  await fs.writeFile(path.join(task,'report.json'),JSON.stringify(report,null,2));console.log('PASS new browser gameplay',JSON.stringify(report));
 }

@@ -99,7 +99,7 @@
     const s = C.stations[best.ns], area = { name: g.zoneName(best.z), x: +m.zCx[best.z].toFixed(2), y: +m.zCy[best.z].toFixed(2), r: 3 };
     if (!siteOK(g.city, area)) { P.cool['z:' + best.z] = ym + 24; return null; }
     const hub = { name: s.name, x: s.x, y: s.y, r: 1.2 }, km = best.nd * CFG.CELL_M / 1000, ci = g.econ.costIndex(g.clock.y);
-    const E = Math.round((CM.Tasks.estimateLink(g, [hub, area]) + Math.max(0, Math.round(km / 1.4) - 1) * CFG.cost.station.underground.M * ci) / 1000) * 1000;
+    const E = CM.Tasks.roundMoney(CM.Tasks.estimateLink(g, [hub, area]) + Math.max(0, Math.round(km / 1.4) - 1) * CFG.cost.station.underground.M * ci);
     return { z: best.z, area: area, anchors: [hub, area], km: km, est: E, pj: best.pj, buildM: U.clamp(Math.round((24 + 5 * km) / 6) * 6, 30, 72) };
   };
   const upgradeCand = function (g, P) {
@@ -114,7 +114,7 @@
         if (s.size !== 'L' && s.size !== 'XL' && !seen.has(k)) { seen.add(k); E += (tbl.L - tbl[s.size]) * ci; n++; }
       }
       if (E <= 0) continue;
-      return { line: x.lid, lf: x.lf, cars: x.cars, n: n, est: Math.round(E * 1.1 / 1000) * 1000 };
+      return { line: x.lid, lf: x.lf, cars: x.cars, n: n, est: CM.Tasks.roundMoney(E * 1.1) };
     }
     return null;
   };
@@ -156,23 +156,31 @@
   // ---------------- 履约 ----------------
   const context = function (g) {
     const m = g.model, C = m.net ? m.net.C : g.compiled, sd = m.stDaily && !m.dailyStale ? m.stDaily : null;
-    const crowd = new Map(); for (const x of CM.Tasks.crowdOf(g)) crowd.set(x.lid, Math.max(crowd.get(x.lid) || 0, x.lf));
+    const crowd = new Map(); for (const x of CM.Tasks.crowdOf(g)) if (!x.noTrain) crowd.set(x.lid, x.lf);
     const f = CM.Macro && g.macro ? CM.Macro.cityFactors(g) : null;
     return { C: C, sd: sd, crowd: crowd, fare: (m.daily && m.daily.avgFare) || 0, cyc: f ? U.clamp(f.com, 0.7, 1.25) : 1 };
   };
   const areaIdx = function (ctx, a) { const C = ctx.C, out = []; if (!C || !a) return out; for (let i = 0; i < C.stations.length; i++) if (C.serviced[i] && U.dist(C.stations[i].x, C.stations[i].y, a.x, a.y) <= a.r + 0.5) out.push(i); return out; };
   const scope = function (g, c) {
-    if (c.type === 'upgrade') return g.tasks.evaluate({ type: 'lineCars', line: c.line, target: 8, start: c.cars0 }, g);
-    return g.tasks.evaluate({ type: 'connect', anchors: c.anchors }, g);
+    const upgrade = c.type === 'upgrade', t = upgrade ? { type: 'lineCars', line: c.line, target: 8, start: c.cars0 } : { type: 'connect', anchors: c.anchors };
+    const built = g.tasks.evaluate(t, g), m = g.model, net = m.net;
+    if (!built.ok || !net || !m.trafficReady()) return Object.assign({}, built, { ok: false });
+    for (const dt of ['wd', 'we']) for (const p of m.resultsFor(dt).per) {
+      const running = function (r) { return CM.Model.boardFreq(p, net, r) > 0; };
+      if (!upgrade && g.tasks.evaluate(t, g, running).ok) return built;
+      if (upgrade && net.C.routes.some(function (rt, r) { return rt.lineId === c.line && running(r); })) return built;
+    }
+    return { ok: false, value: built.value, text: '合同范围内的服务中断' };
   };
   const kpis = function (g, c, ctx) {
     const sc = scope(g, c), idx = c.type === 'upgrade' ? [] : areaIdx(ctx, c.area);
     const lines = new Set(c.type === 'upgrade' ? [c.line] : []);
     for (const i of idx) for (const l of ctx.C.stationLines[i] || []) lines.add(l);
-    let lf = 0; lines.forEach(function (l) { lf = Math.max(lf, ctx.crowd.get(l) || 0); });
+    let lf = null; lines.forEach(function (l) { if (ctx.crowd.has(l)) lf = Math.max(lf || 0, ctx.crowd.get(l)); });
     const lim = c.type === 'upgrade' ? 1.0 : 1.1;
+    const crowd = lf != null && lf <= lim;
     let inn = 0; if (ctx.sd) for (const i of idx) inn += ctx.sd.inn[i] || 0;
-    return { conn: !!sc.ok, lf: lf, lim: lim, crowd: lf <= lim, n: (sc.ok ? 1 : 0) + (lf <= lim ? 1 : 0), inn: inn, r: c.forecast > 0 && ctx.sd ? inn / c.forecast : null };
+    return { conn: !!sc.ok, lf: lf, lim: lim, crowd: crowd, n: (sc.ok ? 1 : 0) + (crowd ? 1 : 0), inn: inn, r: c.forecast > 0 && ctx.sd ? inn / c.forecast : null };
   };
   // 物业收益与持有成本记入车站商业收入 / 成本（月末流水按月汇总），其余逐笔记入合同收支
   const pay = function (g, c, key, v, note) { if (!(v > 0.05)) return; const prop = key === 'prop'; g.econ.income(prop ? 'commerce' : 'ppp', v); c.paid[key] = (c.paid[key] || 0) + v; if (!prop) g.econ.log('ppp', v, 'gen', note + '：' + c.title, when(g)); };
@@ -210,7 +218,7 @@
       return;
     }
     const k = kpis(g, c, ctx), apF = k.n === 2 ? 1 : (k.n === 1 ? 0.7 : 0.3);
-    c.kpi = { conn: k.conn, lf: +k.lf.toFixed(3), lim: k.lim, crowd: k.crowd, f: apF, r: k.r == null ? null : +k.r.toFixed(3), inn: Math.round(k.inn) };
+    c.kpi = { conn: k.conn, lf: k.lf == null ? null : +k.lf.toFixed(3), lim: k.lim, crowd: k.crowd, f: apF, r: k.r == null ? null : +k.r.toFixed(3), inn: Math.round(k.inn) };
     pay(g, c, 'ap', c.opt.apM * apF, '可用性付费' + (apF < 1 ? '（考核扣减 ' + Math.round((1 - apF) * 100) + '%）' : ''));
     if (apF < 1) c.paid.cut = (c.paid.cut || 0) + c.opt.apM * (1 - apF);
     // 客流风险分担：按本月实际天数、全网平均每次票价折算
@@ -225,7 +233,7 @@
     c.offline = k.conn ? 0 : (c.offline || 0) + 1;
     P.rating = U.clamp(P.rating + (k.n === 2 ? 0.25 : -1.5), 0, 100);
     if (c.offline >= 3) { fail(g, P, c, '服务连续 3 个月中断'); return; }
-    if (k.n < 2 && !c.warned) { c.warned = ym; say(g, '合同考核未达标：' + c.title, (k.conn ? '' : '合同范围内的服务中断；') + (k.crowd ? '' : '最拥挤区段早高峰满载率 ' + U.fmtPct(k.lf, 0) + '，高于 ' + U.fmtPct(k.lim, 0) + '；') + '本月可用性付费只付 ' + Math.round(apF * 100) + '%。', 'warn'); }
+    if (k.n < 2 && !c.warned) { c.warned = ym; say(g, '合同考核未达标：' + c.title, (k.conn ? '' : '合同范围内的服务中断；') + (k.crowd ? '' : k.lf == null ? '早高峰没有列车运行；' : '最拥挤区段早高峰满载率 ' + U.fmtPct(k.lf, 0) + '，高于 ' + U.fmtPct(k.lim, 0) + '；') + '本月可用性付费只付 ' + Math.round(apF * 100) + '%。', 'warn'); }
     if (k.n === 2) c.warned = 0;
     if (ym >= c.opsEnd) {
       P.rating = U.clamp(P.rating + 5, 0, 100); close(g, P, c, 'done');

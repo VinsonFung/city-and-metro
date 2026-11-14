@@ -135,7 +135,7 @@
   };
   TilePool.prototype.stop = function () {
     if (this.list) for (const s of this.list) { try { s.w.terminate(); } catch (e) { /* 已结束 */ } }
-    this.list = null; this.pending.clear(); this.ovBusy = false; this.ep++;
+    this.list = null; this.geo = null; this.sent = {}; this.pending.clear(); this.ovBusy = false; this.ep++;
   };
   TilePool.prototype.fail = function (why) {
     if (this.off) return;
@@ -590,6 +590,7 @@
     this._sitePlans=new WeakMap();this._siteStamp=null;
     this.displayedLevel = this.requestedLevel = null;
     this.clearImages(); this.dropThemeStash(); if (this.overview && this.overview.close) this.overview.close(); this.overview = null; this.overviewJob = null; this.overviewStale = true; this.heat = null; this.heatKey = '';
+    if (this.tiles && this.tiles.geo && this.tiles.geo !== CM.GEO) this.tiles.stop();
     if (g && typeof document !== 'undefined' && !this.tiles) this.tiles = new TilePool(this);
     this.heatLayers.clear(); this.segScreens = new WeakMap(); this.segDecos = new WeakMap(); this.metroOrder = null;
     this.roadLabelGeom = new WeakMap(); this.textWidths.clear(); this._cgBmp = null;
@@ -603,7 +604,7 @@
     this.roadVer = g ? g.city.roadVersion : -1;
     // 换城市（含换地图）时清掉按城市版本号缓存的数据，避免不同城市的版本号恰好相同
     this.linkGrid = null; this.linkGridVer = -1; this._cgIdx = null; this._cgRuns = null; this._fa = null; this._fl = null; this._flKey = null;
-    this._todL = null; this._smC = null;
+    this._todL = null; this._rev = null; this._smC = null;
     this._flLay = null; this._flLayKey = null; this._flShow = null; this._sf = null; this._sfKey = null; this._rm = {}; this.hl = null; this.follow = null;
     this._rk = null; this.styleEpoch = g ? Math.floor(g.clock.y / 5) : null; this.styleYear = g ? this.styleEpoch * 5 : null;
   };
@@ -678,7 +679,7 @@
   };
   Renderer.prototype.panBy = function (dx, dy) {
     const d = this.screenToWorldDelta(dx, dy);
-    this.cam.cx -= d.x; this.cam.cy -= d.y; this.cam.fly = null; this.clampCam(); this.computeTransform();
+    this.cam.cx -= d.x; this.cam.cy -= d.y; this.cam.fly = null; this.cam.anchor = null; this.clampCam(); this.computeTransform();
   };
   Renderer.prototype.zoomAt = function (sx, sy, factor) {
     const c = this.cam;
@@ -2646,7 +2647,7 @@
   Renderer.prototype.buildHeat = function () {
     const g = this.game, city = g.city, model = g.model, W = city.W, H = city.H, LO = this.layerOpt, lay = this.layer;
     const access = lay === 'cover' || lay === 'gap' ? model.net : null;
-    const dyn = lay === 'fac' || lay === 'gap' || lay === 'commute' || lay === 'mshare';
+    const dyn = lay === 'fac' || lay === 'gap' || lay === 'flow' || lay === 'mshare';
     const key = this.themeName + ':' + AX.flag() + ':' + lay + ':' + city.version + ':' + g.clock.y + ':' + g.clock.m + ':' + (lay === 'cover' ? g.netVersion + ':' + LO.cover : '') + (lay === 'fac' ? LO.facP + ':' + LO.facDt : '') + (lay === 'gap' ? LO.gapDt + ':' + g.netVersion : '') + (lay === 'mshare' ? LO.shareDt : '') + (lay === 'dev' ? LO.devK + ':' + LO.devB + ':' + (g.eraBase ? g.eraBase.id : '') + (LO.devK === 'pull' ? ':' + g.netVersion + ':' + (model.dailyStale ? 0 : model.version) : '') : '') + (dyn ? ':' + model.cycles + ':' + (model.settled ? 's' : '') : '');
     const old = this.heatLayers.get(lay);
     if (old && old.key === key && old.access === access) { this.heat = old.cv; this.heatKey = key; return; }
@@ -2686,15 +2687,15 @@
     }
     // 通勤时间、乘地铁比例：按片区算比率，再在片区中心之间双线性插值；出行很少的片区不参与（比率没有意义）
     let rateAt = null, rateScale = null;
-    if (lay === 'commute' || lay === 'mshare') {
+    if (lay === 'flow' || lay === 'mshare') {
       const Z = model.Z, ZS = CFG.ZONE, zw = W / ZS, zh = H / ZS, zv = new Float32Array(Z).fill(-1), P0 = model.resultsFor('wd').per[0];
-      if (lay === 'commute') { if (P0.zCW) for (let z = 0; z < Z; z++) if (P0.zCW[z] > 5) zv[z] = P0.zCT[z] / P0.zCW[z]; }
+      if (lay === 'flow') { if (P0.zCW) for (let z = 0; z < Z; z++) if (P0.zCW[z] > 5) zv[z] = P0.zCT[z] / P0.zCW[z]; }
       else if (fd) for (let z = 0; z < Z; z++) if (fd.trips[z] > 300) zv[z] = fd.metro[z] / fd.trips[z];
       const vals = []; let wSum = 0;
-      for (let z = 0; z < Z; z++) if (zv[z] >= 0) { const w = lay === 'commute' ? P0.zCW[z] : fd.trips[z]; vals.push([zv[z], w]); wSum += w; }
+      for (let z = 0; z < Z; z++) if (zv[z] >= 0) { const w = lay === 'flow' ? P0.zCW[z] : fd.trips[z]; vals.push([zv[z], w]); wSum += w; }
       vals.sort(function (a, b) { return a[0] - b[0]; });
       const at = function (q) { let c = 0; for (const e of vals) { c += e[1]; if (c >= wSum * q) return e[0]; } return vals.length ? vals[vals.length - 1][0] : 0; };
-      if (lay === 'commute') { const lo = Math.floor(at(0.1)), hi = Math.max(lo + 8, Math.ceil(at(0.9))); rateScale = { lo: lo, hi: hi }; }
+      if (lay === 'flow') { const lo = Math.floor(at(0.1)), hi = Math.max(lo + 8, Math.ceil(at(0.9))); rateScale = { lo: lo, hi: hi }; }
       else rateScale = { lo: 0, hi: Math.max(0.05, Math.ceil(at(0.95) * 20) / 20) };
       rateAt = function (x, y) {
         const fx = U.clamp((x + 0.5) / ZS - 0.5, 0, zw - 1), fy = U.clamp((y + 0.5) / ZS - 0.5, 0, zh - 1), x0 = Math.floor(fx), y0 = Math.floor(fy), x1 = Math.min(zw - 1, x0 + 1), y1 = Math.min(zh - 1, y0 + 1), tx = fx - x0, ty = fy - y0;
@@ -2755,7 +2756,7 @@
       } else if (rateAt) {
         if (p + jb > 300 && city.lu[c] !== CM.LU.WATER) {
           const x = c % W, v = rateAt(x, (c - x) / W);
-          if (v >= 0 && lay === 'commute') { col = AX.ramp([[0, [64, 170, 120]], [0.5, [245, 200, 80]], [1, [205, 50, 50]]], U.clamp((v - rateScale.lo) / (rateScale.hi - rateScale.lo), 0, 1)); a = U.clamp(0.28 + Math.sqrt((p + jb) / 90000) * 0.3, 0, 0.55); }
+          if (v >= 0 && lay === 'flow') { col = AX.ramp([[0, [64, 170, 120]], [0.5, [245, 200, 80]], [1, [205, 50, 50]]], U.clamp((v - rateScale.lo) / (rateScale.hi - rateScale.lo), 0, 1)); a = U.clamp(0.28 + Math.sqrt((p + jb) / 90000) * 0.3, 0, 0.55); }
           else if (v >= 0) { const t = U.clamp(v / rateScale.hi, 0, 1); col = AX.ramp([[0, [214, 232, 245]], [0.5, [90, 160, 220]], [1, [20, 70, 159]]], t); a = 0.16 + 0.42 * t; }
         }
       } else if (lay === 'pop') {
@@ -2904,7 +2905,7 @@
     ctx.globalAlpha = 1;
     // ---- 图层（地面） ----
     const layerOn = this.layer !== 'none';
-    if (layerOn && ['pop', 'jobs', 'cover', 'region', 'fac', 'gap', 'dev', 'commute', 'mshare'].indexOf(this.layer) >= 0) {
+    if (layerOn && ['pop', 'jobs', 'cover', 'region', 'fac', 'gap', 'dev', 'flow', 'mshare'].indexOf(this.layer) >= 0) {
       this.buildHeat();
       setWorld();
       ctx.imageSmoothingEnabled = true;
@@ -2915,7 +2916,7 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     // 分析图层开启时：地面加一层浅色蒙版，隐藏建筑与车辆，让图层本身清楚可读（渐变过渡）
     this.layerFade = U.clamp((this.layerFade || 0) + (layerOn ? dt : -dt) / 0.25, 0, 1);
-    if (this.layerFade > 0.01 && (this.layer === 'cong' || this.layer === 'flow' || this.layer === 'station' || this.layer === 'tod' || !layerOn)) {
+    if (this.layerFade > 0.01 && (this.layer === 'cong' || this.layer === 'station' || this.layer === 'tod' || !layerOn)) {
       ctx.fillStyle = U.rgb(TH.fog || TH.bg, 0.5 * this.layerFade); ctx.fillRect(0, 0, this.w, this.h);
     }
     // 经纬网格（视图工具）：画在地面上、建筑之下，保持低调
@@ -4142,17 +4143,74 @@
   // 结果按月和客流版本缓存，不用每帧重算
   Renderer.prototype.todList = function () {
     const g = this.game, ui = CM.ui, key = g.clock.y + ':' + g.clock.m + ':' + g.netVersion + ':' + g.model.cycles;
-    if (this._todL && this._todL.key === key) return this._todL.list;
+    if (this._todL && this._todL.game === g && this._todL.net === g.net && this._todL.daily === g.model.daily && this._todL.key === key) return this._todL.list;
     const list = [];
     if (ui) for (const id in g.net.stations) {
       const I = ui.todInfo(id); if (!I) continue;
       if (I.lv) list.push({ id: id, lv: I.lv, net: I.net(I.lv) });
       else list.push({ id: id, lv: 0, net: I.net(1) });
     }
-    this._todL = { key: key, list: list };
+    this._todL = { key: key, game: g, net: g.net, daily: g.model.daily, list: list };
     return list;
   };
+  // 车站营收（v2.7.1，商业开发图层的默认视图）：每座运营车站每月的票款（进站人次 × 全网平均票价，估算）、商业收入，
+  // 以及扣除车站日常运营费和商业运营成本后的结余。按月和客流版本缓存
+  Renderer.prototype.stationRevenue = function () {
+    const g = this.game, ui = CM.ui, m = g.model, C = m.net ? m.net.C : null;
+    const day = m.dailyStale ? null : m.daily, sd = m.dailyStale ? null : m.stDaily;
+    const ym = g.ym();
+    if (this._rev && this._rev.ym === ym && this._rev.network === C && this._rev.daily === day && this._rev.net === g.net && this._rev.details === this.todList()) return this._rev;
+    const out = { ym: ym, network: C, daily: day, net: g.net, details: this.todList(), list: [], fare: 0, com: 0, cost: 0 };
+    if (!C || !ui || !sd || !day || sd.inn.length !== C.stations.length) { this._rev = out; return out; }
+    const avgFare = day.avgFare || 0, oi = g.econ.opsIndex(g.clock.y);
+    C.stations.forEach(function (st, k) {
+      if (!C.serviced[k]) return;
+      const s = g.net.stations[st.id]; if (!s) return;
+      const I = ui.todInfo(st.id), lv = s.tod || 0;
+      // 票价以元计，账目以万计
+      const fare = (sd.inn[k] || 0) * avgFare * 30.4 / 10000, com = I && lv ? I.month(lv) : 0, cost = (CFG.ops.stationDaily[s.size] || 0) * oi * 30.4 + (I && lv ? I.cost(lv) : 0);
+      out.list.push({ id: st.id, x: s.x, y: s.y, type: s.type, name: s.name, fare: fare, com: com, cost: cost, rev: fare + com, net: fare + com - cost, lv: lv });
+      out.fare += fare; out.com += com; out.cost += cost;
+    });
+    out.list.sort(function (a, b) { return b.rev - a.rev; });
+    out.top = out.list.length ? out.list[0].rev : 1;
+    this._rev = out;
+    return out;
+  };
+  Renderer.prototype.drawRevLayer = function (ctx) {
+    const R = this.stationRevenue(), v = this.view, zk = U.clamp(this.z / 26, 0.6, 1.2), a0 = this.layerFade == null ? 1 : this.layerFade;
+    if (!R.list.length) return;
+    const top = Math.max(1, R.top), Hmax = 66 * zk, bw = Math.max(6, 9 * zk), placed = [];
+    const hit = function (b) { for (const q of placed) if (b[0] < q[2] && b[2] > q[0] && b[1] < q[3] && b[3] > q[1]) return true; return false; };
+    ctx.save(); ctx.globalAlpha = a0; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+    // 先画柱，再按营收从高到低放标注（不重叠）；营收为零的车站只画一个灰点
+    const vis = [];
+    for (const o of R.list) {
+      if (o.x < v.x0 - 1 || o.x > v.x1 + 1 || o.y < v.y0 - 1 || o.y > v.y1 + 1) continue;
+      const p = this.P(o.x, o.y, this.trackH(o.type)), h = o.rev > 0 ? Math.max(3, Hmax * Math.sqrt(o.rev / top)) : 0, hf = o.rev > 0 ? h * o.fare / o.rev : 0;
+      vis.push({ o: o, p: p, h: h });
+      ctx.fillStyle = 'rgba(20,30,45,0.18)'; ctx.fillRect(p.x - bw / 2 + 1.5, p.y - h + 1.5, bw, h);
+      ctx.fillStyle = '#2f7dd1'; ctx.fillRect(p.x - bw / 2, p.y - hf, bw, hf);
+      if (h > hf) { ctx.fillStyle = '#d9a514'; ctx.fillRect(p.x - bw / 2, p.y - h, bw, h - hf); }
+      ctx.strokeStyle = TH.halo; ctx.lineWidth = 1; ctx.strokeRect(p.x - bw / 2, p.y - h, bw, h);
+      ctx.fillStyle = o.net >= 0 ? '#2fa36b' : '#d63031'; ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(3.2, 4.2 * zk), 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.3; ctx.stroke();
+    }
+    ctx.font = '700 11px ' + FONT;
+    let n = 0;
+    for (const q of vis) {
+      if (q.o.rev <= 0) break;
+      if (n >= 14 && this.z < 16) break;
+      const text = U.fmtMoney(q.o.rev) + '/月', w = ctx.measureText(text).width + 8, y = q.p.y - q.h - 9, b = [q.p.x - w / 2, y - 8, q.p.x + w / 2, y + 8];
+      if (hit(b)) continue;
+      placed.push(b); n++;
+      ctx.lineWidth = 3; ctx.strokeStyle = TH.halo; ctx.strokeText(text, q.p.x, y);
+      ctx.fillStyle = q.o.net >= 0 ? '#1f5f9e' : '#c0282a'; ctx.fillText(text, q.p.x, y);
+    }
+    ctx.restore();
+  };
   Renderer.prototype.drawTodLayer = function (ctx) {
+    if ((this.layerOpt.todMode || 'rev') === 'rev') return this.drawRevLayer(ctx);
     const list = this.todList(), net = this.game.net, v = this.view, zk = U.clamp(this.z / 26, 0.55, 1.15), a0 = this.layerFade == null ? 1 : this.layerFade;
     let top = 1; for (const o of list) if (o.lv || o.net > 0) top = Math.max(top, Math.abs(o.net));
     ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
@@ -5282,15 +5340,12 @@
         if (named && named.has(s.id)) continue;
         const font = C.stationLines[i].size > 1 ? TYPE.placeMajor : TYPE.place;   // 按实际字重测宽，避免换乘站名与旁边标注重叠
         const w = this.textW(font, s.name);
-        // 右侧放不下时依次试左侧、上方（图层标注较多时站名仍尽量显示）
-        let x = p.x + p.r + 4, y = p.y;
-        if (!fits(x - 2, y - fs / 2 - 2, x + w + 2, y + fs / 2 + 2)) {
-          x = p.x - p.r - 4 - w;
-          if (!fits(x - 2, y - fs / 2 - 2, x + w + 2, y + fs / 2 + 2)) {
-            x = p.x - w / 2; y = p.y - p.r - fs / 2 - 4;
-            if (!fits(x - 2, y - fs / 2 - 2, x + w + 2, y + fs / 2 + 2)) continue;
-          }
-        }
+        // 右侧放不下时依次试左侧、上方、下方（图层标注较多时站名仍尽量显示）。v2.7.1 玩家反馈（站名消失）：换乘站四处都被地标、
+        // 设施名占住时仍写在右侧，不让主要车站的名字整个消失
+        const right = [p.x + p.r + 4, p.y], cand = [right, [p.x - p.r - 4 - w, p.y], [p.x - w / 2, p.y - p.r - fs / 2 - 4], [p.x - w / 2, p.y + p.r + fs / 2 + 4]];
+        let x = 0, y = 0, placed = false;
+        for (const q of cand) { x = q[0]; y = q[1]; if (fits(x - 2, y - fs / 2 - 2, x + w + 2, y + fs / 2 + 2)) { placed = true; break; } }
+        if (!placed) { if (C.stationLines[i].size < 2) continue; x = right[0]; y = right[1]; occupy(x - 2, y - fs / 2 - 2, x + w + 2, y + fs / 2 + 2); }
         put(s.name, x, y, font, TH.ink, false, 0, 1, i);
       }
     }

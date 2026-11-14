@@ -1,6 +1,6 @@
 'use strict';
 // 线网成长回放（v2.7）：在线路图里按时间重放线网从第一条线到现在的成长。
-// 在站线变化的月份排版，站位和路线在相邻两次排版之间连续过渡；新线沿线路方向逐段长出来。
+// 固定线路图版面；历史站点补在相邻车站旁，新线沿线路方向逐段长出。
 // 用画布绘制（线路多时比逐个改 SVG 元素流畅），线宽、站标、配色与静态线路图相同，最后一帧与静态图位置一致。
 (function (CM) {
   const U = CM.U, M = CM.Metro, h = U.h, AX = CM.Accessibility;
@@ -65,20 +65,6 @@
     }
     return out;
   }
-  // 关键帧的时刻：线网真正发生变化（新建、拆除、贯通、拆开）的月份，加上开头和现在。
-  // v2.7 玩家反馈：以前按历史阶段排版，两次排版之间的后半段一直在变形，停在中途看到的线路走向既不是当时的线网也不是后来的版面。
-  // 现在版面只在变化的月份过渡，其余时间不动；变化太多时最多取 16 个变化最大的月份，最后一次变化一定保留
-  function keyTimes(H) {
-    const mon = new Map(), add = function (t, w) { if (!isFinite(t)) return; const m = Math.round(t * 12); mon.set(m, (mon.get(m) || 0) + w); };
-    for (const x of H.segs) { add(x.t0, x.relabel ? 0.5 : 1); add(x.t1, 1); }
-    const m0 = Math.round(H.T0 * 12), m1 = Math.round(H.T1 * 12);
-    let list = Array.from(mon.entries()).filter(function (e) { return e[0] > m0 && e[0] < m1; });
-    if (list.length > 16) {
-      const last = list.reduce(function (a, e) { return e[0] > a[0] ? e : a; }, list[0]);
-      list = list.filter(function (e) { return e !== last; }).sort(function (a, b) { return b[1] - a[1]; }).slice(0, 15).concat([last]);
-    }
-    return [H.T0].concat(list.map(function (e) { return e[0] / 12; }).sort(function (a, b) { return a - b; }), [H.T1]);
-  }
   function frameOf(g, H, t) {
     const net = subnet(H, t), F = { t: t, pos: new Map(), hub: new Map(), route: new Map(), n: Object.keys(net.segments).length, real: [], virt: [] };
     if (!F.n) return F;
@@ -91,65 +77,58 @@
     });
     return F;
   }
-  function translate(F, dx, dy) {
-    F.pos.forEach(function (p) { p[0] += dx; p[1] += dy; });
-    if (F.virt) for (const v of F.virt) { v.p[0] += dx; v.p[1] += dy; }
-    F.hub.forEach(function (G) { G.x += dx; G.y += dy; });
-    F.route.forEach(function (r) { for (let k = 0; k < SN; k++) { r[2 * k] += dx; r[2 * k + 1] += dy; } });
-  }
-  // 相邻帧对齐，并给还没建成（或已拆除）的车站和区段补上位置，这样过渡时不会从别处飞过来
-  function complete(H, frames) {
-    const last = frames[frames.length - 1];
-    for (let i = frames.length - 2; i >= 0; i--) {
-      const F = frames[i], N = frames[i + 1]; let dx = 0, dy = 0, n = 0;
-      F.pos.forEach(function (p, sid) { const q = N.pos.get(sid); if (q) { dx += q[0] - p[0]; dy += q[1] - p[1]; n++; } });
-      if (n) translate(F, dx / n, dy / n);
-    }
+  // 简洁示意的固定版面。
+  // 现在和地理线网一样只用一份版面：现在线网的排版（与静态线路图一致），已拆除的车站按相邻车站的地理方向和本图的比例补位
+  function placeGone(H, F) {
+    const geo = function (sid) { const s = H.stations[sid]; return s ? [s.x, s.y] : null; };
+    const rs = [];
+    for (const x of H.segs) { const pa = F.pos.get(x.a), pb = F.pos.get(x.b), ga = geo(x.a), gb = geo(x.b); if (!pa || !pb || !ga || !gb) continue; const d = Math.hypot(ga[0] - gb[0], ga[1] - gb[1]); if (d > 0.2) rs.push(Math.hypot(pa[0] - pb[0], pa[1] - pb[1]) / d); }
+    rs.sort(function (a, b) { return a - b; });
+    const k = rs.length ? rs[rs.length >> 1] : 40;
     const adj = new Map(), link = function (a, b) { let l = adj.get(a); if (!l) adj.set(a, l = []); l.push(b); };
     for (const x of H.segs) { link(x.a, x.b); link(x.b, x.a); }
-    const sids = Object.keys(H.stations).filter(function (sid) { return adj.has(sid); });
-    const nearestFrame = function (i, sid) { for (let d = 1; d < frames.length; d++) { if (i + d < frames.length && frames[i + d].pos.has(sid)) return frames[i + d]; if (i - d >= 0 && frames[i - d].pos.has(sid)) return frames[i - d]; } return null; };
-    frames.forEach(function (F, i) {
-      const extra = new Map();
-      for (const sid of sids) {
-        if (F.pos.has(sid)) continue;
-        const J = nearestFrame(i, sid); if (!J) continue;
-        const seen = new Set([sid]), q = [sid]; let ref = null;
-        for (let k = 0; k < q.length && k < 400 && !ref; k++) for (const o of adj.get(q[k]) || []) { if (seen.has(o)) continue; seen.add(o); if (F.pos.has(o) && J.pos.has(o)) { ref = o; break; } q.push(o); }
-        const pj = J.pos.get(sid);
-        if (ref) { const a = F.pos.get(ref), b = J.pos.get(ref); extra.set(sid, [a[0] + pj[0] - b[0], a[1] + pj[1] - b[1]]); } else extra.set(sid, pj.slice());
+    let todo = Array.from(adj.keys()).filter(function (sid) { return !F.pos.has(sid) && geo(sid); });
+    // 沿已拆除的区段一圈一圈往外补：先补紧挨着现存车站的，再补它们的邻站
+    for (let pass = 0; todo.length && pass < 60; pass++) {
+      const next = [];
+      for (const sid of todo) {
+        const g0 = geo(sid), ref = (adj.get(sid) || []).find(function (o) { return F.pos.has(o) && geo(o); });
+        if (!ref) { next.push(sid); continue; }
+        const p = F.pos.get(ref), gr = geo(ref); F.pos.set(sid, [p[0] + (g0[0] - gr[0]) * k, p[1] + (g0[1] - gr[1]) * k]);
       }
-      extra.forEach(function (p, sid) { F.pos.set(sid, p); });
-    });
-    frames.forEach(function (F, i) {
-      for (const x of H.segs) {
-        if (F.route.has(x.id)) continue;
-        let J = null;
-        for (let d = 1; d < frames.length && !J; d++) { if (i + d < frames.length && frames[i + d].route.has(x.id)) J = frames[i + d]; else if (i - d >= 0 && frames[i - d].route.has(x.id)) J = frames[i - d]; }
-        const pa = F.pos.get(x.a), pb = F.pos.get(x.b); if (!pa || !pb) continue;
-        const r = new Float32Array(SN * 2);
-        if (J && J.pos.get(x.a) && J.pos.get(x.b)) {
-          const src = J.route.get(x.id), qa = J.pos.get(x.a), qb = J.pos.get(x.b), dax = pa[0] - qa[0], day = pa[1] - qa[1], dbx = pb[0] - qb[0], dby = pb[1] - qb[1];
-          for (let k = 0; k < SN; k++) { const t = k / (SN - 1); r[2 * k] = src[2 * k] + dax + (dbx - dax) * t; r[2 * k + 1] = src[2 * k + 1] + day + (dby - day) * t; }
-        } else for (let k = 0; k < SN; k++) { const t = k / (SN - 1); r[2 * k] = pa[0] + (pb[0] - pa[0]) * t; r[2 * k + 1] = pa[1] + (pb[1] - pa[1]) * t; }
-        F.route.set(x.id, r);
-      }
-    });
-    return last;
+      if (next.length === todo.length) break;
+      todo = next;
+    }
+    // 和现在线网完全不连通的（整条线都拆了）：挂到地理上最近的已定位车站
+    for (const sid of todo) {
+      const g0 = geo(sid); let best = null, bd = Infinity;
+      F.pos.forEach(function (p, o) { const go = geo(o); if (!go) return; const d = Math.hypot(go[0] - g0[0], go[1] - g0[1]); if (d < bd) { bd = d; best = o; } });
+      if (best) { const p = F.pos.get(best), gb = geo(best); F.pos.set(sid, [p[0] + (g0[0] - gb[0]) * k, p[1] + (g0[1] - gb[1]) * k]); }
+    }
+    // 区段：同一条轨道的其他时期（贯通、拆开前后）沿用现在的走向；已拆除的画直线
+    const byBase = new Map(); for (const x of H.segs) { const r = F.route.get(x.id); if (r && !byBase.has(x.base)) byBase.set(x.base, r); }
+    for (const x of H.segs) {
+      if (F.route.has(x.id)) continue;
+      const r0 = byBase.get(x.base); if (r0) { F.route.set(x.id, r0); continue; }
+      const pa = F.pos.get(x.a), pb = F.pos.get(x.b); if (!pa || !pb) continue;
+      const r = new Float32Array(SN * 2);
+      for (let q = 0; q < SN; q++) { const t = q / (SN - 1); r[2 * q] = pa[0] + (pb[0] - pa[0]) * t; r[2 * q + 1] = pa[1] + (pb[1] - pa[1]) * t; }
+      F.route.set(x.id, r);
+    }
   }
-  // 播放进度 ↔ 时间：有变化（新建、拆除、贯通、拆开）的月份多给时间，没有变化的月份很快过去（约 0.05 秒一个月）。
-  // 总时长按变化的多少定：一个有变化的月份约 0.6–2 秒，最短 15 秒、最长 90 秒
-  const IDLE = 0.05;
+  // 播放进度 ↔ 时间：有变化（新建、拆除、贯通、拆开）的月份多给时间，没有变化的月份较快过去（约 0.15 秒一个月）。
+  // 总时长按变化的多少定：一个有变化的月份约 1.4–3 秒，最短 30 秒、最长 150 秒
+  const IDLE = 0.15;
   function timeWarp(H) {
-    const m0 = Math.floor(H.T0 * 12), m1 = Math.ceil(H.T1 * 12), n = Math.max(1, m1 - m0), w = new Float64Array(n);
+    const m0 = Math.round(H.T0 * 12), m1 = Math.round(H.T1 * 12), n = Math.max(1, m1 - m0), w = new Float64Array(n);
     const mon = function (t) { return U.clamp(Math.floor(t * 12 + 1e-6) - m0, 0, n - 1); };
-    const bump = function (t) { if (!isFinite(t)) return; const k = mon(t); w[k] += w[k] ? 0.2 : 0.6; };
+    const bump = function (t) { if (!isFinite(t)) return; const k = mon(t); w[k] += w[k] ? 0.4 : 1.4; };
     for (const x of H.segs) { if (!x.relabel || !w[mon(x.t0)]) bump(x.t0); if (!x.relabel) bump(x.t1); }
-    for (let i = 0; i < n; i++) w[i] = w[i] ? Math.min(w[i], 2) : IDLE;
+    for (let i = 0; i < n; i++) w[i] = w[i] ? Math.min(w[i], 3) : IDLE;
     const acc = new Float64Array(n + 1); for (let i = 0; i < n; i++) acc[i + 1] = acc[i] + w[i];
     const tot = acc[n] || 1;
     return {
-      dur: U.clamp(tot, 15, 90),
+      dur: U.clamp(tot, 30, 150),
       t2p: function (t) { const f = U.clamp(t * 12 - m0, 0, n), i = Math.min(n - 1, Math.floor(f)); return (acc[i] + w[i] * (f - i)) / tot; },
       p2t: function (p) { const v = U.clamp(p, 0, 1) * tot; let lo = 0, hi = n; while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (acc[mid] <= v) lo = mid; else hi = mid; } return (m0 + lo + (v - acc[lo]) / (w[lo] || 1)) / 12; },
     };
@@ -219,64 +198,45 @@
   function prepare(g) {
     const H = collect(g), eras = eraList(), W = timeWarp(H), stInfo = schedule(H, W), news = newsList(H, W);
     const all = { stations: H.stations, segments: {}, lines: H.lines }; for (const x of H.segs) all.segments[x.id] = x.s;
-    let frames;
+    let F;
     if (A.geographic()) {
       // 地理线网：位置不变，只有一帧（已拆除的区段也算出位置）
       const base = M.withSegIndex([g.net, all], function () { const current = A.computeRoutes(g, g.net, [], A.spacing()); return current.N ? current : A.computeRoutes(g, all, [], A.spacing()); });
       if (!base.N) return null;
-      const F = { t: H.T1, pos: new Map(), hub: new Map(), route: new Map() };
+      F = { t: H.T1, pos: new Map(), hub: new Map(), route: new Map(), n: H.segs.length };
       for (const sid in H.stations) { const s = H.stations[sid], p = base.base(s.x, s.y); F.pos.set(sid, p); F.hub.set(sid, A.hubGeom(p[0], p[1], null)); }
       M.withSegIndex([all], function () { for (const x of H.segs) F.route.set(x.id, resample(base.base.path(M.segGeom(all, x.s, g.city).pts))); });
-      frames = [F];
     } else {
-      frames = [];
-      // 贯通或拆线时区段数可能相同，仍须保留当月的排版与换乘关系。
-      for (const t of keyTimes(H)) { const F = frameOf(g, H, t); if (F.n) frames.push(F); }
-      if (!frames.length) return null;
-      complete(H, frames);
-      // 线路图的江海底图（v2.7 玩家反馈）：每一帧按当时的站位变形，顶点数相同，过渡时逐点插值
-      const lens = H.segs.map(function (x) { const a = H.stations[x.a], b = H.stations[x.b]; return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0; }).filter(function (v) { return v > 0; });
-      const med = A.medianSpacing(lens);
-      for (const F of frames) {
-        const G = [], P = [];
-        for (const sid of F.real) { const s = H.stations[sid], q = F.pos.get(sid); if (s && q) { G.push([s.x, s.y]); P.push(q); } }
-        for (const v of F.virt || []) { G.push(v.g); P.push(v.p); }
-        F.water = G.length >= 2 ? A.waterLayer(G, P, med) : null;
-      }
+      const baseTime = H.segs.some(function (x) { return !isFinite(x.t1); }) ? H.T1 : H.segs.reduce(function (t, x) { return Math.max(t, x.t0); }, H.T0);
+      F = frameOf(g, H, baseTime);
+      if (!F.n) return null;
+      placeGone(H, F);
+      const lenses = H.segs.map(function (x) { const a = H.stations[x.a], b = H.stations[x.b]; return Math.hypot(a.x - b.x, a.y - b.y); }).filter(function (v) { return v > 0; });
+      const G = [], P = [];
+      for (const sid of F.real) { const s = H.stations[sid]; G.push([s.x, s.y]); P.push(F.pos.get(sid)); }
+      for (const v of F.virt) { G.push(v.g); P.push(v.p); }
+      F.water = G.length >= 2 ? A.waterLayer(G, P, A.medianSpacing(lenses)) : null;
     }
-    // 每一帧在播放进度上的过渡窗口：这一帧所在的那个月
-    for (const F of frames) { F.pa = W.t2p(F.t); F.pb = Math.max(F.pa + 1e-6, W.t2p(F.t + 1 / 12)); }
     let km = new Map(), kmOK = true;
     try {
       const C = g.compiled; if (C && C.segs) C.segs.forEach(function (cs) { if (cs.g) km.set(cs.seg.id, cs.g.lenM / 1000); });
       M.withSegIndex([all], function () { for (const x of H.segs) if (!km.has(x.base)) km.set(x.base, M.segGeom(all, x.s, g.city).lenM / 1000); });
     } catch (e) { kmOK = false; }
-    return { H: H, eras: eras, W: W, stInfo: stInfo, frames: frames, km: km, kmOK: kmOK, news: news };
+    return { H: H, eras: eras, W: W, stInfo: stInfo, layout: F, km: km, kmOK: kmOK, news: news };
   }
 
   // ---------------- 绘制 ----------------
-  // 按播放进度取版面：平时停在最近一次变化的版面；变化的那个月里从上一版面平滑过渡过来
-  function frameAt(D, p) {
-    const f = D.frames; let i = 0;
-    while (i + 1 < f.length && p >= f[i + 1].pa) i++;
-    if (i === 0 || p >= f[i].pb) return { a: f[i], b: f[i], s: 0 };
-    return { a: f[i - 1], b: f[i], s: ease((p - f[i].pa) / (f[i].pb - f[i].pa)) };
-  }
-  // 线路图回放的江海底图：前后两帧的水面逐点插值（两帧顶点数相同，见 netmap.js waterLayer），先裁到地图边框内
-  function drawWater(c, fr, P) {
-    const wa = fr.a.water || fr.b.water, wb = fr.b.water || fr.a.water; if (!wa || !wb) return;
-    const s = fr.a.water && fr.b.water ? fr.s : 0;
-    const trace = function (fa, fb, closed) {
-      const n = Math.min(fa.length, fb.length);
-      for (let k = 0; k + 1 < n; k += 2) { const x = fa[k] + (fb[k] - fa[k]) * s, y = fa[k + 1] + (fb[k + 1] - fa[k + 1]) * s; if (k) c.lineTo(x, y); else c.moveTo(x, y); }
-      if (closed) c.closePath();
-    };
-    c.save();
-    c.beginPath(); trace(wa.edge, wb.edge, true); c.clip();
+  function drawWater(c, wa, P) {
+    if (!wa) return;
+    const C = wa._path || (wa._path = (function () {
+      const path = function (f, closed) { const q = new Path2D(); for (let k = 0; k + 1 < f.length; k += 2) { if (k) q.lineTo(f[k], f[k + 1]); else q.moveTo(f[k], f[k + 1]); } if (closed) q.closePath(); return q; };
+      const polys = new Path2D(); for (const f of wa.polys) polys.addPath(path(f, true));
+      return { edge: path(wa.edge, true), polys: polys, rivers: wa.rivers.map(function (r) { return { w: r.w, p: path(r.p, false) }; }) };
+    })());
+    c.save(); c.clip(C.edge);
     c.fillStyle = P.waterS || P.water; c.strokeStyle = P.waterS || P.water; c.lineJoin = 'round'; c.lineCap = 'round'; c.lineWidth = 4;
-    c.beginPath(); for (let k = 0; k < wa.polys.length && k < wb.polys.length; k++) trace(wa.polys[k], wb.polys[k], true);
-    c.fill('evenodd'); c.stroke();
-    for (let k = 0; k < wa.rivers.length && k < wb.rivers.length; k++) { c.lineWidth = wa.rivers[k].w; c.beginPath(); trace(wa.rivers[k].p, wb.rivers[k].p, false); c.stroke(); }
+    c.fill(C.polys, 'evenodd'); c.stroke(C.polys);
+    for (const r of C.rivers) { c.lineWidth = r.w; c.stroke(r.p); }
     c.restore();
   }
   const lineColor = function (L) { return AX.line(L); };
@@ -303,8 +263,8 @@
     const cw = host.clientWidth, ch = host.clientHeight, dpr = Math.min(2, window.devicePixelRatio || 1);
     if (!cw || !ch) return;
     if (cv.width !== Math.round(cw * dpr) || cv.height !== Math.round(ch * dpr)) { cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr); }
-    const p = S.p, T = Math.min(D.H.now, D.W.p2t(p)), fr = frameAt(D, p), P = S.P, H = D.H;
-    const lerpP = function (sid) { const a = fr.a.pos.get(sid), b = fr.b.pos.get(sid); if (!a) return b; if (!b) return a; return [a[0] + (b[0] - a[0]) * fr.s, a[1] + (b[1] - a[1]) * fr.s]; };
+    const p = S.p, T = Math.min(D.H.now, D.W.p2t(p)), F = D.layout, P = S.P, H = D.H;
+    const stationPos = function (sid) { return F.pos.get(sid); };
     // 可见区段和车站
     const vis = [], stLines = new Map();
     const stDir = new Map();
@@ -313,7 +273,7 @@
       const g = x.gd ? U.clamp((p - x.p0) / x.gd, 0, 1) : 1;
       vis.push({ x: x, g: g });
       // 车站处的线路走向：站名写在线路旁边，不压在线上
-      const ra = fr.a.route.get(x.id) || fr.b.route.get(x.id);
+      const ra = F.route.get(x.id);
       if (ra) { const dx = ra[2] - ra[0], dy = ra[3] - ra[1]; if (!stDir.has(x.a)) stDir.set(x.a, [dx, dy]); if (!stDir.has(x.b)) stDir.set(x.b, [dx, dy]); }
       const reached = g >= 1;
       for (const e of [[x.a, x.from === x.a || reached], [x.b, x.from === x.b || reached]]) { if (!e[1]) continue; let l = stLines.get(e[0]); if (!l) stLines.set(e[0], l = []); if (l.indexOf(x.line) < 0) l.push(x.line); }
@@ -323,7 +283,7 @@
     S.cameraMoving = false;
     if (S.follow && V) {
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      stLines.forEach(function (l, sid) { const q = lerpP(sid); if (!q) return; x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]); });
+      stLines.forEach(function (l, sid) { const q = stationPos(sid); if (!q) return; x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]); });
       if (x0 < Infinity) {
         const pad = 150, minW = 1200, bw = Math.max(minW, x1 - x0 + pad * 2), bh = Math.max(minW * ch / cw, y1 - y0 + pad * 2), sc = Math.min(cw / bw, Math.max(120, ch - 96) / bh), tw = cw / sc, th = ch / sc, tx = (x0 + x1) / 2 - tw / 2, ty = (y0 + y1) / 2 - th / 2 + 34 / sc;
         S.cameraMoving = !S.snap && Math.max(Math.abs(tx - V.x), Math.abs(ty - V.y), Math.abs(tw - V.w), Math.abs(th - V.h)) > tw * 0.0001;
@@ -337,14 +297,11 @@
     c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, cw, ch);
     c.setTransform(dpr * sc, 0, 0, dpr * sc, dpr * ox, dpr * oy);
     const geo = A.geographic(), LW = geo ? 8.5 : 11;
-    if (!geo) drawWater(c, fr, P);
+    if (!geo) drawWater(c, F.water, P);
     // 路线
-    const pts = new Float32Array(SN * 2);
     const trace = function (o) {
-      const ra = fr.a.route.get(o.x.id), rb = fr.b.route.get(o.x.id), rev = o.x.from === o.x.b, last = o.g >= 1 ? SN - 1 : o.g * (SN - 1), n = Math.floor(last);
-      if (!ra && !rb) return false;
-      const A0 = ra || rb, B0 = rb || ra, s = fr.s;
-      for (let k = 0; k < SN * 2; k++) pts[k] = A0[k] + (B0[k] - A0[k]) * s;
+      const pts = F.route.get(o.x.id), rev = o.x.from === o.x.b, last = o.g >= 1 ? SN - 1 : o.g * (SN - 1), n = Math.floor(last);
+      if (!pts) return false;
       c.beginPath();
       if (!rev) { c.moveTo(pts[0], pts[1]); for (let k = 1; k <= n; k++) c.lineTo(pts[2 * k], pts[2 * k + 1]); if (n < SN - 1) { const f = last - n; c.lineTo(pts[2 * n] + (pts[2 * n + 2] - pts[2 * n]) * f, pts[2 * n + 1] + (pts[2 * n + 3] - pts[2 * n + 1]) * f); } }
       else { const e = SN - 1; c.moveTo(pts[2 * e], pts[2 * e + 1]); for (let k = 1; k <= n; k++) c.lineTo(pts[2 * (e - k)], pts[2 * (e - k) + 1]); if (n < e) { const f = last - n, i = e - n; c.lineTo(pts[2 * i] + (pts[2 * i - 2] - pts[2 * i]) * f, pts[2 * i + 1] + (pts[2 * i - 1] - pts[2 * i + 1]) * f); } }
@@ -364,10 +321,10 @@
     const labels = [];
     stLines.forEach(function (ls, sid) {
       const info = D.stInfo.get(sid); if (!info || p < info.p0) return;
-      const q = lerpP(sid); if (!q) return;
+      const q = stationPos(sid); if (!q) return;
       const pop = ease((p - info.p0) / 0.006), scale = 0.4 + 0.6 * pop;
       if (ls.length > 1) {
-        const ga = fr.a.hub.get(sid), gb = fr.b.hub.get(sid), hx = ga && gb ? ga.x + (gb.x - ga.x) * fr.s : q[0], hy = ga && gb ? ga.y + (gb.y - ga.y) * fr.s : q[1], gr = ga && gb ? ga.r + (gb.r - ga.r) * fr.s : (geo ? 11 : 12.5);
+        const hub = F.hub.get(sid), hx = hub ? hub.x : q[0], hy = hub ? hub.y : q[1], gr = hub ? hub.r : (geo ? 11 : 12.5);
         drawHub(c, hx, hy, gr * scale, ls.map(function (l) { return lineColor(H.lines[l]); }), P);
         labels.push({ sid: sid, x: hx, y: hy, r: gr * 1.15, hub: 1, name: info.name, a: pop });
       } else {
@@ -492,7 +449,7 @@
     start: start, stop: stop,
     active: function () { return !!S || !!preparing; },
     // 当前回放的总时长（秒）、进度和播报清单（检查与测试用）
-    info: function () { if (!S) return null; const fr = frameAt(S.D, S.p); return { dur: S.D.W.dur, p: S.p, t: S.D.W.p2t(S.p), news: S.D.news.map(function (e) { return e.text; }), pieces: S.D.H.segs.length, relabel: S.D.H.segs.filter(function (x) { return x.relabel; }).length, frames: S.D.frames.map(function (f) { return [+f.t.toFixed(3), f.n, +f.pa.toFixed(3)]; }), morph: fr.s, frame: S.D.frames.indexOf(fr.b) }; },
+    info: function () { if (!S) return null; const F = S.D.layout; return { dur: S.D.W.dur, p: S.p, t: Math.min(S.D.H.now, S.D.W.p2t(S.p)), news: S.D.news.map(function (e) { return e.text; }), pieces: S.D.H.segs.length, relabel: S.D.H.segs.filter(function (x) { return x.relabel; }).length, frames: [[+F.t.toFixed(3), F.n, +S.D.W.t2p(F.t).toFixed(3)]], morph: 0, frame: 0 }; },
     userMoved: function () { if (S) { S.follow = false; S.dirty = true; } },
     dirty: function () { if (S) S.dirty = true; },
   };

@@ -517,14 +517,18 @@
   CM.Tasks = Tasks;
 
   // 网络连通分量（线路 + 站外换乘）
-  function stationComponents(C, acc) {
+  function stationComponents(C, acc, activeRoutes) {
     const N = C.stations.length, par = new Int32Array(N);
+    const serviced = activeRoutes ? new Uint8Array(N) : C.serviced;
     for (let i = 0; i < N; i++) par[i] = i;
     const find = function (x) { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
     const uni = function (a, b) { a = find(a); b = find(b); if (a !== b) par[a] = b; };
-    for (const r of C.routes) for (let k = 1; k < r.stIdx.length; k++) uni(r.stIdx[0], r.stIdx[k]);
-    if (acc) for (const t of acc.transfers) uni(t.a, t.b);
-    return { find: find, serviced: C.serviced };
+    C.routes.forEach(function (r, i) {
+      if (activeRoutes && !activeRoutes(i)) return;
+      for (const s of r.stIdx) { if (activeRoutes) serviced[s] = 1; uni(r.stIdx[0], s); }
+    });
+    if (acc) for (const t of acc.transfers) if (!activeRoutes || (serviced[t.a] && serviced[t.b])) uni(t.a, t.b);
+    return { find: find, serviced: serviced };
   }
   Tasks.stationComponents = stationComponents;
   // 同上，但不能经过 avoid 一带的车站（「不经市中心」）：只有相邻两站都在范围外才算连通
@@ -651,18 +655,18 @@
   // 票价显示（去掉「/次」），用于提示玩家要把票价调回多少
   const fareWords = function (v) { return CM.UI && CM.UI.fmtFare ? CM.UI.fmtFare(v).replace('/次', '') : String(+v.toFixed(2)); };
 
-  Tasks.prototype.evaluate = function (t, g) {
+  Tasks.prototype.evaluate = function (t, g, activeRoutes) {
     const C = g.compiled, model = g.model, acc = model.net ? model.net.acc : null;
     if (t.type === 'connect') {
-      const comp = t.avoid ? componentsAvoiding(C, acc, t.avoid) : stationComponents(C, acc);
+      const comp = t.avoid ? componentsAvoiding(C, acc, t.avoid) : stationComponents(C, acc, activeRoutes);
       const anchorSets = t.anchors.map(function (a) {
         const set = [];
-        C.stations.forEach(function (s, i) { if (C.serviced[i] && U.dist(s.x, s.y, a.x, a.y) <= a.r) set.push(i); });
+        C.stations.forEach(function (s, i) { if (comp.serviced[i] && U.dist(s.x, s.y, a.x, a.y) <= a.r) set.push(i); });
         return set;
       });
       const hits = anchorSets.map(function (s) { return s.length > 0; });
       let ok = false;
-      if (hits.every(Boolean)) {
+      if (hits.length && hits.every(Boolean)) {
         const roots = anchorSets.map(function (s) { return new Set(s.map(comp.find)); });
         for (const r of roots[0]) if (roots.every(function (S) { return S.has(r); })) { ok = true; break; }
       }
@@ -689,7 +693,9 @@
       const i = C.sIndex.get(t.station);
       if (i === undefined) return { ok: false, value: 0, text: '车站已拆除' };
       const sd = model.stDailyWk || model.stDaily;
-      const peak = sd && !model.dailyStale ? sd.peak[i] || 0 : 0;
+      if (!sd || model.dailyStale) return { ok: false, value: 0, text: '客流计算中' };
+      if (!stationRunning(g, i)) return { ok: false, value: 0, text: '车站没有列车运行' };
+      const peak = sd.peak[i] || 0;
       const cap = CFG.metro.stationCap[C.stations[i].size];
       const v = peak / cap;
       return { ok: v <= t.target, value: U.clamp((t.start - v) / Math.max(0.01, t.start - t.target), 0, 1), text: '工作日高峰负荷 ' + U.fmtPct(v, 0) + ' / 目标 ≤ ' + U.fmtPct(t.target, 0) };
@@ -810,8 +816,8 @@
         const v = Tasks.partValue(p, g);
         if (v != null) { p.base0 = v; p.target = p.gain ? v + p.gain : v * (1 - p.drop); }
       }
-      if (p.type === 'budget') { if (p.spent0 == null) p.spent0 = g.econ.built || 0; if (p.budget == null) p.budget = Math.round(Tasks.estimateLink(g, anchors) * (p.budgetX || 1.2) / 1000) * 1000; }
-      else if (p.type === 'lineCost') { if (p.y0 == null) p.y0 = g.clock.y; if (p.budget == null) p.budget = Math.round(Tasks.estimateLink(g, anchors) * (p.x || 1) / 1000) * 1000; }
+      if (p.type === 'budget') { if (p.spent0 == null) p.spent0 = g.econ.built || 0; if (!(p.budget > 0)) p.budget = Tasks.roundMoney(Tasks.estimateLink(g, anchors) * (p.budgetX || 1.2)); }
+      else if (p.type === 'lineCost') { if (p.y0 == null) p.y0 = g.clock.y; if (!(p.budget > 0)) p.budget = Tasks.roundMoney(Tasks.estimateLink(g, anchors) * (p.x || 1)); }
       else if (p.type === 'facShare') { if (p.fare0 == null) p.fare0 = Tasks.fareLevel(g.econ.fare); const f = CM.Fac && CM.Fac.byId(p.fac); if (f && !p.basis) p.basis = Tasks.facBasis(f); }
     }
     return t;
@@ -1042,6 +1048,12 @@
   // 工作日早高峰各区段的满载情况（任务、地铁芯和线路详情共用这一份）：满载率 = 区间断面客流 ÷ 线路运力（发车频率 × 定员，v2.5 定员按车队，环线两个方向分别计）。
   // 没有列车运行的路线（列车都调走了、手动设为 0，或全部跑在加开的交路上）没有运力，满载率无从谈起：标 noTrain，不再除以兜底的 1 得出几十万 %
   Tasks.LF_MAX = 9.99;
+  const stationRunning = function (g, i) {
+    const m = g.model, n = m.net, routes = g.compiled.stationRoutes[i];
+    return n && routes && m.resultsFor('wd').per.some(function (p) {
+      return routes.some(function (r) { return CM.Model.boardFreq(p, n, r) > 0; });
+    });
+  };
   Tasks.crowdSections = function (g, lid) {
     const m = g.model, net = m.net, out = []; if (!net || !net.R || !m.trafficReady()) return out;
     const P = m.resultsFor('wd').per[0]; if (!P.load || P.load.length !== net.nE) return out;
@@ -1090,7 +1102,7 @@
   Tasks.prototype.reviewValue=function(t,g){
     if(t.type==='ridership'){const d=g.model.dailyFor(Tasks.basisOf(t));return d?d.metro:null;}
     if(t.type==='facShare'){const f=CM.Fac.byId(t.fac),r=f&&Tasks.facShareOf(g.model,f,t.basis);return r?r.share:null;}
-    if(t.type==='stationCrowd'){const i=g.compiled.sIndex.get(t.station),s=g.model.stDailyWk;return i===undefined||!s?null:(s.peak[i]||0)/CFG.metro.stationCap[g.compiled.stations[i].size];}
+    if(t.type==='stationCrowd'){const i=g.compiled.sIndex.get(t.station),s=g.model.stDailyWk;return i===undefined||!s||!stationRunning(g,i)?null:(s.peak[i]||0)/CFG.metro.stationCap[g.compiled.stations[i].size];}
     if(t.type==='zoneCong'){
       if(t.metric!=='carShare')return g.zoneCong(t.zone,'wd');
       const a=(t.samples||[]).filter(x=>x.ym>=g.ym()-2&&x.ym<g.ym()).slice(-2);
@@ -1290,6 +1302,12 @@
     return out;
   };
 
+  // 金额目标使用两位有效数字，最大取整单位为千。早期伦敦币值较小，需要保留低于千的造价目标与合同估价。
+  Tasks.roundMoney = function (v) {
+    if (!(v > 0)) return 0;
+    const p = Math.min(1000, Math.pow(10, Math.floor(Math.log10(v)) - 1));
+    return +(Math.max(p, Math.round(v / p) * p)).toPrecision(6);
+  };
   Tasks.prototype.generate = function (g) {
     const y = g.clock.y, m = g.clock.m, model = g.model, city = g.city;
     const acc = model.net ? model.net.acc : null;
@@ -1464,7 +1482,7 @@
         // 锚点：[地名, 半径]（按 D.places 定位）或带坐标的对象
         const an = s.anchors.map(function (a) { if (!Array.isArray(a)) return a; const p = placeAt(a[0]); return p ? { name: a[0], x: p.x, y: p.y, r: a[1] || 3 } : null; });
         if (an.some(function (a) { return !a; })) continue;
-        c.anchors = an; c.budget = Math.round(Tasks.estimateLink(g, an) * (s.budgetX || 1.2) / 1000) * 1000;
+        c.anchors = an; c.budget = Tasks.roundMoney(Tasks.estimateLink(g, an) * (s.budgetX || 1.2));
         if (this.evaluate(Object.assign({}, c, { type: 'connect' }), g).ok) continue;
       } else if (s.type === 'regionCov') {
         c.regions = s.regions; c.areaName = s.areaName; c.target = s.target;

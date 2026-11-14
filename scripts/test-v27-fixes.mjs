@@ -5,7 +5,7 @@ const load=async f=>vm.runInContext(await fs.readFile(new URL(f,root),'utf8'),c,
 for(const[,f]of(await fs.readFile(new URL('index.html',root),'utf8')).matchAll(/<script src="([^"]+)"/g)){await load(f);if(f==='js/save.js')break;}
 const C=c.CM,M=C.Metro,copy=x=>JSON.parse(JSON.stringify(x)),sum=a=>a.reduce((s,n)=>s+n,0);C.UI=function(){};
 for(const f of ['settings','icons','pages','corp','fleet','opsapp','render','sites','scenery'])await load('js/'+f+'.js');
-assert.equal(C.CFG.GAME_VERSION,'2.7.0');assert.equal(C.CFG.RULES_REVISION,10);assert.equal(C.MAP_ORDER.length,12);assert.equal(C.Fleet.MODELS.length,56);assert.ok(!C.MAPS.sg&&!C.MAPS.ny&&!C.Achievements&&!C.Desktop);
+assert.equal(C.CFG.GAME_VERSION,'2.7.1');assert.equal(C.CFG.RULES_REVISION,11);assert.equal(C.MAP_ORDER.length,12);assert.equal(C.Fleet.MODELS.length,56);assert.ok(!C.MAPS.sg&&!C.MAPS.ny&&!C.Achievements&&!C.Desktop);
 C.useMap('tutorial');const g=C.Game.create({mode:'free',tutorial:true,seed:20000101}),F=C.Fleet;F.ensure(g);let fixture;
 for(let y=5;y<g.city.H-5&&!fixture;y++)for(let x=5;x<g.city.W-22&&!fixture;x++){
  if([0,4,8,12,16].some(d=>!M.checkSite(g.city,x+d,y,'underground').ok))continue;
@@ -14,7 +14,14 @@ for(let y=5;y<g.city.H-5&&!fixture;y++)for(let x=5;x<g.city.W-22&&!fixture;x++){
 }
 assert.ok(fixture);g.edit(n=>Object.assign(n,fixture.n));assert.equal(g.confirmDraft().ok,true);g.model.solveNow(4);F.ensure(g);const{lid,ids}=fixture;
 assert.ok(g.model.daily.metro>0);const svc=F.svcId(g.compiled.routes[0],0);F.setMode(g,lid,'manual');for(let p=0;p<4;p++)F.setManual(g,lid,svc,p,0);g.model.solveNow(4);
-assert.equal(g.model.daily.metro,0);for(const dt of ['wd','we'])for(const P of g.model.resultsFor(dt).per){assert.equal(sum(P.load),0);assert.equal(sum(P.stIn),0);assert.equal(sum(P.stOut),0);}
+assert.equal(g.model.daily.metro,0);
+assert.equal(g.tasks.evaluate({type:'stationCrowd',station:ids[0],start:1.1,target:.9},g).ok,false);
+const liveRoute=g.compiled.routes[0],oldEnd=liveRoute.stIds.at(-1),terminal=g.net.stations[oldEnd];
+assert.ok(!g.edit(n=>{const end=M.addStation(n,terminal.x+4,terminal.y,{size:'M',type:'underground'},g.city);M.addSegment(n,lid,oldEnd,end,[],'underground');})?.error);
+assert.ok(g.draftCompiled().routes[0].stIds.length>liveRoute.stIds.length);
+const draftPlan=F.plan(g,{C:g.draftCompiled()})[0];assert.equal(JSON.stringify(draftPlan.manual[0]),'[0,0,0,0]');
+assert.equal((g.draftEval().fleetAdd||[]).length,0,'Extending a manual off route must not buy trains');g.cancelDraft();
+for(const dt of ['wd','we'])for(const P of g.model.resultsFor(dt).per){assert.equal(sum(P.load),0);assert.equal(sum(P.stIn),0);assert.equal(sum(P.stOut),0);}
 assert.ok(C.Tasks.crowdOf(g).every(s=>s.noTrain&&s.lf===0));assert.equal(C.OpsAlerts.scan(g).length,0);
 for(let p=0;p<4;p++)F.setManual(g,lid,svc,p,1);g.model.solveNow(4);assert.ok(g.model.daily.metro>0);
 F.setManual(g,lid,svc,0,0);g.model.solveNow(3);assert.equal(sum(g.model.resultsFor('wd').per[0].load),0);assert.ok(sum(g.model.resultsFor('wd').per[1].load)>0);F.setManual(g,lid,svc,0,1);
@@ -25,10 +32,10 @@ const pred=F.plan(g,{C:M.compile(M.clone(g.net),g.city)});assert.equal(pred[0].a
 console.log('PASS no-train and per-period shutdown, restored service, zero residual demand, express-only prediction and load diagnostics');
 
 // Old-rule progress is backed up byte-for-byte, without changing assets or past accounts.
-const payload=copy(g.serialize());payload.rulesRevision=9;const body=JSON.stringify(payload),raw=JSON.stringify({format:C.CFG.SAVE_FORMAT,version:2,gameVersion:'2.7.0',savedAt:Date.now(),body,checksum:C.U.fnv(body)}),imp=await C.Save.importText(raw),old=await C.Save.load(imp.slotId);
+const payload=copy(g.serialize());payload.rulesRevision=10;const body=JSON.stringify(payload),raw=JSON.stringify({format:C.CFG.SAVE_FORMAT,version:2,gameVersion:'2.7.0',savedAt:Date.now(),body,checksum:C.U.fnv(body)}),imp=await C.Save.importText(raw),old=await C.Save.load(imp.slotId);
 assert.ok(old.__backupSlot);assert.equal(JSON.parse(memory.get(C.Save.slotInfo(old.__backupSlot).key)).body,body);
 const restored=C.Game.restore(copy(old));assert.equal(restored.econ.funds,payload.econ.funds);assert.equal(JSON.stringify(restored.net),JSON.stringify(payload.net));assert.equal(JSON.stringify(restored.econ.ledger),JSON.stringify(payload.econ.ledger));
-console.log('PASS exact v2.7 rules-9 backup and preserved network, funds and historical ledger');
+console.log('PASS exact v2.7 rules-10 backup and preserved network, funds and historical ledger');
 
 const byId=C.Fac.byId,facIndex=g.model.facIndex,facStats=g.model.facStats,ready=g.model.trafficReady,verified=g.model.trafficVerified,clock={...g.clock},fare=g.econ.fare;
 try{

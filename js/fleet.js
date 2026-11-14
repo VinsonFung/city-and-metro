@@ -160,6 +160,34 @@
     }
     return { r: rs[0], d: 0 };
   };
+  // 手动时刻表属于交路，即使该交路未配车也要随终点变更。
+  const remapSchedules = function (C, rs, schedules) {
+    if (!schedules || !rs) return schedules;
+    const active = new Set();
+    for (const r of rs) {
+      const rt = C.routes[r];
+      active.add(F.svcId(rt, 0));
+      if (rt.loop) active.add(F.svcId(rt, 1));
+    }
+    const remapped = {};
+    for (const svc of active) if (schedules[svc]) remapped[svc] = schedules[svc];
+    for (const svc of Object.keys(schedules)) {
+      if (active.has(svc) || /^v\d/.test(svc)) continue;
+      const pos = placeOf(C, rs, { svc: svc });
+      if (!pos) continue;
+      const id = F.svcId(C.routes[pos.r], pos.d);
+      if (!remapped[id]) remapped[id] = schedules[svc].slice();
+    }
+    return remapped;
+  };
+  const manualSchedules = function (C, byLine, ops) {
+    const schedules = new Map();
+    for (const [lid, rs] of byLine) {
+      const o = ops[lid];
+      if (o && o.mode === 'manual') schedules.set(lid, remapSchedules(C, rs, o.n) || {});
+    }
+    return schedules;
+  };
   // 最低服务水平所需的列车（早高峰）：按周转时间
   F.floorNeed = function (rt) { return Math.max(1, Math.ceil(CM.Model.serviceFloor(rt, 0) * rt.cycleSec / 3600 - 1e-6)); };
   const cache = new WeakMap();
@@ -168,7 +196,11 @@
   F.plan = function (g, net) {
     const fl = g.fleet; if (!fl || !net || !net.C) return null;
     const hit = cache.get(net); if (hit && hit.ver === fl.ver && hit.ym === g.ym()) return hit.plan;
-    const C = net.C, draft = C.net !== g.net, byLine = routesOfLine(C), y = g.clock.y;
+    const C = net.C, byLine = routesOfLine(C), manual = manualSchedules(C, byLine, fl.ops);
+    const draftAdds = g.draft && C.net === g.draft.net ? g.draftEval().fleetAdd : null;
+    const extra = new Map();
+    for (const a of draftAdds || []) extra.set(a.line + ':' + a.svc, a);
+    const byId = draftAdds && draftAdds.length ? new Map(fl.trains.map(function (t) { return [t.id, t]; })) : null;
     const plan = C.routes.map(function (rt) { return { avail: [0, 0], units: [[], []], cap: rt.cap, cars: rt.cars, opsF: rt.opsK || 1, manual: null, blocked: 0, slow: 0, floor: F.floorNeed(rt) }; });
     for (const t of fl.trains) {
       if (!t.line) continue; const rs = byLine.get(t.line); if (!rs) continue;
@@ -178,8 +210,6 @@
       if (tooSlow(t, rt)) { fp.slow++; continue; }
       fp.units[pos.d].push({ id: t.id, m: F.model(t.model), cars: t.cars, cap: F.capOf(t), ops: F.opsF(g, t) });
     }
-    const onSvc = new Set();   // 有列车跑在加开交路上的线路：随线配车不补全程交路（见 F.draftExtra），预测里全程交路也保持停运
-    C.routes.forEach(function (rt, r) { if (rt.svc && (plan[r].units[0].length || plan[r].units[1].length)) onSvc.add(rt.lineId); });
     C.routes.forEach(function (rt, r) {
       const fp = plan[r], nd = rt.loop ? 2 : 1;
       let n = 0, cap = 0, cars = 0, ops = 0;
@@ -187,24 +217,35 @@
         fp.units[d].sort(function (a, b) { return b.cap - a.cap; });
         fp.avail[d] = fp.units[d].length;
         for (const u of fp.units[d]) { n++; cap += u.cap; cars += u.cars; ops += u.ops; }
+        const a = extra.get(rt.lineId + ':' + F.svcId(rt, d));
+        if (!a) continue;
+        for (const id of a.use) {
+          const t = byId.get(id);
+          fp.avail[d]++; n++; cap += F.capOf(t); cars += t.cars; ops += F.opsF(g, t);
+        }
+        if (a.buy) {
+          const m = F.model(a.model);
+          fp.avail[d] += a.buy; n += a.buy; cap += a.buy * m.cap * a.cars; cars += a.buy * a.cars; ops += a.buy * m.ops;
+        }
       }
       if (nd === 1) { fp.avail[1] = fp.avail[0]; fp.units[1] = fp.units[0]; }
-      if (draft && !rt.svc && !onSvc.has(rt.lineId)) {   // 预测：随线配车会把全程交路的列车补到最低需要（用推荐车型）；加开的交路由玩家配车
-        const m = F.recommend(g.mapId, y, rt.kmh), c = Math.min(rt.cars, m.max);
-        for (let d = 0; d < nd; d++) { const add = Math.max(0, fp.floor - fp.avail[d]); fp.avail[d] += add; n += add; cap += add * m.cap * c; cars += add * c; ops += add * m.ops; }
-        if (nd === 1) fp.avail[1] = fp.avail[0];
-      }
       if (n) { fp.cap = cap / n; fp.cars = cars / n; fp.opsF = ops / n * (rt.opsK || 1); }
-      const o = fl.ops[rt.lineId];
-      if (o && o.mode === 'manual') {
-        fp.manual = [0, 1].map(function (d) { const s = o.n && o.n[F.svcId(rt, rt.loop ? d : 0)]; return [0, 1, 2, 3].map(function (p) { return s && s[p] != null ? Math.min(s[p], fp.avail[d]) : fp.avail[d]; }); });
+      const schedules = manual.get(rt.lineId);
+      if (schedules) {
+        fp.manual = [0, 1].map(function (d) { const s = schedules[F.svcId(rt, rt.loop ? d : 0)]; return [0, 1, 2, 3].map(function (p) { return s && s[p] != null ? Math.min(s[p], fp.avail[d]) : fp.avail[d]; }); });
       }
     });
     cache.set(net, { ver: fl.ver, ym: g.ym(), plan: plan });
     return plan;
   };
   // 车队变化：版本加一、模拟立即按新的列车数重算频率与费用、界面刷新
-  const changed = function (g) { g.fleet.ver++; g.model.applyFleet(); g.touch(); g.emit('fleet'); };
+  const changed = function (g) {
+    g.fleet.ver++;
+    g.model.applyFleet();
+    if (g.draft) g.invalidatePrediction();
+    g.touch();
+    g.emit('fleet');
+  };
   F.changed = changed;
   const newTrain = function (g, mdl, cars, cost, line, svc, bought) {
     const fl = g.fleet, t = { id: 'T' + (fl.seq++), model: mdl.id, cars: cars, bought: bought == null ? g.ym() : bought, cost: Math.round(cost), line: line || null, svc: svc || null };
@@ -237,18 +278,21 @@
   F.sync = function (g) {
     const fl = g.fleet; if (!fl) return 0; let n = 0, remapped = false;
     const C = g.compiled, byLine = routesOfLine(C);
+    for (const lid in fl.ops) {
+      if (!g.net.lines[lid]) { delete fl.ops[lid]; continue; }
+      const o = fl.ops[lid], prev = o.n, next = remapSchedules(C, byLine.get(lid), prev);
+      if (next && (Object.keys(next).length !== Object.keys(prev).length || Object.keys(next).some(function (svc) { return next[svc] !== prev[svc]; }))) {
+        o.n = next;
+        remapped = true;
+      }
+    }
     for (const t of fl.trains) {
       if (!t.line) continue;
       const rs = byLine.get(t.line), pos = rs && placeOf(C, rs, t);
       if (!g.net.lines[t.line] || !pos) { t.line = null; t.svc = null; n++; continue; }
       const svc = F.svcId(C.routes[pos.r], pos.d);
-      if (svc !== t.svc) {
-        const o = fl.ops[t.line];
-        if (o && o.n && o.n[t.svc] && !o.n[svc]) o.n[svc] = o.n[t.svc].slice();
-        t.svc = svc; remapped = true;
-      }
+      if (svc !== t.svc) { t.svc = svc; remapped = true; }
     }
-    for (const lid in fl.ops) if (!g.net.lines[lid]) delete fl.ops[lid];
     if (n || remapped) fl.ver++;
     if (n) g.logEvent({ tag: '运营', title: n + ' 列列车回到车辆段', desc: '线路调整后没有归属的列车停入车辆段，可以调往其他线路或出售。' });
     return n;
@@ -259,7 +303,11 @@
   F.draftExtra = function (g, ev) {
     const fl = g.fleet; if (!fl || !g.draft || !ev) return;
     const C = g.draftCompiled(); if (!C) return;
-    const byLine = routesOfLine(C), y = g.clock.y, have = C.routes.map(function () { return [0, 0]; });
+    const byLine = routesOfLine(C), manual = manualSchedules(C, byLine, fl.ops), y = g.clock.y, have = C.routes.map(function () { return [0, 0]; });
+    const before = new Map();
+    for (const rt of g.compiled.routes) {
+      if (!rt.svc) before.set(rt.lineId + ':' + F.svcId(rt, 0), rt);
+    }
     const idle = [], onSvc = new Set();   // onSvc：有列车跑在加开交路上的线路，全程交路可以不配车
     for (const t of fl.trains) {
       const rs = t.line && byLine.get(t.line);
@@ -271,13 +319,19 @@
     const adds = []; let total = 0;
     C.routes.forEach(function (rt, r) {
       if (rt.svc || onSvc.has(rt.lineId)) return;   // 随线配车只补全程交路
+      const old = before.get(rt.lineId + ':' + F.svcId(rt, 0));
+      const floor = F.floorNeed(rt);
+      if (old && rt.cars === old.cars && rt.kmh === old.kmh && floor === F.floorNeed(old) && rt.loop === old.loop
+        && rt.stIds.length === old.stIds.length && rt.stIds.every(function (id, i) { return id === old.stIds[i]; })) return;
       const mdl = F.recommend(g.mapId, y, rt.kmh);
       for (let d = 0; d < (rt.loop ? 2 : 1); d++) {
-        let short = F.floorNeed(rt) - have[r][d]; if (short <= 0) continue;
+        const svc = F.svcId(rt, d), schedules = manual.get(rt.lineId), periods = schedules && schedules[svc];
+        if (periods && [0, 1, 2, 3].every(function (p) { return periods[p] === 0; })) continue;
+        let short = floor - have[r][d]; if (short <= 0) continue;
         const use = [];
         for (let i = idle.length - 1; i >= 0 && short > 0; i--) if (idle[i].cars <= rt.cars && !tooSlow(idle[i], rt)) { use.push(idle[i].id); idle.splice(i, 1); short--; }
         const cars = Math.min(rt.cars, mdl.max), cost = short > 0 ? F.price(g, mdl, cars, y) * short : 0;
-        adds.push({ line: rt.lineId, svc: F.svcId(rt, d), name: F.svcName(rt, d), use: use, buy: short, model: mdl.id, cars: cars, cost: cost });
+        adds.push({ line: rt.lineId, svc: svc, name: F.svcName(rt, d), use: use, buy: short, model: mdl.id, cars: cars, cost: cost });
         total += cost;
       }
     });
@@ -339,20 +393,44 @@
       if (i < 0) { best.stuck = true; continue; }
       best.ids.push(idle[i].id); idle.splice(i, 1); best.short--;
     }
-    return { needs: needs, moved: total - idle.length, left: idle.length, unmet: needs.reduce(function (a, x) { return a + x.short; }, 0) };
+    return { result: g.model.resultsFor('wd'), needs: needs, moved: total - idle.length, left: idle.length, unmet: needs.reduce(function (a, x) { return a + x.short; }, 0), fleetVer: g.fleet.ver, netVer: g.netVersion, ym: g.ym() };
   };
+  const currentAlloc = function (g, plan) { return plan.fleetVer === g.fleet.ver && plan.netVer === g.netVersion && plan.ym === g.ym() && plan.result === g.model.resultsFor('wd'); };
   F.applyAlloc = function (g, plan) {
+    if (!currentAlloc(g, plan)) return 0;
     const by = new Map(); for (const x of plan.needs) for (const id of x.ids) by.set(id, x);
     if (!by.size) return 0;
-    for (const t of g.fleet.trains) { const x = by.get(t.id); if (x) { t.line = x.lid; t.svc = x.svc; } }
+    for (const t of g.fleet.trains) { const x = by.get(t.id); if (x && !t.line) { t.line = x.lid; t.svc = x.svc; } }
     g.logEvent({ tag: '运营', title: '车辆段分配列车 ' + by.size + ' 列', desc: plan.needs.filter(function (x) { return x.ids.length; }).map(function (x) { return x.name + ' +' + x.ids.length; }).join('、') + '。' });
     changed(g); return by.size;
   };
   // 分配后还差的列车：按推荐车型配齐（编组取站台允许的最长）
   F.fillCost = function (g, plan) {
     const y = g.clock.y, rows = []; let cost = 0;
-    for (const x of plan.needs) { if (x.short <= 0) continue; const m = F.recommend(g.mapId, y, x.rt.kmh), cars = Math.min(x.maxCars, m.max), c = F.price(g, m, cars, y) * x.short; rows.push({ x: x, m: m, cars: cars, n: x.short, cost: c }); cost += c; }
+    for (const x of plan.needs) {
+      if (x.short <= 0) continue;
+      const m = F.available(g.mapId, y).find(function (m) { return x.rt.kmh <= 80 || m.kmh >= x.rt.kmh; });
+      if (!m) return { rows: [], cost: 0, unavailable: true };
+      const cars = Math.min(x.maxCars, m.max), c = F.price(g, m, cars, y) * x.short;
+      rows.push({ x: x, m: m, cars: cars, n: x.short, cost: c }); cost += c;
+    }
     return { rows: rows, cost: cost };
+  };
+  F.confirmAlloc = function (g, plan, fill) {
+    if (g.jumping || g.pending) return { error: '正在结算，请稍候' };
+    if (!currentAlloc(g, plan)) return { stale: true };
+    if (fill && fill.unavailable) return { error: '本年没有满足要求的车型' };
+    if (fill && !g.econ.canAffordBuild(fill.cost)) return { error: '资金不足：需要 ' + U.fmtMoney(fill.cost) };
+    const moved = F.applyAlloc(g, plan);
+    if (fill && fill.rows.length) {
+      const clock = g.clock, n = fill.rows.reduce(function (a, r) { return a + r.n; }, 0);
+      const title = '购置列车 ' + n + ' 列';
+      g.econ.spendBuild({ construction: fill.cost }, title, { y: clock.y, m: clock.m, d: clock.d }, true);
+      for (const r of fill.rows) for (let i = 0; i < r.n; i++) newTrain(g, r.m, r.cars, r.cost / r.n, r.x.lid, r.x.svc);
+      g.logEvent({ tag: '运营', title: title, desc: '按智能分配方案补齐缺口，共 ' + U.fmtMoney(fill.cost) + '。' });
+      changed(g);
+    }
+    return { ok: true, moved: moved };
   };
   F.setMode = function (g, lid, mode) {
     const o = g.fleet.ops[lid] || (g.fleet.ops[lid] = { mode: 'auto', n: {} });
@@ -419,6 +497,19 @@
   // 线路上的列车（按交路）与车辆段闲置列车
   F.trainsOf = function (g, lid, svc) { return g.fleet.trains.filter(function (t) { return t.line === lid && (svc == null || t.svc === svc); }); };
 
+  // 超龄列车按线路计数（v2.7.1 玩家反馈：提示只说有多少列超龄，要一条条线路去找）：线路编号 → 列数，车辆段为 ''
+  F.oldByLine = function (g) {
+    const out = new Map(); if (!g.fleet) return out;
+    for (const t of g.fleet.trains) if (ageY(g, t) > F.model(t.model).life) { const k = t.line && g.net.lines[t.line] ? t.line : ''; out.set(k, (out.get(k) || 0) + 1); }
+    return out;
+  };
+  F.oldText = function (g, by) {
+    by = by || F.oldByLine(g);
+    const ids = M_sort(Array.from(by.keys()).filter(function (k) { return k; }));
+    const parts = ids.map(function (k) { return g.net.lines[k].name + ' ' + by.get(k) + ' 列'; });
+    if (by.get('')) parts.push('车辆段 ' + by.get('') + ' 列');
+    return parts.join('、');
+  };
   // ---------------- 每月：运力不足与超龄提示 ----------------
   F.monthly = function (g) {
     const fl = g.fleet; if (!fl || !g.model.trafficReady()) return;
@@ -436,8 +527,8 @@
       }
     }
     if (g.clock.m === 1) {
-      const old = fl.trains.filter(function (t) { return ageY(g, t) > F.model(t.model).life; }).length;
-      if (old && !(note.old > ym)) { note.old = ym + 12; g.logEvent({ tag: '运营', title: old + ' 列列车超过设计寿命', desc: '超龄列车的运营与维护费用 ×1.25。可以出售旧车（按残值），换购新车型。' }); }
+      const by = F.oldByLine(g); let old = 0; by.forEach(function (n) { old += n; });
+      if (old && !(note.old > ym)) { note.old = ym + 12; g.logEvent({ tag: '运营', title: old + ' 列列车超过设计寿命', desc: '超龄列车：' + F.oldText(g, by) + '。超龄列车的运营与维护费用 ×1.25，可以在线路的「列车运营」分页出售旧车（按残值），换购新车型。' }); }
       const y = g.clock.y, fresh = MODELS.filter(function (m) { return m.from === y && (!m.maps || m.maps.indexOf(g.mapId) >= 0); });
       if (fresh.length && !(note.newY >= y)) {
         note.newY = y;
@@ -719,6 +810,14 @@
   UI.prototype.showFleetAlloc = function () {
     const g = this.g(), self = this, plan = F.allocPlan(g), fill = F.fillCost(g, plan), box = h('div');
     const finish = function () { self.closeScreen(); self.markUnsaved(); self.scheduleAutosave(); self.rerenderPage(); };
+    const confirm = function (buy) {
+      const res = F.confirmAlloc(g, plan, buy ? fill : null);
+      if (res.stale) { self.showFleetAlloc(); return; }
+      if (res.error) { self.toast(res.error, 'bad'); return; }
+      sfx(buy ? 'trainBuy' : 'trainMove');
+      self.toast(buy ? '已分配并买够缺口，约 ' + U.fmtMoney(fill.cost) : '已分配 ' + res.moved + ' 列到缺车的线路', 'good');
+      finish();
+    };
     if (!plan.needs.length) box.appendChild(h('div', { class: 'note' }, h('span', null, '各线高峰运力都够，不需要调车。'), plan.left ? h('span', null, '车辆段的 ' + plan.left + ' 列继续闲置。') : null));
     else {
       const t = h('table', { class: 'tbl' }, h('tr', null, h('th', null, '交路'), h('th', null, '配属'), h('th', null, '高峰需要'), h('th', null, '调入'), h('th', null, '还差')));
@@ -726,14 +825,11 @@
       box.appendChild(h('div', { class: 'tbl-wrap' }, t));
       box.appendChild(h('div', { class: 'note' }, h('span', null, plan.left ? '车辆段可分配 ' + plan.moved + ' 列，剩 ' + plan.left + ' 列。' : '车辆段可分配 ' + plan.moved + ' 列。'), h('span', null, plan.unmet ? '分配后还差 ' + plan.unmet + ' 列。' : '分配后高峰运力够用。'), plan.left && plan.unmet ? h('span', null, '剩下的列车编组超过站台长度或速度不够，不能上线。') : null));
     }
+    if (fill.unavailable) box.appendChild(h('div', { class: 'note' }, '本年没有满足要求的车型'));
     box.appendChild(h('div', { class: 'modal-actions' },
       h('button', { class: 'btn', onclick: function () { self.closeScreen(); } }, plan.needs.length ? '取消' : '完成'),
-      fill.rows.length ? h('button', { class: 'btn', disabled: g.econ.canAffordBuild(fill.cost) ? null : true, 'data-tip': g.econ.canAffordBuild(fill.cost) ? '缺的列车按推荐车型购买并配属' : '资金不足：需要 ' + U.fmtMoney(fill.cost), onclick: function () {
-        F.applyAlloc(g, plan);
-        for (const r of fill.rows) { const res = F.buy(g, r.x.lid, r.x.svc, r.m.id, r.cars, r.n); if (res.error) { self.toast(res.error, 'bad'); break; } }
-        sfx('trainBuy'); self.toast('已分配并买够缺口，约 ' + U.fmtMoney(fill.cost), 'good'); finish();
-      } }, '分配并买够缺口（约 ' + U.fmtMoney(fill.cost) + '）') : null,
-      plan.moved ? h('button', { class: 'btn primary', onclick: function () { const k = F.applyAlloc(g, plan); sfx('trainMove'); self.toast('已分配 ' + k + ' 列到缺车的线路', 'good'); finish(); } }, ic('check', 14), '按此分配') : null));
+      fill.rows.length ? h('button', { class: 'btn', disabled: g.econ.canAffordBuild(fill.cost) ? null : true, 'data-tip': g.econ.canAffordBuild(fill.cost) ? '缺的列车按推荐车型购买并配属' : '资金不足：需要 ' + U.fmtMoney(fill.cost), onclick: function () { confirm(true); } }, '分配并买够缺口（约 ' + U.fmtMoney(fill.cost) + '）') : null,
+      plan.moved ? h('button', { class: 'btn primary', onclick: function () { confirm(false); } }, ic('check', 14), '按此分配') : null));
     if (CM.I18n) CM.I18n.localize(box);
     this.openScreen(h('div', { class: 'card wide' }, this.cardHead('train', 'b-blue', '智能分配列车'), h('div', { class: 'note' }, '把车辆段的闲置列车分给高峰缺口最大的线路，手动调度的线路不参与。'), box), function () { self.closeScreen(); });
   };
@@ -839,10 +935,12 @@
       h('div', null, h('small', null, '车辆段闲置'), h('b', null, depot.length + ' 列')),
       h('div', null, h('small', null, '残值合计'), h('b', null, U.fmtMoney(value))),
       h('div', null, h('small', null, '超龄'), h('b', { class: old ? 'bad' : '' }, old + ' 列'))));
-    const tbl = h('table', { class: 'tbl' }, h('tr', null, h('th', null, '线路'), h('th', null, '配属'), h('th', null, '高峰需要'), h('th', null, '运营')));
+    const oldBy = F.oldByLine(g);
+    if (old) el.appendChild(h('div', { class: 'callout warn', style: { marginTop: '6px' } }, '超龄列车：' + F.oldText(g, oldBy) + '。运营与维护费用 ×1.25。'));
+    const tbl = h('table', { class: 'tbl' }, h('tr', null, h('th', null, '线路'), h('th', null, '配属'), h('th', null, '高峰需要'), h('th', null, '超龄'), h('th', null, '运营')));
     for (const lid of M_sort(Object.keys(g.net.lines))) {
       const L = g.net.lines[lid], inf = F.lineInfo(g, lid) || [], av = inf.reduce(function (a, x) { return a + x.avail; }, 0), nd = inf.reduce(function (a, x) { return a + x.peakNeed; }, 0), o = fl.ops[lid];
-      tbl.appendChild(h('tr', { class: 'clickable', onclick: function () { if (self.opsApp) self.opsApp.go('lines', lid); else self.openObj('line', lid, 'ops'); } }, h('td', null, h('span', { class: 'swatch', style: { background: AX.line(L), marginRight: '6px' } }), L.name), h('td', null, String(av)), h('td', { class: nd > av ? 'bad' : '' }, String(nd)), h('td', null, o && o.mode === 'manual' ? '手动' : '智能')));
+      tbl.appendChild(h('tr', { class: 'clickable', onclick: function () { if (self.opsApp) self.opsApp.go('lines', lid); else self.openObj('line', lid, 'ops'); } }, h('td', null, h('span', { class: 'swatch', style: { background: AX.line(L), marginRight: '6px' } }), L.name), h('td', null, String(av)), h('td', { class: nd > av ? 'bad' : '' }, String(nd)), h('td', { class: oldBy.get(lid) ? 'bad' : '' }, String(oldBy.get(lid) || 0)), h('td', null, o && o.mode === 'manual' ? '手动' : '智能')));
     }
     el.appendChild(h('div', { class: 'tbl-wrap' }, tbl));
     el.appendChild(h('div', { class: 'fl-h fo-svc-head', style: { marginTop: '10px' } }, h('span', { class: 'grow' }, '车辆段'),

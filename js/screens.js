@@ -306,12 +306,15 @@
     const root = h('div', { class: 'ms2', tabindex: '-1' }, rail, stage);
     // 键盘：↑↓ 切换地图，Enter 开始（主按钮）
     root.addEventListener('keydown', function (e) {
+      if (e.isComposing || e.keyCode === 229 || e.defaultPrevented) return;
       if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Enter') return;
-      if (e.key === 'Enter') { if (e.target === search || e.target === root) { e.preventDefault(); goPrimary(); } return; }
+      if (e.key === 'Enter') { if ((e.target === search || e.target === root) && items[sel] && !items[sel].classList.contains('hidden-el')) { e.preventDefault(); goPrimary(); } return; }
+      if (e.target !== root && e.target !== search && !list.contains(e.target)) return;
       const vis = all.filter(function (id) { return !items[id].classList.contains('hidden-el'); });
       if (!vis.length) return;
       e.preventDefault();
-      const k = vis.indexOf(sel), n = vis[(k + (e.key === 'ArrowDown' ? 1 : -1) + vis.length) % vis.length];
+      const k = vis.indexOf(sel), dir = e.key === 'ArrowDown' ? 1 : -1;
+      const n = vis[k < 0 ? (dir > 0 ? 0 : vis.length - 1) : (k + dir + vis.length) % vis.length];
       pick(n);
     });
     drawStage(); drawList();

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { gameEntries, writeManifest, verifyGame } from './verify-game.mjs';
 import { checkRoadKernel } from './build-road-kernel.mjs';
 import { simulationStamp } from './sim-stamp.mjs';
+import { geoIndex } from './geo-index.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const output = path.resolve(root, 'dist');
@@ -22,6 +23,7 @@ for (const entry of entries) {
 const legal = {};
 for (const file of ['LICENSE.txt', 'THIRD_PARTY_NOTICES.txt']) legal[file] = (await readFile(path.join(root, file), 'utf8')).replace(/\r\n/g, '\n');
 await writeFile(path.join(root, 'js/legal.js'), "'use strict';\n// 由 scripts/build.mjs 从网页版根目录许可生成。\n(function (CM) { CM.LEGAL = " + JSON.stringify(legal, null, 2) + '; })(window.CM);\n');
+await geoIndex(root, true);
 await checkRoadKernel();
 await simulationStamp(true);
 await writeManifest(root);

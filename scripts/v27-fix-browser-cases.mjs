@@ -33,7 +33,7 @@ export async function runFixChecks({E,send,until,screenshot,delay,settle,tap,aud
  if(!await E('document.querySelector(".mc-kpis").textContent.includes("早高峰无列车")'))throw Error('No-train KPI still shows a percentage');await audit('stopped line controls','.mc-app button');
  for(const s of await E('CM.Fleet.lineInfo(CM.game,testLine).map(s=>s.id)'))await E('CM.Fleet.setManual(CM.game,testLine,'+JSON.stringify(s)+',0,1);true');
  await close();await E('CM.game.model.solveNow(2);true');
- await E('(async()=>{const r=await CM.Save.save(CM.game,"manual");if(!r.ok)throw Error(r.error);const p=await CM.Save.load(r.slotId);if(p.rulesRevision!==10||!Object.values(p.net.stations).some(s=>s.tod===1&&s.decor))throw Error("Batch values missing from actual IndexedDB save");return true})()');
+ await E('(async()=>{const r=await CM.Save.save(CM.game,"manual");if(!r.ok)throw Error(r.error);const p=await CM.Save.load(r.slotId);if(p.rulesRevision!==11||!Object.values(p.net.stations).some(s=>s.tod===1&&s.decor))throw Error("Batch values missing from actual IndexedDB save");return true})()');
  report.missing=await E('CM.I18n.missing()');if(report.missing.length)throw Error('Missing translations: '+JSON.stringify(report.missing));await screenshot('v27-task-service-final');
  console.log('PASS section load navigation, stopped-service KPI and persisted batch changes');
 }

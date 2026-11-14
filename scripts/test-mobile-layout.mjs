@@ -24,6 +24,8 @@ async function runMobileChecks({evaluate:E,send,screenshot,delay,task,fs,path,un
  const tap=async(exp)=>{const p=await E('(()=>{const r=('+exp+').getBoundingClientRect();const p={x:r.x+r.width/2,y:r.y+r.height/2},n=document.elementFromPoint(p.x,p.y);if(!r.width||!r.height||!(n===('+exp+')||('+exp+').contains(n)))throw Error("Touch target covered: "+('+JSON.stringify(exp)+')+" by "+n?.outerHTML.slice(0,160));return p})()');await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[p]});await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await delay(80);};
  const wait=async()=>{await send('Page.bringToFront');await E('CM.ui.layoutHud();CM.ui.measureLayout();true');await delay(180);await E('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(r))))');};
  const sizes=[[320,568],[360,740],[375,667],[390,844],[430,932],[568,320],[667,375],[844,390]],langs=['zh-CN','zh-TW','en'];
+ if(process.env.CM_MOBILE_GESTURES_ONLY){await runGestureChecks({E,send,tap,wait,audit,delay});await fs.writeFile(path.join(task,'report.json'),JSON.stringify(report));return;}
+ await runGestureChecks({E,send,tap,wait,audit,delay});
  await runNewsChecks({E,send,tap,wait,audit,screenshot,langs});
  if(!process.env.CM_MOBILE_FAST&&!inputOnly)for(const lang of langs)for(const scale of [.9,1,1.15]){
   for(const[w,h]of sizes){await send('Emulation.setDeviceMetricsOverride',{width:w,height:h,deviceScaleFactor:1,mobile:true});await E('CM.Settings.set("language",'+JSON.stringify(lang)+');CM.Settings.set("uiScale",'+scale+');CM.ui.closePanel(true);CM.ui.tools.setTool("select");CM.ui.toasts.replaceChildren();true');await wait();await audit([lang,scale,w,h,'base'].join('/'));report.groups.push({lang,scale,w,h});if(lang==='zh-CN'&&scale===1&&w===390)await screenshot('after-390');}
@@ -175,4 +177,80 @@ async function runPatchChecks({E,send,tap,wait,audit,until,delay,screenshot,repo
     await screenshot('patch-airport-'+(view?'25d':'2d'));
   }
   report.patchScale=true;console.log('PASS physical scale in both views/grid units and Beijing terminal previews');
+}
+
+async function runGestureChecks({E,send,tap,wait,audit,delay}) {
+ const touch=(type,touchPoints)=>send('Input.dispatchTouchEvent',{type,touchPoints});
+ await E('CM.ui.closePanel(true);CM.Settings.set("language","en");CM.Settings.set("uiScale",1.15);true');
+ await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});await wait();
+ // A second pointer cancelled over an interface control must not cancel the map's own drag.
+ await E('window.mapCancel=CM.ui.tools.cancelDrag;window.cancellations=0;CM.ui.tools.cancelDrag=function(){cancellations++;return mapCancel.call(this)};true');
+ await touch('touchStart',[{x:170,y:420,id:11}]);
+ await E('CM.ui.opsDock.dispatchEvent(new PointerEvent("pointercancel",{pointerId:77,pointerType:"touch",bubbles:true}));if(cancellations)throw Error("Unrelated touch cancelled map drag");true');
+ await touch('touchMove',[{x:190,y:435,id:11}]);await touch('touchEnd',[]);
+ await E('CM.ui.tools.cancelDrag=mapCancel;true');
+ // Tapping an extension handle can switch the active tool during the pointer event.
+ await E('CM.ui.tools.setTool("select");CM.ui.highlightLine=Object.keys(CM.game.net.lines)[0];const T=CM.ui.tools, first=T.extendHandles()[0],s=CM.game.net.stations[first.station];CM.ui.flyTo(s.x,s.y,24);true');
+ await delay(800);
+ const handle=await E('(()=>{const h=CM.ui.tools.extendHandles()[0],el=document.elementFromPoint(h.sx,h.sy);if(el!==CM.R.cv)throw Error("Extension test handle is covered");return {x:h.sx,y:h.sy,id:11}})()');
+ await touch('touchStart',[handle]);await touch('touchEnd',[]);
+ if(!await E('CM.ui.tools.tool==="line"&&!!CM.ui.tools.chain'))throw Error('Extension tap lost its start station');
+ await audit('finish drawing is reachable','#toolopts [data-act="build.finish"]','#toolopts [data-act="build.finish"]');
+ await tap('document.querySelector(\'[data-act="build.finish"]\')');
+ if(await E('!!CM.ui.tools.chain'))throw Error('Finish did not end the drawing chain');
+ await E('CM.ui.tools.setTool("station");window.touchBefore=JSON.stringify(CM.game.draft);window.startZoom=CM.R.cam.tz;true');
+ await touch('touchStart',[{x:130,y:360,id:11}]);
+ await touch('touchStart',[{x:130,y:360,id:11},{x:250,y:440,id:12}]);
+ await touch('touchMove',[{x:90,y:350,id:11},{x:275,y:450,id:12}]);
+ await touch('touchEnd',[{x:275,y:450,id:12}]);
+ await touch('touchMove',[{x:295,y:465,id:12}]);await touch('touchEnd',[]);
+ await delay(180);
+ if(!await E('CM.R.cam.tz>startZoom&&JSON.stringify(CM.game.draft)===touchBefore&&!CM.ui.tools.ptr'))throw Error('Pinch did not zoom cleanly in station mode');
+ await E('CM.ui.tools.setTool("select");CM.ui.highlightLine=null;CM.ui.toasts.replaceChildren();true');
+ // With three touch points, swapping the leading finger must not introduce a zoom jump.
+ await E('CM.ui.openNetMap();true');await wait();
+ await E('window.nmBefore=document.querySelector(".nm-canvas .nm-svg").getAttribute("viewBox");true');
+ await touch('touchStart',[{x:130,y:405,id:11}]);
+ await touch('touchStart',[{x:130,y:405,id:11},{x:240,y:405,id:12}]);
+ await touch('touchMove',[{x:105,y:405,id:11},{x:265,y:405,id:12}]);
+ await delay(440);
+ const nmWidth=await E('Number(document.querySelector(".nm-canvas .nm-svg").getAttribute("viewBox").split(" ")[2])');
+ const before=await E('Number(nmBefore.split(" ")[2])');if(!(nmWidth<before))throw Error('Diagram pinch did not zoom in');
+ await touch('touchStart',[{x:105,y:405,id:11},{x:265,y:405,id:12},{x:260,y:640,id:13}]);
+ await touch('touchEnd',[{x:265,y:405,id:12},{x:260,y:640,id:13}]);
+ await touch('touchMove',[{x:265,y:405,id:12},{x:261,y:640,id:13}]);
+ await touch('touchEnd',[]);await delay(480);
+ const after=await E('Number(document.querySelector(".nm-canvas .nm-svg").getAttribute("viewBox").split(" ")[2])');
+ if(Math.abs(after/nmWidth-1)>.04)throw Error('Changing the active fingers caused diagram zoom to jump: '+nmWidth+' → '+after);
+ await E('CM.NetMap.close();CM.ui.openOpsApp("stations");true');await wait();
+ await E('window.opsInput=document.querySelector(".mc-q");opsInput.focus();opsInput.value="test";opsInput.dispatchEvent(new Event("input",{bubbles:true}));CM.ui.opsApp.refresh();if(document.activeElement!==opsInput||!opsInput.isConnected)throw Error("Metro Core refresh replaced the active search field");opsInput.blur();true');
+ await E('CM.ui.opsApp.go("stations",Object.keys(CM.game.net.stations)[0]);window.nameInput=document.querySelector(".mc-name");nameInput.focus();CM.ui.opsApp.refresh();if(document.activeElement!==nameInput||!nameInput.isConnected)throw Error("Metro Core refresh replaced the active name field");nameInput.blur();true');
+ await delay(120);
+ await E('(()=>{const g=CM.game,id=CM.ui.opsApp.state().id,n=g.opsNote||(g.opsNote={});if(!n.trend)n.trend={s:{},l:{}};n.trend.s[id]=[[g.ym()-1,1200,35],[g.ym(),1800,53]];CM.ui.opsApp.refresh();document.querySelector(".mc-plot").scrollIntoView({block:"center"});return true})()');
+ await wait();
+ const plot=await E('(()=>{const p=document.querySelector(".mc-plot").getBoundingClientRect(),content=document.querySelector(".mc-content");window.chartScroll=content.scrollTop;return{x:p.x+p.width/2,y:p.y+p.height/2,id:11}})()');
+ await touch('touchStart',[plot]);
+ for(let i=1;i<=5;i++)await touch('touchMove',[{...plot,y:plot.y+i*16}]);
+ await touch('touchEnd',[]);await delay(260);
+ const nextScroll=await E('(()=>{const c=document.querySelector(".mc-content"),p=document.querySelector(".mc-plot");return {before:chartScroll,after:c.scrollTop,max:c.scrollHeight-c.clientHeight,onPlot:p.contains(document.elementFromPoint('+plot.x+','+plot.y+')),action:getComputedStyle(p).touchAction};})()');
+ if(nextScroll.after>=nextScroll.before-25)throw Error('Dragging over a chart blocked vertical scrolling '+JSON.stringify(nextScroll));
+ await send('Emulation.setDeviceMetricsOverride',{width:568,height:240,deviceScaleFactor:1,mobile:true});await wait();
+ await audit('Metro Core exit in short landscape','.mc-exit','.mc-exit');
+ await tap('document.querySelector(".mc-exit")');
+ await E('CM.ui.showMapSelect("bj");true');await wait();
+ const picker='.ms2-actbar .free-toggle';
+ await E('document.querySelector(".ms2-actbar .free-toggle").scrollIntoView({block:"nearest"});true');
+ await audit('map actions in short landscape',picker,picker);
+ await tap('document.querySelector(".ms2-actbar .free-toggle")');
+ await E('document.querySelector(".ms2-actbar .fo-go").scrollIntoView({block:"nearest"});true');
+ await audit('free build in short landscape','.ms2-actbar .fo-go','.ms2-actbar .fo-go');
+ await send('Emulation.setDeviceMetricsOverride',{width:320,height:568,deviceScaleFactor:1,mobile:true});await wait();
+ await E('document.querySelector(".ms2-frow:last-child .fchips").scrollLeft=0;true');
+ const chips=await E('(()=>{const e=document.querySelector(".ms2-frow:last-child .fchips"),r=e.getBoundingClientRect();return{x:r.right-24,y:r.y+r.height/2}})()');
+ await touch('touchStart',[{...chips,id:11}]);
+ for(let i=1;i<=5;i++)await touch('touchMove',[{x:chips.x-i*23,y:chips.y,id:11}]);
+ await touch('touchEnd',[]);await delay(320);
+ if(!await E('document.querySelector(".ms2-frow:last-child .fchips").scrollLeft>30&&CM.ui._mapFilter.era==="all"'))throw Error('Swiping the year filters did not reveal options or filtered the list accidentally');
+ await E('CM.ui.closeScreen();CM.ui.closePanel(true);CM.ui.toasts.replaceChildren();true');
+ console.log('PASS native map and diagram gestures, Metro Core search, short landscape actions and filter swipe');
 }

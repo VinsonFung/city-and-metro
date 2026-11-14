@@ -52,6 +52,7 @@
   };
   // 解码结果按数据源缓存：切换地图时不必重新解码
   const cache = new Map();
+  Geo.forget = function (G) { if (Geo.src !== G) cache.delete(G); };
   const KEYS = ['names', 'water', 'waterLines', 'roads', 'streets', 'rail', 'parks', 'reserves', 'woods', 'admin', 'places', 'streetBk'];
   Geo.init = function () {
     if (Geo.ready && Geo.src === CM.GEO) return Geo;

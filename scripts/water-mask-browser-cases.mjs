@@ -2,14 +2,14 @@
 import {fileURLToPath} from 'node:url';
 export async function runWaterMaskChecks({E,task,fs,path}){
  const root=fileURLToPath(new URL('..',import.meta.url)),html=await fs.readFile(path.join(root,'index.html'),'utf8');
- const scripts=[...html.matchAll(/<script src="([^"]+)"/g)].map(x=>x[1]).filter(s=>/^js\/(?:util|config|accessibility|geo(?:_\w+)?|data_\w+|traits|maps|facility|eras|city|render|sites|scenery)\.js$/.test(s));
+ const scripts=[...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map(x=>x[1]).filter(s=>/^js\/(?:util|config|accessibility|geo(?:_\w+|-index)?|data_\w+|traits|maps|facility|eras|city|render|sites|scenery)\.js$/.test(s));
  await E(`(async()=>{window.waterFrame=document.createElement('iframe');waterFrame.style.cssText='position:fixed;left:-10000px;width:1px;height:1px';document.body.appendChild(waterFrame);for(const file of ${JSON.stringify(scripts)})await new Promise((resolve,reject)=>{const s=waterFrame.contentDocument.createElement('script');s.src=location.origin+'/'+file;s.onload=resolve;s.onerror=()=>reject(Error(file));waterFrame.contentDocument.head.appendChild(s)});waterFrame.contentWindow.CM.Settings={get:k=>k==='lighting'?true:k==='gfx'?'auto':false};return true})()`);
  const setup=function(){
   const C=waterFrame.contentWindow.CM,w=waterFrame.contentWindow;
   w.audit={};
   w.prepareWaterMap=async function(id){
    if(w.audit.R?.tiles)w.audit.R.tiles.stop();
-   C.useMap(id);const city=new C.City(),gen=city.generateGen(19500101,C.CFG.START.y,{deferGraphs:true});while(!gen.next().done)await new Promise(r=>w.setTimeout(r,0));
+   await C.loadGeo(id);C.useMap(id);const city=new C.City(),gen=city.generateGen(19500101,C.CFG.START.y,{deferGraphs:true});while(!gen.next().done)await new Promise(r=>w.setTimeout(r,0));
    const canvas=w.document.createElement('canvas'),R=new C.Renderer(canvas),g={city,mapId:id,clock:{y:C.CFG.START.y,m:1,d:1}};
    R.setGame(g);R._facm={city,list:[],hubs:[],airs:[],cells:new Set(),noTree:new Set(),ver:1};
    w.audit={city,R,g};

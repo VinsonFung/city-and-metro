@@ -45,7 +45,10 @@
     return f._portal;
   };
   Fac.isPortalStation = function (st, f) {
-    if (!st || !st.portal || (f && st.portal !== f.id)) return false;
+    if (!st) return false;
+    // 没经吸附、直接建在接驳口上的普通车站（250 m 内）同样算接通（v2.7.1 玩家反馈：香港罗湖接驳口里的车站离接驳口约 1 m，仍提示没接通）
+    if (!st.portal) { const p0 = f && f.ext && f.ext.gate ? Fac.portal(f) : null; return !!p0 && U.dist(st.x, st.y, p0.x, p0.y) < 1; }
+    if (f && st.portal !== f.id) return false;
     const pf = f || Fac.byId(st.portal), p = Fac.portal(pf);
     return !!p && U.dist(st.x, st.y, p.x, p.y) < 1.2;   // 车站被拖离接驳口后不再算接通
   };
@@ -64,11 +67,15 @@
     if (!f.ext || !g || !g.compiled) return null;
     const C = g.compiled;
     if (C._ext && C._ext.has(f.id)) return C._ext.get(f.id);
-    let best = -1, bd = Infinity, portal = false;
+    let best = -1, bd = Infinity, portal = false, closestPortal = Infinity;
     C.stations.forEach(function (s, i) {
-      if (!C.serviced[i] || portal) return;
-      if (Fac.isPortalStation(s, f)) { best = i; bd = 0; portal = true; return; }
-      const d = Fac.extNear(f, s); if (d >= 0 && d <= bd) { bd = d; best = i; }
+      if (!C.serviced[i]) return;
+      if (Fac.isPortalStation(s, f)) {
+        const p = Fac.portal(f), d = U.dist(s.x, s.y, p.x, p.y);
+        if (d < closestPortal) { best = i; bd = 0; portal = true; closestPortal = d; }
+        return;
+      }
+      const d = Fac.extNear(f, s); if (!portal && d >= 0 && d <= bd) { bd = d; best = i; }
     });
     const r = best < 0 ? null : { i: best, st: C.stations[best], lines: Array.from(C.stationLines[best]), d: bd, portal: portal };
     (C._ext || (C._ext = new Map())).set(f.id, r);

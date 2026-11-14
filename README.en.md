@@ -8,7 +8,9 @@ City & Metro is a single-player metro planning and city management game for your
 
 **[Play online](https://city-and-metro.pages.dev)** · [Source repository](https://github.com/VinsonFung/city-and-metro) · [License](./LICENSE.txt)
 
-The web edition **v2.7.0** brings London and 11 local train models, city-specific mechanics, Shenzhen, expanded Hong Kong and cross-border gates, the new network diagram and growth replay, city reviews, XL stations, and redesigned fare and batch station management. In-game release notes cover v2.6 and v2.7 separately. The world map, city transitions, city achievements, and three selectable line styles remain exclusive to the standalone edition.
+The web edition **v2.7.1** brings London and 11 local train models, city-specific mechanics, Shenzhen, expanded Hong Kong and cross-border gates, the new network diagram and growth replay, city reviews, XL stations, and redesigned fare and batch station management. In-game release notes cover v2.6 and v2.7 separately. The world map, city transitions, city achievements, and three selectable line styles remain exclusive to the standalone edition.
+
+Version 2.7.1 is a maintenance release with improvements to fleet allocation, contract service checks, station revenue layers, network replay, and map loading.
 
 ## Maintenance and community editions
 

@@ -167,7 +167,7 @@
       if (m === 1 && (y - y0) % 5 === 0) {
         city.buildGraphs(); const C = M.compile(this.net, city);
         yield* model.refreshCityGen(C);
-        this.compiled = C; if (sync) model.solveNow(1); else yield* model.solveGen(1);
+        this.compiled = C; if (sync) model.solveNow(1, ['wd']); else yield* model.solveGen(1, ['wd']);
       }
       if ((++n & 3) === 0) yield;
     }
@@ -177,7 +177,7 @@
     this.compiled = C;
     model.setYear(this.clock.y); model.setDayType(CM.Model.dayType(this.clock.y, this.clock.m, this.clock.d));
     model.onSolveProgress = function (f) { lp(0.84 + 0.12 * f, '计算居民出行'); };
-    try { if (sync) model.solveNow(4); else yield* model.solveGen(4); } finally { model.onSolveProgress = null; }
+    try { if (sync) model.solveNow(4); else { yield* model.solveGen(2); model.wake(4); } } finally { model.onSolveProgress = null; }
     // 按所选年份重新开账：票价、拨款口径与任务从这一年开始；开局前的任务与统计不保留
     this.econ = new CM.Economy(this.mode, this.clock.y, this.clock.m);
     model.fare = this.econ.fare; model.crossFee = this.econ.cross;
@@ -644,10 +644,13 @@
   };
   Game.prototype.draftEval = function () {
     const d = this.draft; if (!d) return null;
-    if (d.evalVer !== d.ver) {
+    const fleetVer = this.fleet && this.fleet.ver;
+    if (d.evalVer !== d.ver || d.evalFleetVer !== fleetVer || d.evalYear !== this.clock.y) {
       d.eval = M.evaluate(d.net, this.net, this.city, this.clock.y);
       if (CM.Fleet && this.fleet) CM.Fleet.draftExtra(this, d.eval);   // 随线配车（v2.5）：新线与延长后补足最低服务所需列车，费用计入建设
       d.evalVer = d.ver;
+      d.evalFleetVer = fleetVer;
+      d.evalYear = this.clock.y;
     }
     return d.eval;
   };
@@ -973,8 +976,8 @@
       const cacheHit = !upgrade && !rulesUpgrade && !airportOpened && !s.__mapMigratedFrom && !s.mapUpgrade && CM.TrafficCache && CM.TrafficCache.restore(g, s.__trafficState);
       if (!cacheHit) {
         g.model.onSolveProgress = f => lp(0.42 + 0.53 * f, '恢复居民出行');
-        try { if (sync) g.model.solveNow(4); else yield* g.model.solveGen(4); } finally { g.model.onSolveProgress = null; }
-        if (s.__trafficKey && !upgrade && !airportOpened && !s.__mapMigratedFrom && !s.mapUpgrade && CM.TrafficCache) CM.TrafficCache.put(s.__trafficKey, CM.TrafficCache.capture(g));
+        try { if (sync) g.model.solveNow(4); else { yield* g.model.solveGen(2); g.model.wake(4); } } finally { g.model.onSolveProgress = null; }
+        if (sync && s.__trafficKey && !upgrade && !airportOpened && !s.__mapMigratedFrom && !s.mapUpgrade && CM.TrafficCache) CM.TrafficCache.put(s.__trafficKey, CM.TrafficCache.capture(g));
       }
       if (!cacheHit && s.__trafficKey && CM.TrafficCache) CM.TrafficCache.track(g, s.__trafficKey);
       if (CM.Milestones) CM.Milestones.backfill(g);

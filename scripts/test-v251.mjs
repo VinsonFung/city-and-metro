@@ -10,11 +10,11 @@ for(const[,src]of(await readFile(new URL('index.html',root),'utf8')).matchAll(/<
 const C=c.CM,M=C.Metro,copy=x=>JSON.parse(JSON.stringify(x));
 C.UI=function(){};for(const src of ['settings','corp','fleet','screens'])await load('js/'+src+'.js');
 const F=C.Fleet;
-assert.equal(C.CFG.GAME_VERSION,'2.7.0');assert.equal(C.CFG.RULES_REVISION,10);
+assert.equal(C.CFG.GAME_VERSION,'2.7.1');assert.equal(C.CFG.RULES_REVISION,11);
 assert.equal(C.MAP_ORDER.length,12);assert.equal(F.MODELS.length,56);assert.ok(C.MAPS.ld&&C.Traits);
 memory.set('cm1.newsSeen','2.7.0');assert.equal(C.UI.prototype.newsUnread(),false);
 memory.set('cm1.newsSeen','2.4.0');assert.equal(C.UI.prototype.newsUnread(),true);
-assert.ok(!C.NEWS.some(n=>n.v==='2.5.1'),'Patch release has no new announcement');
+assert.ok(!C.NEWS.some(n=>n.v==='2.7.1'),'Patch release has no new announcement');
 
 C.useMap('tutorial');const g=C.Game.create({mode:'free',tutorial:true,seed:20000101});F.ensure(g);
 // A legacy smooth segment must keep its shape and avoid a platform adjustment charge on extension.
@@ -59,8 +59,12 @@ assert.equal(F.buy(g,null,null,fast.id,8,1).ok,true);assert.equal(F.buy(g,null,n
 const fleetBefore=JSON.stringify(g.fleet.trains),plan=F.allocPlan(g);assert.equal(JSON.stringify(g.fleet.trains),fleetBefore);assert.equal(plan.moved,2);assert.equal(plan.left,2);
 assert.deepEqual(Array.from(plan.needs.flatMap(x=>x.ids)).sort(),compatible.sort());
 const cash=g.econ.funds;assert.equal(F.applyAlloc(g,plan),2);assert.equal(g.econ.funds,cash);
-const fill=F.fillCost(g,F.allocPlan(g));assert.ok(fill.cost>0);const preview=fill.cost;
-for(const x of fill.rows)assert.equal(F.buy(g,x.x.lid,x.x.svc,x.m.id,x.cars,x.n).ok,true);
+const order=F.allocPlan(g),fill=F.fillCost(g,order);assert.ok(fill.cost>0);const preview=fill.cost;
+g.clock.m++;assert.equal(F.confirmAlloc(g,order,fill).stale,true);g.clock.m--;
+const capex=g.econ.capex,beforeOrder=JSON.stringify(g.fleet.trains);g.econ.capex=0;g.econ.funds=0;
+assert.ok(F.confirmAlloc(g,order,fill).error);assert.equal(JSON.stringify(g.fleet.trains),beforeOrder);assert.equal(g.econ.funds,0);
+g.econ.funds=cash;g.econ.capex=capex;assert.equal(F.confirmAlloc(g,order,fill).ok,true);
+assert.equal(F.confirmAlloc(g,order,fill).stale,true,'A confirmed quote may only be applied once');
 assert.ok(Math.abs(cash-g.econ.funds-preview)<1e-5);assert.equal(F.allocPlan(g).unmet,0);
 F.setMode(g,line,'manual');assert.equal(F.allocPlan(g).needs.length,0);F.setMode(g,line,'auto');
 g.fleet.autoAlloc=true;const fleetRoundTrip=C.Game.restore(copy(g.serialize()));assert.equal(fleetRoundTrip.fleet.autoAlloc,true);assert.equal(fleetRoundTrip.econ.funds,g.econ.funds);

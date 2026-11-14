@@ -36,6 +36,7 @@
     fare: ['票价有点贵，每天来回要 {f}。', '地铁是方便，可每月光车费就要不少钱。'],
     road: ['{r}早高峰堵得动不了，要是有地铁就好了。', '每天在{r}上堵半小时，羡慕住在地铁边的同事。'],
     roadok: ['{r}最近好像没那么堵了，地铁分走了不少人。'],
+    facnear: ['{x}门口就有{s}站，可我住的地方附近没有地铁，去一趟还得先打车。', '去{x}坐地铁倒是方便，就是从我家到地铁站太远。'],
     fac: ['去{x}还得打车或转好几趟公交，附近没有地铁站。', '{x}离最近的地铁站太远了，希望能修过去。'],
     impact: ['新线开通后，地铁出行多了 {d}，身边越来越多人改坐地铁。', '新线开通以后上班终于不用堵在路上了。'],
     satlow: ['地铁修得太慢了，城市都长这么大了。', '希望地铁规划多听听乘客的声音。'],
@@ -115,7 +116,20 @@
       const fs = [];
       for (const f of m.fn.list) { if (f.T.hub) continue; const r = CM.Tasks.facShareOf(m, f, CM.Tasks.facBasis(f)); if (r && r.vol > 4000 && r.share < 0.08) fs.push([f, r.vol, r.share]); }
       fs.sort(function (a, b) { return b[1] - a[1]; });
-      for (const x of fs.slice(0, 2)) post('idea', 'fac', fill(say(SAY.fac, hash(x[0].id) + ym), { x: x[0].name }), x[1], { fac: x[0].id }, ['接驳'], '', FAC_ROLE[x[0].t], ['fac', { x: short(x[0].name) }], { x: short(x[0].name), vol: x[1], share: x[2] });
+      // 设施步行 10 分钟内已有运营车站时，不说「附近没有地铁站」，改说到访者住处离地铁远
+      const acc = m.net.acc, C2 = m.net.C;
+      for (const x of fs.slice(0, 2)) {
+        const k2 = m.fn.list.indexOf(x[0]);
+        const nearby = acc && k2 >= 0 && acc.NZ === m.fn.NZ ? acc.zl[m.Z + k2] : null;
+        const nb = nearby && nearby.find(function (o) {
+          return o.w <= 10 && ((C2.stationRoutes && C2.stationRoutes[o.s]) || []).some(function (r) {
+            return m.resultsFor('wd').per.some(function (p) { return CM.Model.boardFreq(p, m.net, r) > 0; });
+          });
+        });
+        const ns = nb && C2.stations[nb.s];
+        if (ns) post('idea', 'fac', fill(say(SAY.facnear, hash(x[0].id) + ym), { x: x[0].name, s: ns.name }), x[1], { fac: x[0].id }, ['覆盖'], '', FAC_ROLE[x[0].t], ['fac', { x: short(x[0].name) }], { x: short(x[0].name), vol: x[1], share: x[2], s: ns.name, w: Math.max(1, Math.round(nb.w)) });
+        else post('idea', 'fac', fill(say(SAY.fac, hash(x[0].id) + ym), { x: x[0].name }), x[1], { fac: x[0].id }, ['接驳'], '', FAC_ROLE[x[0].t], ['fac', { x: short(x[0].name) }], { x: short(x[0].name), vol: x[1], share: x[2] });
+      }
     }
     // 总体口碑
     if (g.econ.sat >= 75) post('good', 'city', pick(SAY.sathigh, ym), 5000, null, ['点赞'], CM.DATA.city, null, ['line', {}], { sat: g.econ.sat, share: d.metroShare || 0 });
@@ -166,6 +180,7 @@
   // 评论区（v2.3）：每条动态两三条回复，内容引用同一份模拟数据（片区人口与最近车站、车站负荷、换乘步行、线路满载率、
   // 道路拥堵指数、设施到访与地铁比例、票价……），运营方账号对其中一部分作出说明。按动态固定，不随机
   const RP = {
+    facnear: ['{x}每天约 {vol}人次到访，坐地铁来的只有 {share}。', '{s}站离{x}步行约 {w} 分钟，可到访的人多数住得离地铁站很远，线网铺开以后会好起来。'],
     cover: ['{p}这一片住着约 {pop}人，离最近的「{st}」站直线还有 {km} km。', '+1，每天出门光走到车站就要二十多分钟。'],
     coverOff: '已收到。{p}的居住人口与通勤需求已经记录，线网规划会优先研究这一带。',
     newst: ['{s}站开通后，日均进出站约 {flow}人次，比想象中热闹。', '在这里还能换乘 {lines}，方便多了。', '终于不用再转两趟公交了！'],
@@ -199,7 +214,7 @@
       case 'line': if (M.l) { const v = { l: M.l, riders: ppl(M.riders || 0), lf: pct(M.lf || 0) }; add(RP.lineGood[0], v); add(RP.lineGood[1], v); } else { const v = { share: pct(M.share || 0), add: ppl(Math.max(0, M.add || 0)) }; add(RP.impact[0], v); add(RP.impact[1], v); } break;
       case 'fare': { const v = { f: M.f }; add(RP.fare[0], v); add(RP.fare[1], v); add(RP.fare[2], v, true); break; }
       case 'road': { const v = { r: M.r, ci: (M.ci || 1).toFixed(2) }; if (M.ok) { add(RP.roadOk[0], v); add(RP.roadOk[1], v); } else { add(RP.road[0], v); add(RP.road[1], v); } break; }
-      case 'fac': { const v = { x: M.x, vol: ppl(M.vol || 0), share: pct(M.share || 0) }; add(RP.fac[0], v); add(RP.fac[1], v); break; }
+      case 'fac': { const v = { x: M.x, vol: ppl(M.vol || 0), share: pct(M.share || 0), s: M.s || '', w: M.w || 0 }, R2 = M.s ? RP.facnear : RP.fac; add(R2[0], v); add(R2[1], v); break; }
       default: { const v = { sat: Math.round(M.sat || g.econ.sat), share: pct(M.share || 0) }; add(RP.city[0], v); add(RP.city[1], v); }
     }
     return out;

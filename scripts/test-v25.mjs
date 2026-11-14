@@ -10,7 +10,7 @@ for(const [,src]of(await readFile(new URL('index.html',root),'utf8')).matchAll(/
 const C=c.CM,M=C.Metro,copy=x=>JSON.parse(JSON.stringify(x));
 C.UI=function(){};for(const name of ['settings','corp','fleet','opsapp'])await load('js/'+name+'.js');
 const F=C.Fleet;
-assert.equal(C.CFG.GAME_VERSION,'2.7.0');assert.equal(C.CFG.RULES_REVISION,10);
+assert.equal(C.CFG.GAME_VERSION,'2.7.1');assert.equal(C.CFG.RULES_REVISION,11);
 assert.equal(C.MAP_ORDER.length,12);assert.equal(F.MODELS.length,56);assert.ok(C.TaskPlans.ld);
 for(const map of C.MAP_ORDER)for(const y of [1900,1950,1990,2025])for(const m of F.available(map,y))assert.ok(m.from<=y&&m.to>=y&&(!m.maps||m.maps.includes(map)));
 C.useMap('tutorial');const g=C.Game.create({mode:'free',tutorial:true,seed:20000101});
@@ -80,7 +80,12 @@ const funds=a.econ.funds;P.monthly(a);assert.equal(a.econ.funds,funds);
 const con={...copy(tender),id:'C-pay',opt:tender.opts[1],signed:g.ym(),deadline:g.ym()+12,phase:'build',paid:{},status:'active',opsM:120};delete con.opts;
 g.corp.contracts=[con];g.corp.tenders=[];g.corp.ym=g.ym()-1;P.monthly(g);assert.equal(con.phase,'ops');assert.ok(con.paid.sub>0&&con.paid.refund>0);
 g.clock.m++;P.monthly(g);assert.ok(con.paid.ap>0);const paid=con.paid.ap;P.monthly(g);assert.equal(con.paid.ap,paid);
-P.quit(g,con.id);assert.equal(g.corp.contracts.length,0);assert.equal(g.corp.closed.at(-1).status,'failed');assert.ok(g.econ.mods.some(m=>m.kind==='grant'&&m.factor===.9));
+const liveMonth=g.clock.m;
+F.setMode(g,lid,'manual');const offSvc=F.svcId(g.compiled.routes[0],0);
+for(let p=0;p<4;p++)F.setManual(g,lid,offSvc,p,0);g.model.solveNow(2);
+for(let i=0;i<3;i++){g.clock.m++;P.monthly(g);assert.equal(con.kpi.lf,null);assert.equal(con.kpi.conn,false);assert.equal(con.kpi.crowd,false);}
+assert.equal(g.corp.contracts.length,0);assert.equal(g.corp.closed.at(-1).status,'failed');assert.ok(g.econ.mods.some(m=>m.kind==='grant'&&m.factor===.9));
+g.clock.m=liveMonth;F.setMode(g,lid,'auto');g.model.solveNow(4);
 g.opsNote={streak:{a:2},snooze:{a:g.ym()+12},lastPop:g.ym()};
 g.mapId='tutorial';const saved=copy(g.serialize()),restored=C.Game.restore(copy(saved));F.ensure(restored);
 assert.equal(JSON.stringify(restored.fleet),JSON.stringify(g.fleet));assert.equal(JSON.stringify(restored.corp),JSON.stringify(g.corp));assert.equal(JSON.stringify(restored.opsNote),JSON.stringify(g.opsNote));assert.equal(restored.econ.funds,g.econ.funds);

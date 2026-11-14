@@ -28,8 +28,8 @@
   // 同时交错执行的时段数（v2.1）：一个时段等汽车分配时，主线程先算其他时段的地铁路径与方式选择。
   // v2.3：12 个逻辑核心以上交错 4 个时段（方式选择线程随之增至 4 个），跳月 / 跳年少等工作线程；各时段互不依赖，结果与宽度无关
   const PIPE_W = 2;
-  function carTree(G, time, origin, W) {
-    const dist = W.dist, dkm = W.dkm, pred = W.pred, order = W.order, keys = W.heapK, values = W.heapV;
+  function carTree(G, time, origin, W, need, stamp) {
+    const dist = W.dist, dkm = W.dkm, pred = W.pred, order = W.order, keys = W.heapK, values = W.heapV, mark = W.mark;
     const start = G.start, node = G.nodes, initial = G.times, km = G.km;
     const outStart = G.outStart, outArc = G.outArc, arcTo = G.arcTo, arcKm = G.arcKm;
     dist.fill(INF);
@@ -59,6 +59,7 @@
       }
       if (du > dist[u]) continue;
       order[no++] = u;
+      if (need > 0 && mark[u] === stamp && --need === 0) break;
       for (let k = outStart[u]; k < outStart[u + 1]; k++) {
         const a = outArc[k], v = arcTo[a], nd = du + time[a];
         if (nd < dist[v]) {
@@ -73,18 +74,31 @@
   }
   // 起点 o：行程时间与里程写入 outT / outK 的 off 起一行（不可达的小区不写，保留原值；工作线程的行预先填 NaN 表示「未写」），
   // 流量累加到本块的 auxP；不可达条目保留原值。
-  function carOriginRow(G, time, o, dem, dOff, W, outT, outK, off, auxP) {
+  // v2.7.1 行程表只存用得到的小区对：dests[q0..q1) 为起点 o 需要的终点小区（升序），dem[q] 为对应的汽车需求，
+  // 结果写入 outT / outK[q - shift]（不可达的不写，保持调用方填好的 NaN）。终点按小区编号升序处理，
+  // 需求只出现在这些小区对上，所以路段流量的累加顺序与逐个小区遍历完全相同，结果逐位一致
+  function carOriginRow(G, time, o, dests, q0, q1, dem, W, outT, outK, shift, auxP) {
     const dist = W.dist, dkm = W.dkm, pred = W.pred, order = W.order, accN = W.accN, arcFrom = G.arcFrom;
-    const connStart = G.start, connNode = G.nodes, connTime = G.times, connKm = G.km, zones = G.zones;
-    const no = carTree(G, time, o, W);
-    for (let zi = 0; zi < zones.length; zi++) {
-      const d = zones[zi];
+    const connStart = G.start, connNode = G.nodes, connTime = G.times, connKm = G.km;
+    // 终点小区的接入节点都标出来，搜索到它们全部定下来为止（v2.7.1，见 carTree）；没有要算的终点就不搜
+    const mark = W.mark;
+    if (W.stamp >= 2147480000) { mark.fill(0); W.stamp = 0; }
+    const stamp = ++W.stamp;
+    let need = 0;
+    for (let q = q0; q < q1; q++) {
+      const d = dests[q];
+      if (d === o) continue;
+      for (let k = connStart[d]; k < connStart[d + 1]; k++) { const nd = connNode[k]; if (mark[nd] !== stamp) { mark[nd] = stamp; need++; } }
+    }
+    const no = need > 0 ? carTree(G, time, o, W, need, stamp) : 0;
+    for (let q = q0; q < q1; q++) {
+      const d = dests[q];
       if (d === o) continue;
       let best = INF, bk = 0, bn = -1;
       for (let k = connStart[d]; k < connStart[d + 1]; k++) { const nd = connNode[k], v = dist[nd] + connTime[k]; if (v < best) { best = v; bk = dkm[nd] + connKm[k]; bn = nd; } }
       if (bn < 0 || best >= INF) continue;
-      outT[off + d] = best; outK[off + d] = bk;
-      const x = dem[dOff + d];
+      outT[q - shift] = best; outK[q - shift] = bk;
+      const x = dem[q];
       if (x > 0) accN[bn] += x;
     }
     for (let q = no - 1; q >= 0; q--) {
@@ -93,20 +107,36 @@
     }
   }
   function carWork(G) {
-    return { dist: new Float64Array(G.nN), dkm: new Float32Array(G.nN), pred: new Int32Array(G.nN), order: new Int32Array(G.nN), accN: new Float64Array(G.nN), heapK: new Float64Array(G.nA + 4), heapV: new Int32Array(G.nA + 4) };
+    return { dist: new Float64Array(G.nN), dkm: new Float32Array(G.nN), pred: new Int32Array(G.nN), order: new Int32Array(G.nN), accN: new Float64Array(G.nN), heapK: new Float64Array(G.nA + 4), heapV: new Int32Array(G.nA + 4), mark: new Int32Array(G.nN), stamp: 0 };
   }
-  // 工作线程入口：收到道路图（每次路网变化一次）与计算块，逐起点计算并回传（缓冲区转移，不复制）
+  // 工作线程入口：收到道路图（每次路网变化一次）与计算块，逐起点计算并回传（缓冲区转移，不复制）。
+  // 稀疏块用 JavaScript 提前结束，稠密块仍可由现有 WASM 内核计算。
   function carWorkerMain() {
-    let G = null, W = null, kernel = null;
+    let G = null, W = null, kernel = null, module = null;
     onmessage = function (e) {
       const m = e.data;
-      if (m.type === 'graph') { G = m.G; W = null;kernel=null;try{if(m.kernel)kernel=roadKernelWorker(m.kernel,G);}catch(e){/* JavaScript fallback. */}return; }
+      if (m.type === 'graph') { G = m.G; W = null; kernel = null; module = m.kernel; return; }
       if (m.type !== 'block') return;
       if (!G || G.id !== m.gid) { postMessage({ req: m.req, b: m.b, stale: true }); return; }
-      if(kernel){try{const r=kernel.solve(m);postMessage({req:m.req,b:m.b,...r,kernel:true},[r.rowsT.buffer,r.rowsK.buffer,r.aux.buffer]);return;}catch(e){kernel=null;}}
-      if(!W)W=carWork(G);
-      const Z = G.Z, n = m.origins.length, rowsT = new Float32Array(n * Z).fill(NaN), rowsK = new Float32Array(n * Z).fill(NaN), aux = new Float32Array(G.nA);
-      for (let i = 0; i < n; i++) carOriginRow(G, m.time, m.origins[i], m.dem, i * Z, W, rowsT, rowsK, i * Z, aux);
+      // 本块各起点需要的终点：tDest[tStart[i]..tStart[i+1])，需求 dem 与之对齐；结果也只回传这些终点（v2.7.1）
+      const n = m.origins.length, tStart = m.tStart, tDest = m.tDest, nt = tDest.length;
+      const rowsT = new Float32Array(nt).fill(NaN), rowsK = new Float32Array(nt).fill(NaN);
+      if (module && nt >= n * G.Z * 0.75) {
+        try {
+          if (!kernel) kernel = roadKernelWorker(module, G);
+          const dense = new Float32Array(n * G.Z);
+          for (let i = 0; i < n; i++) for (let q = tStart[i]; q < tStart[i + 1]; q++) dense[i * G.Z + tDest[q]] = m.dem[q];
+          const result = kernel.solve({ origins: m.origins, dem: dense, time: m.time });
+          for (let i = 0; i < n; i++) for (let q = tStart[i]; q < tStart[i + 1]; q++) {
+            const k = i * G.Z + tDest[q]; rowsT[q] = result.rowsT[k]; rowsK[q] = result.rowsK[k];
+          }
+          postMessage({ req: m.req, b: m.b, rowsT, rowsK, aux: result.aux, kernel: true }, [rowsT.buffer, rowsK.buffer, result.aux.buffer]);
+          return;
+        } catch (e) { module = kernel = null; }
+      }
+      if (!W) W = carWork(G);
+      const aux = new Float32Array(G.nA);
+      for (let i = 0; i < n; i++) carOriginRow(G, m.time, m.origins[i], tDest, tStart[i], tStart[i + 1], m.dem, W, rowsT, rowsK, 0, aux);
       postMessage({ req: m.req, b: m.b, rowsT: rowsT, rowsK: rowsK, aux: aux }, [rowsT.buffer, rowsK.buffer, aux.buffer]);
     };
   }
@@ -166,6 +196,12 @@
       if (typeof console !== 'undefined') console.warn('交通求解改为主线程计算：' + why);
       this.notify();
     },
+    release: function () {
+      if (!this.list) return true;
+      if (this.reqs.size || this.queue.length || this.list.some(function (s) { return s.n > 0; })) return false;
+      for (const s of this.list) { try { s.w.terminate(); } catch (e) { /* 已结束 */ } }
+      this.list = null; return true;
+    },
     notify: function () {
       if (!this.onReq || this.notifying) return;
       this.notifying = true;
@@ -179,7 +215,7 @@
     // 提交一次分配：blocks 为 [{ origins, dem }]；alive() 为假时（求解已被放弃）尚未发出的块直接丢弃
     submit: function (G, time, blocks, alive) {
       const req = { id: ++this.rseq, G: G, time: Float32Array.from(time), res: new Array(blocks.length), remaining: 0, failed: false, alive: alive };
-      blocks.forEach(function (b, i) { if (b.origins.length) { req.remaining++; this.queue.push({ req: req, b: i, origins: b.origins, dem: b.dem }); } else req.res[i] = null; }, this);
+      blocks.forEach(function (b, i) { if (b.origins.length) { req.remaining++; this.queue.push({ req: req, b: i, origins: b.origins, tStart: b.tStart, tDest: b.tDest, dem: b.dem }); } else req.res[i] = null; }, this);
       if (req.remaining) this.reqs.set(req.id, req);
       this.pump();
       return req;
@@ -202,7 +238,7 @@
         try {
           if (s.gid !== t.req.G.id) { const msg = { type: 'graph', G: t.req.G, kernel: CM.RoadKernel && CM.RoadKernel.module }; try { s.w.postMessage(msg); } catch (e) { msg.kernel = null; s.w.postMessage(msg); } s.gid = t.req.G.id; }
           s.n++;
-          s.w.postMessage({ type: 'block', req: t.req.id, b: t.b, gid: t.req.G.id, time: t.req.time, origins: t.origins, dem: t.dem }, [t.dem.buffer]);
+          s.w.postMessage({ type: 'block', req: t.req.id, b: t.b, gid: t.req.G.id, time: t.req.time, origins: t.origins, tStart: t.tStart, tDest: t.tDest, dem: t.dem }, [t.tStart.buffer, t.tDest.buffer, t.dem.buffer]);
         } catch (e) { this.fail('工作线程消息发送失败：' + (e && e.message || e)); return; }
       }
     },
@@ -229,7 +265,7 @@
   const SKIM_BLOCKS = 16;
   const OD_OUT = ['carDem', 'hasCar', 'S', 'pT', 'pM', 'zTrips', 'zMetro', 'zAccess', 'zCW', 'zCT', 'desTot', 'desMetro',
     'zDest', 'zDestM', 'fIn', 'fInM', 'fOut', 'fOutM', 'fP', 'fPM', 'DS', 'choices'];
-  const OD_FIXED = ['Z', 'NZ', 'B', 'odStart', 'odDest', 't0', 't1', 't2', 't3', 't4', 't5', 'hostZ', 'nx', 'ny', 'kmPerCell', 'blocks'];
+  const OD_FIXED = ['Z', 'NZ', 'B', 'odStart', 'odDest', 't0', 't1', 't2', 't3', 't4', 't5', 'hostZ', 'nx', 'ny', 'kmPerCell', 'blocks', 'pkO', 'pkR', 'ckR'];
   const OD_MOVE = { gtS: 1, tmS: 1, kmS: 1 };
   const OD_INPUT = ['N', 'co', 'cr', 'facW', 'facWe', 'odOk', 'skT', 'skK', 'zJ', 'cpk', 'park', 'vot', 'carAccess',
     'walkW', 'occ', 'theta', 'fareFlat', 'fareKm0', 'fareStep', 'fareInc', 'fareCap', 'fareTab', 'bgShare', 'bgSpeed', 'bgWait', 'bgFare', 'roadKeep', 'accOk', 'gtS', 'tmS', 'kmS', 'perMin', 'capSh', 'capLz', 'habit', 'habAsc', 'habLite'];
@@ -288,6 +324,12 @@
       this.list = null; this.queue = [];
       if (typeof console !== 'undefined') console.warn('方式选择改为主线程计算：' + why);
       CarPool.notify();
+    },
+    release: function () {
+      if (!this.list) return true;
+      if (this.queue.length || this.list.some(s => s.req)) return false;
+      for (const s of this.list) { try { s.w.terminate(); } catch (e) { /* 已结束 */ } }
+      this.list = null; return true;
     },
     submit: function (model, K, od, fn, alive) {
       let version = model._odWorkerVersion;
@@ -410,6 +452,12 @@
       if (typeof console !== 'undefined') console.warn('地铁最短路改为主线程计算：' + why);
       CarPool.notify();
     },
+    release: function () {
+      if (!this.list) return true;
+      if (this.queue.length || this.list.some(s => s.job)) return false;
+      for (const s of this.list) { try { s.w.terminate(); } catch (e) { /* 已结束 */ } }
+      this.list = null; return true;
+    },
     // 提交一次全网最短路：起点固定分成 SKIM_BLOCKS 段（与线程数无关，结果逐位一致）；req.done 后 req.parts 为各段结果。
     // reuse：上一轮这份存储的各段缓冲区，交给线程继续用
     submit: function (net, cost, tAct, tpen, reuse) {
@@ -476,6 +524,7 @@
     const fareKm0 = K.fareKm0, fareStep = K.fareStep, fareInc = K.fareInc, fareCap = K.fareCap, fareTab = K.fareTab, fareTabN = fareTab.length - 1;
     const bgShare = K.bgShare || 0, bgSpeed = K.bgSpeed, bgWait = K.bgWait, bgFare = K.bgFare, roadKeep = K.roadKeep || 0;
     const acc = K.acc, accOk = K.accOk, zCov = acc ? acc.zCov : null, zl = acc ? acc.zl : null, choices = K.choices;
+    const pkO = K.pkO, pkR = K.pkR, ckR = K.ckR;
     const gtS = K.gtS, tmS = K.tmS, kmS = K.kmS, DS = K.DS, perMin = K.perMin, capSh = K.capSh, capLz = K.capLz;
     const carDem = K.carDem, hasCar = K.hasCar, S = K.S, pT = K.pT, pM = K.pM;
     const habit = K.habit, habAsc = K.habAsc || 0, habLite = K.habLite || 0;
@@ -495,8 +544,8 @@
       for (let dir = 0; dir < 2; dir++) {
         const isOut = dir === 0, o = isOut ? i : j, d = isOut ? j : i, F0 = isOut ? F1 : F2, comp = isOut ? cO : cR;
         if (F0 <= 0) continue;
-        const ho = hostZ[o], hd = hostZ[d];
-        let ct = skT[ho * Z + hd], ck = skK[ho * Z + hd];
+        const ho = hostZ[o], hd = hostZ[d], pi = isOut ? pkO[k] : pkR[k];
+        let ct = Math.abs(skT[pi]), ck = Math.abs(skK[pi]);
         if (!(ct > 0) || ct >= INF) { const straight = U.dist(nx[o], ny[o], nx[d], ny[d]) * kmPerCell * 1.3; ct = straight / 16 * 60 + 3; ck = straight; }
         const carMoney = ck * cpk + park;
         let gtCar = ct + carAccess + carMoney / vot * 60, roadF = 1, tBg = 0;
@@ -516,7 +565,7 @@
           const lo = zl[o], ld = zl[d];
           if (fo > 0 && fd > 0 && lo && ld) {
             let best = INF, bw = 0;
-            const pair = o * NZ + d, cached = choices[pair];
+            const pair = isOut ? k : ckR[k], cached = choices[pair];
             let winner = -1;
             if (cached >= 0) {
               const A = lo[cached >> 2], Bq = ld[cached & 3];
@@ -560,7 +609,7 @@
         const car = F - metro;
         // roadKeep（v2.6，伦敦）：改乘地铁的人空出的路面，有这样一部分又被别的车辆占满（公交与电车竞争、被压抑的小汽车出行），道路不会同比变空
         const onRoad = car + metro * roadKeep;
-        if (onRoad > 0) { carDem[ho * Z + hd] += onRoad / occ * roadF; hasCar[ho] = 1; }
+        if (onRoad > 0) { carDem[pi] += onRoad / occ * roadF; hasCar[ho] = 1; }
         S[0] += F; S[1] += metro; S[2] += car;
         const tCar = bgShare > 0 ? (1 - bgShare) * (ct + carAccess * 0.5) + bgShare * tBg : ct + carAccess * 0.5;
         S[3] += car * tCar + metro * mTime;
@@ -727,6 +776,48 @@
       dest[n] = Z + D.hubs[h]; c0[n] = 0; c1[n] = 0; c2[n] = 0; c3[n] = 0; c4[n] = 0; c5[n] = v; tot[5] += v; n++;
     }
     D.n = n;
+  }
+
+  // 每个出发小区一段、到达小区升序（与原来整张表逐行的顺序相同）；pkO / pkR 为每条需求去程、返程在其中的位置。
+  // 接驳组合缓存的位置：去程用需求序号 k；返程（j → i）如果正好是小区 j 的某条需求 k' 的去程就共用 k'，否则另编号，
+  // 与原来按「出发节点 × 到达节点」缓存的命中完全相同。fp 为排列的指纹（交通缓存核对用）
+  function* skimLayoutGen(Z, odStart, odDest, hostZ, n) {
+    const rs = new Int32Array(Z + 1);
+    for (let i = 0; i < Z; i++) {
+      for (let k = odStart[i]; k < odStart[i + 1]; k++) { rs[i + 1]++; rs[hostZ[odDest[k]] + 1]++; }
+      if ((i & 255) === 255) yield;
+    }
+    for (let z = 0; z < Z; z++) rs[z + 1] += rs[z];
+    const raw = new Int32Array(rs[Z]), cur = rs.slice(0, Z);
+    for (let i = 0; i < Z; i++) {
+      for (let k = odStart[i]; k < odStart[i + 1]; k++) { const b = hostZ[odDest[k]]; raw[cur[i]++] = b; raw[cur[b]++] = i; }
+      if ((i & 255) === 255) yield;
+    }
+    // 逐段排序、去重，原地压紧（写入位置不超过读取位置）
+    const ps = new Int32Array(Z + 1); let w = 0;
+    for (let a = 0; a < Z; a++) {
+      const seg = raw.subarray(rs[a], rs[a + 1]); seg.sort();
+      ps[a] = w; let last = -1;
+      for (let q = 0; q < seg.length; q++) { const v = seg[q]; if (v !== last) { raw[w++] = v; last = v; } }
+      if ((a & 255) === 255) yield;
+    }
+    ps[Z] = w;
+    const dest = raw.slice(0, w);
+    const find = function (a, b) { let lo = ps[a], hi = ps[a + 1] - 1; while (lo <= hi) { const m = (lo + hi) >> 1, v = dest[m]; if (v < b) lo = m + 1; else if (v > b) hi = m - 1; else return m; } return -1; };
+    const pkO = new Int32Array(n), pkR = new Int32Array(n);
+    for (let i = 0; i < Z; i++) {
+      for (let k = odStart[i]; k < odStart[i + 1]; k++) { const b = hostZ[odDest[k]]; pkO[k] = find(i, b); pkR[k] = find(b, i); }
+      if ((i & 255) === 255) yield;
+    }
+    const outK = new Int32Array(w).fill(-1);
+    for (let i = 0; i < Z; i++) for (let k = odStart[i]; k < odStart[i + 1]; k++) if (odDest[k] < Z) outK[pkO[k]] = k;
+    const ckR = new Int32Array(n); let nCk = n;
+    for (let i = 0; i < Z; i++) for (let k = odStart[i]; k < odStart[i + 1]; k++) { const c = odDest[k] < Z ? outK[pkR[k]] : -1; ckR[k] = c >= 0 ? c : nCk++; }
+    let h = 2166136261;
+    h = Math.imul(h ^ Z, 16777619) >>> 0;
+    for (let q = 0; q <= Z; q++) h = Math.imul(h ^ ps[q], 16777619) >>> 0;
+    for (let q = 0; q < w; q++) h = Math.imul(h ^ dest[q], 16777619) >>> 0;
+    return { Z: Z, n: w, start: ps, dest: dest, pkO: pkO, pkR: pkR, ckR: ckR, nCk: nCk, fp: h.toString(16) };
   }
 
   // 日期 → 日类型（周六、周日为周末；节假日不单独模拟）
@@ -1038,7 +1129,8 @@
       start[i + 1] = D.n;
     }
     const n = D.n, o = D.out;
-    this.od = { start: start, dest: o.dest.subarray(0, n), t: o.t.map(function (a) { return a.subarray(0, n); }), tot: D.tot, F: F, NZ: NZ, key: fn.key };
+    const skim = yield* skimLayoutGen(Z, start, o.dest, fn.hostZ, n);
+    this.od = { skim: skim, start: start, dest: o.dest.subarray(0, n), t: o.t.map(function (a) { return a.subarray(0, n); }), tot: D.tot, F: F, NZ: NZ, key: fn.key };
     this.version++;
   };
   // 分步版本（月度处理中使用，避免单帧长时间停顿）。进行期间暂停实时求解与预测（见 step），
@@ -1310,10 +1402,9 @@
     if (fn && CM.Fac) for (let k = 0; k < F; k++) {
       const f = fn.list[k]; if (!f.ext) continue;
       if (f.ext.gate) { zCov[Z + k] = 0; zWalk[Z + k] = 0; zl[Z + k] = null; }
-      for (let s = 0; s < N; s++) {
-        if ((C.serviced && !C.serviced[s]) || !CM.Fac.isPortalStation(C.stations[s], f)) continue;
-        zCov[Z + k] = 1; zWalk[Z + k] = 1; zl[Z + k] = [{ s: s, w: 1 + this.crossMin(f), share: 1 }];
-        break;
+      const link = CM.Fac.extLink(f, { compiled: C });
+      if (link && link.portal) {
+        zCov[Z + k] = 1; zWalk[Z + k] = 1; zl[Z + k] = [{ s: link.i, w: 1 + this.crossMin(f), share: 1 }];
       }
     }
     // 人口覆盖率
@@ -1404,10 +1495,10 @@
     if (!P.fIn || P.fIn.length !== F) { P.fIn = new Float32Array(F); P.fInM = new Float32Array(F); P.fOut = new Float32Array(F); P.fOutM = new Float32Array(F); P.fP = new Float32Array(NPK * F); P.fPM = new Float32Array(NPK * F); }
   };
   Model.prototype.makePer = function (net) {
-    const Z = this.Z, nA = this.road.nA;
+    const Z = this.Z, nA = this.road.nA, lay = this.od && this.od.skim;
     const P = {
       arcVol: new Float32Array(nA), arcTime: Float32Array.from(this.road.arcT0),
-      skimT: new Float32Array(Z * Z), skimK: new Float32Array(Z * Z),
+      skimT: new Float32Array(lay ? lay.n : 0), skimK: new Float32Array(lay ? lay.n : 0), skimLay: lay || null,
       desTot: new Float32Array(this.B * this.B), desMetro: new Float32Array(this.B * this.B),
       zTrips: new Float32Array(Z), zMetro: new Float32Array(Z), zAccess: new Float32Array(Z),
       stats: null, iters: 0,
@@ -1552,6 +1643,50 @@
     store.skimKey=key;store.transferPen=prm.tpen;store.valid=true;
   };
 
+  // 把某时段的汽车行程表搬到需求表 od 的小区对排列上（v2.7.1）。原有的小区对保留原值；新出现的小区对按该出发小区已算出的
+  // 小区对的平均车速（时间、里程与直线距离之比）估一个值，存成负数，下一次汽车分配算到后换成实算值（见 iterate 的 merge）。
+  // 已算出的小区对少于 3 个时不估，与从未算到时一样留 0（方式选择按直线距离估）。同一排列直接返回，不复制
+  Model.prototype.alignSkims = function (P, od) {
+    const lay = od.skim;
+    if (P.skimLay === lay && P.skimT && P.skimK && P.skimT.length === lay.n && P.skimK.length === lay.n) return lay;
+    const T = new Float32Array(lay.n), K = new Float32Array(lay.n), old = P.skimLay, oT = P.skimT, oK = P.skimK;
+    if (old && oT && oK && oT.length === old.n && oK.length === old.n && old.Z === lay.Z) {
+      const Z = lay.Z, s0 = old.start, d0 = old.dest, s1 = lay.start, d1 = lay.dest, cx = this.zCx, cy = this.zCy, kmc = CFG.CELL_M / 1000;
+      for (let a = 0; a < Z; a++) {
+        const q0 = s1[a], q1 = s1[a + 1];
+        if (q0 === q1) continue;
+        let p = s0[a], sT = 0, sK = 0, sD = 0, nOk = 0, nNew = 0;
+        const pe = s0[a + 1];
+        for (let q = q0; q < q1; q++) {
+          const b = d1[q];
+          while (p < pe && d0[p] < b) p++;
+          if (p < pe && d0[p] === b) {
+            const t = oT[p], k = oK[p];
+            T[q] = t; K[q] = k;
+            if (t > 0 && b !== a) { sT += t; sK += k; sD += U.dist(cx[a], cy[a], cx[b], cy[b]) * kmc; nOk++; }
+          } else if (b !== a) { T[q] = NaN; nNew++; }
+        }
+        if (!nNew) continue;
+        const ok = nOk >= 3 && sD > 0, rT = ok ? sT / sD : 0, rK = ok ? sK / sD : 0;
+        for (let q = q0; q < q1; q++) {
+          if (T[q] === T[q]) continue;
+          const b = d1[q], dd = U.dist(cx[a], cy[a], cx[b], cy[b]) * kmc;
+          if (ok && dd > 0) { T[q] = -dd * rT; K[q] = -dd * rK; } else { T[q] = 0; K[q] = 0; }
+        }
+      }
+    }
+    P.skimT = T; P.skimK = K; P.skimLay = lay;
+    return lay;
+  };
+  // 汽车行程时间（分钟）：小区 a → b，取某时段（默认工作日早高峰）的行程表；没有这个小区对或尚未算到时为 0
+  Model.prototype.carSkim = function (a, b, P) {
+    P = P || this.ctxs.wd.per[0];
+    const L = P.skimLay, T = P.skimT;
+    if (!L || !T || T.length !== L.n || a < 0 || a >= L.Z) return 0;
+    let lo = L.start[a], hi = L.start[a + 1] - 1;
+    while (lo <= hi) { const m = (lo + hi) >> 1, v = L.dest[m]; if (v < b) lo = m + 1; else if (v > b) hi = m - 1; else return Math.abs(T[m]); }
+    return 0;
+  };
   Model.prototype.allocSkimStore = function (net, buf) {
     const N = net.N, nn = net.nNodes;
     const st = buf.skim;
@@ -1586,7 +1721,8 @@
     const hasMetro = net && net.R > 0;
     if (hasMetro) { store = this.allocSkimStore(net, buf); yield* this.metroSkim(net, P, p, prm, store); store.D.fill(0); }
     // ---- 方式选择 ----
-    if (!buf.carDem || buf.carDem.length !== Z * Z) buf.carDem = new Float32Array(Z * Z);
+    const lay = this.alignSkims(P, od);
+    if (!buf.carDem || buf.carDem.length !== lay.n) buf.carDem = new Float32Array(lay.n);
     if (!buf.hasCar || buf.hasCar.length !== Z) buf.hasCar = new Uint8Array(Z);
     const carDem = buf.carDem, hasCar = buf.hasCar;
     carDem.fill(0);
@@ -1605,7 +1741,7 @@
     const blocks = this.zoneBlock;
     // The same directed OD can appear in several purpose flows. Cache only the winning
     // access-pair indices within this iteration, never rounded costs or stale results.
-    if (hasMetro && (!buf.choice || buf.choice.length !== NZ * NZ)) buf.choice = new Int8Array(NZ * NZ);
+    if (hasMetro && (!buf.choice || buf.choice.length !== lay.nCk)) buf.choice = new Int8Array(lay.nCk);
     const choices = hasMetro ? buf.choice : null;
     if (choices) choices.fill(-2);
     const t = od.t;
@@ -1613,7 +1749,7 @@
     const S = new Float64Array(14), fp = Model.fareParams(this.fare), bg = CM.Eras ? CM.Eras.bg(this.year) : null;
     const K = { Z: Z, NZ: NZ, N: N, B: this.B, odStart: od.start, odDest: od.dest, t0: t[0], t1: t[1], t2: t[2], t3: t[3], t4: t[4], t5: t[5],
       co: co, cr: cr, cO: new Float64Array(NPK), cR: new Float64Array(NPK), facW: facW, facWe: facWe, odOk: od.F === F && od.key === fn.key,
-      hostZ: hostZ, nx: nx, ny: ny, skT: skT, skK: skK, kmPerCell: kmPerCell,
+      hostZ: hostZ, nx: nx, ny: ny, skT: skT, skK: skK, kmPerCell: kmPerCell, pkO: lay.pkO, pkR: lay.pkR, ckR: lay.ckR,
       cpk: prm.cpk, park: prm.park, vot: prm.vot, carAccess: prm.carAccess, walkW: prm.walkW, occ: prm.occ, theta: prm.theta, fareFlat: this.fareFor(0),
       fareKm0: fp.km0, fareStep: fp.step, fareInc: fp.inc, fareCap: fp.cap, fareTab: Model.fareTab(this.fare, this.year, prm.vot),
       bgShare: bg ? bg.share : 0, bgSpeed: bg ? bg.speed : 1, bgWait: bg ? bg.wait : 0, bgFare: bg ? bg.fare : 0, roadKeep: bg ? bg.keep : 0,
@@ -1747,45 +1883,55 @@
     const zPop = this.zPop, fullSkim = !!opts.fullSkim, iters = P.iters, time = P.arcTime;
     const runList = [];
     for (let o = 0; o < Z; o++) {
-      if (connStart[o] === connStart[o + 1]) continue;
+      if (connStart[o] === connStart[o + 1] || lay.start[o] === lay.start[o + 1]) continue;
       if (!hasCar[o] && !(fullSkim && zPop[o] > 0) && iters > 0) continue;
       runList.push(o);
     }
     const nRun = runList.length, bounds = [];
     for (let b = 0; b <= CAR_BLOCKS; b++) bounds.push(Math.floor(b * nRun / CAR_BLOCKS));
+    // 每个起点只算行程表里有的终点（lay.dest[lay.start[o]..lay.start[o+1])，升序），需求 carDem 与之对齐
+    const pS = lay.start, pD = lay.dest;
     let res = null;
     if (nRun && !this.syncSolve && CarPool.ready()) {
       const self = this, isPred = !!opts.pred || buf === this.predBuf, ep = isPred ? this.predEpoch : this.epoch, blocks = [];
       for (let b = 0; b < CAR_BLOCKS; b++) {
-        const os = Int32Array.from(runList.slice(bounds[b], bounds[b + 1])), dem = new Float32Array(os.length * Z);
-        for (let i = 0; i < os.length; i++) dem.set(carDem.subarray(os[i] * Z, os[i] * Z + Z), i * Z);
-        blocks.push({ origins: os, dem: dem });
+        const os = Int32Array.from(runList.slice(bounds[b], bounds[b + 1])), tStart = new Int32Array(os.length + 1);
+        for (let i = 0; i < os.length; i++) tStart[i + 1] = tStart[i] + (pS[os[i] + 1] - pS[os[i]]);
+        const tDest = new Int32Array(tStart[os.length]), dem = new Float32Array(tStart[os.length]);
+        for (let i = 0; i < os.length; i++) { const a = pS[os[i]], e = pS[os[i] + 1]; tDest.set(pD.subarray(a, e), tStart[i]); dem.set(carDem.subarray(a, e), tStart[i]); }
+        blocks.push({ origins: os, tStart: tStart, tDest: tDest, dem: dem });
       }
       const req = CarPool.submit(G, time, blocks, function () { return !self.retired && (isPred ? self.predEpoch === ep : self.epoch === ep); });
       while (req.remaining > 0 && !req.failed) yield WAIT;
       res = req.res;
     }
-    // 按块顺序合并：行程时间表逐行写回（不可达的保留原值），路段流量逐块相加；缺少的块（工作线程失败）在主线程补算
-    // 正、有限道路成本下，可达性只依赖拓扑。按道路版本缓存有限连续区间，以批量复制代替逐元素比较。
-    const rowSpans=this.roadData.rowSpans||(this.roadData.rowSpans=new Array(Z));
-    const merge = function (o, rT, rK) {
-      const row=o*Z;let spans=rowSpans[o];
-      if(!spans){spans=[];for(let d=0;d<Z;){if(rT[d]!==rT[d]){d++;continue;}const a=d;while(d<Z&&rT[d]===rT[d])d++;spans.push(a,d);}rowSpans[o]=spans;}
-      for(let i=0;i<spans.length;i+=2){const a=spans[i],b=spans[i+1];skT.set(rT.subarray(a,b),row+a);skK.set(rK.subarray(a,b),row+a);}
+    // 按块顺序合并：行程时间表逐个小区对写回，路段流量逐块相加；缺少的块（工作线程失败）在主线程补算。
+    // 算到的值覆盖；不可达的保留原值，但新小区对的估算值（负数）改回 0（与从未算到时一样，用直线距离估）
+    const merge = function (a0, len, rT, rK, off) {
+      for (let q = 0; q < len; q++) {
+        const v = rT[off + q], at = a0 + q;
+        if (v === v) { skT[at] = v; skK[at] = rK[off + q]; }
+        else if (skT[at] < 0) { skT[at] = 0; skK[at] = 0; }
+      }
     };
+    let rowT = work.rowT, rowK = work.rowK;
     for (let b = 0; b < CAR_BLOCKS; b++) {
       const i0 = bounds[b], i1 = bounds[b + 1];
       if (i0 === i1) continue;
       const r = res && res[b];
       let auxB;
       if (r) {
-        for (let i = i0; i < i1; i++) merge(runList[i], r.rowsT.subarray((i - i0) * Z, (i - i0 + 1) * Z), r.rowsK.subarray((i - i0) * Z, (i - i0 + 1) * Z));
+        let off = 0;
+        for (let i = i0; i < i1; i++) { const o = runList[i], a0 = pS[o], len = pS[o + 1] - a0; merge(a0, len, r.rowsT, r.rowsK, off); off += len; }
         auxB = r.aux;
       } else {
         auxB = work.auxB; auxB.fill(0);
         for (let i = i0; i < i1; i++) {
-          const o = runList[i];
-          carOriginRow(G, time, o, carDem, o * Z, work, skT, skK, o * Z, auxB);
+          const o = runList[i], a0 = pS[o], a1 = pS[o + 1], len = a1 - a0;
+          if (!rowT || rowT.length < len) { rowT = work.rowT = new Float32Array(Math.max(len, 256)); rowK = work.rowK = new Float32Array(rowT.length); }
+          rowT.fill(NaN, 0, len); rowK.fill(NaN, 0, len);
+          carOriginRow(G, time, o, pD, a0, a1, carDem, work, rowT, rowK, a0, auxB);
+          merge(a0, len, rowT, rowK, 0);
           if ((i & 1) === 1) yield;
         }
       }
@@ -1847,6 +1993,7 @@
   // start(job, buf) 返回该任务的生成器，onDone(job, 返回值) 在任务完成时调用（按完成顺序）。所有任务都在等工作线程时让出 WAIT
   Model.prototype.pipeline = function* (jobs, start, onDone, pred) {
     if(!jobs.length)return;
+    if (pred) this._predAt = performance.now(); else this._liveAt = performance.now();
     const width = this.syncSolve || !CarPool.ready() ? 1 : Math.min(PIPE_W, jobs.length);
     const bufs = pred ? (this.predBufs || (this.predBufs = [this.predBuf])) : (this.pipeBufs || (this.pipeBufs = [this.liveBuf]));
     const act = [], free = [];
@@ -1905,9 +2052,18 @@
       this.cycles++;this.computeDaily();if(this.reviewObserver)this.reviewObserver();if(this.reviewEnough&&this.reviewEnough())this.clearReviews();yield;
     }
   };
+  // 空闲时释放多余的求解缓冲（v2.7.1 性能）：时段流水线每个并行槽位约有 4 个「车站数²」的浮点矩阵（八百站的线网每槽约 19 MB）。
+  // 交通结果已收敛、TRIM_MS 内没再用到时只留实时求解的一套；建设前预测结束后同样时长内没有新的预测就全部释放。
+  // 缓冲区只是临时工作区，用到时按原样重建，计算结果不变
+  const TRIM_MS = 15000;
+  Model.prototype.trimIdle = function (now) {
+    if (this.predBufs && !this.predJob && now - (this._predAt || 0) > TRIM_MS) { this.predBufs = null; this.predBuf = {}; }
+    if (this.pipeBufs && this.pipeBufs.length > 1 && this.settled && !this.gen && now - (this._liveAt || 0) > TRIM_MS) this.pipeBufs = [this.liveBuf];
+  };
   Model.prototype.step = function (budget) {
     if (this.refreshing || this.solving) return;
     const t0 = performance.now();
+    this.trimIdle(t0);
     if (this.predJob) {
       const pj = this.predJob;
       while (performance.now() - t0 < budget * 1.2) {
@@ -2229,7 +2385,7 @@
         const net = nets[job[0]], dt = job[1], p = job[2];
         const L = self.ctxs[dt].per[p];
         const P = {
-          arcVol: Float32Array.from(L.arcVol), arcTime: Float32Array.from(L.arcTime), skimT: Float32Array.from(L.skimT), skimK: Float32Array.from(L.skimK),
+          arcVol: Float32Array.from(L.arcVol), arcTime: Float32Array.from(L.arcTime), skimT: Float32Array.from(L.skimT), skimK: Float32Array.from(L.skimK), skimLay: L.skimLay,
           desTot: new Float32Array(self.B * self.B), desMetro: new Float32Array(self.B * self.B), zTrips: new Float32Array(self.Z), zMetro: new Float32Array(self.Z), zAccess: new Float32Array(self.Z),
           stats: null, demandTotal:L.demandTotal, iters: Math.max(1, L.iters), dt: dt,
         };
