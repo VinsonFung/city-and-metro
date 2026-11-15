@@ -52,6 +52,14 @@
     const pf = f || Fac.byId(st.portal), p = Fac.portal(pf);
     return !!p && U.dist(st.x, st.y, p.x, p.y) < 1.2;   // 车站被拖离接驳口后不再算接通
   };
+  // 口岸附近可接驳的车站按距离排序，供各时段从实际开行的线路中选路。
+  Fac.gateStations = function (f, C) {
+    const p = Fac.portal(f), matches = [];
+    C.stations.forEach(function (s, i) {
+      if (C.serviced[i] && Fac.isPortalStation(s, f)) matches.push({ i: i, d: U.dist(s.x, s.y, p.x, p.y) });
+    });
+    return matches.sort(function (a, b) { return a.d - b.d; });
+  };
   Fac.shortName = function (f) { return f.name.replace(/（.*）/, ''); };
   // 接驳点或接驳口附近的普通车站（玩家反馈：大兴机场的接驳点周围没有人行道，车站显示已接通却没有旅客）：
   // 直线距离在范围内就算接通，不要求有路。界面（extLink）和客流（sim.js computeAccess）都用这一条。

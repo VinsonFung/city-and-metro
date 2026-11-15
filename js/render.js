@@ -4526,21 +4526,25 @@
     ctx.beginPath(); ctx.moveTo(G.e.x + vx / L * 4, G.e.y + vy / L * 4); ctx.lineTo(c.bx - vx / L * c.gr, c.by - vy / L * c.gr);
     ctx.setLineDash(dashed ? [3, 4] : []); ctx.lineWidth = w; ctx.strokeStyle = col; ctx.stroke(); ctx.setLineDash([]);
   }
-  // 普通视图中的接驳口（不进入地下视图、分析图层与开始界面）
+  // 建站、绘线时在地下视图和分析图层中也保留口岸标记和点击位置。
   Renderer.prototype.drawPortals = function (ctx, alpha) {
     const g = this.game, Fac = CM.Fac;
     this._portals = [];
-    if (!Fac || g.preview || !CM.DATA.facilities || alpha <= 0.02) return;
+    if (!Fac || g.preview || !CM.DATA.facilities) return;
     const yr = g.year ? g.year() : g.clock.y, z = this.z, lw = this.lineWidthPx(), net = g.net;
     const T = CM.tools, building = T && (T.tool === 'station' || T.tool === 'line'), hov = T && T.portalHover;
+    if (alpha <= 0.02 && !building) return;
     const accent = TH.night ? '#6f9fe0' : '#3f6fb0', grey = TH.night ? '#5d6a7e' : '#9aa6b6';
     const gr = U.clamp(z * 0.4, 11, 15), sel = CM.ui && CM.ui.selection;
     for (const f of Fac.list()) {
       if (!f.ext) continue;
-      if (f.ext.gate && yr < f.open) continue;   // 城市连接的接驳口没到开放时间不显示，也没有需求
+      const gate = f.ext.gate;
+      if (gate && !Fac.active(f, yr, g.city)) continue;
+      const opacity = gate && building ? 1 : alpha;
+      if (opacity <= 0.02) continue;
       const G = this.gateGeom(f), e = G.e, n = G.n;
       if (e.x < -240 || e.x > this.w + 240 || e.y < -240 || e.y > this.h + 240) { this._portals.push({ f: f, sx: e.x, sy: e.y, card: null }); continue; }
-      const active = yr >= f.open && (f.close == null || yr < f.close);
+      const active = gate || (yr >= f.open && (f.close == null || yr < f.close));
       const lk = active ? Fac.extLink(f, g) : null;
       const L = lk ? net.lines[lk.lines[0]] : null, col = L ? AX.line(L) : (active ? accent : grey);
       const km = f.ext.km + ' km', labels = z >= 6 && this.labelsOn;
@@ -4550,7 +4554,7 @@
       card.gate = f.ext.gate;
       this._portals.push({ f: f, sx: e.x, sy: e.y, card: card });
       ctx.save();
-      ctx.globalAlpha = alpha * (active ? 1 : 0.75);
+      ctx.globalAlpha = opacity * (active ? 1 : 0.75);
       ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       gateLeader(ctx, G, card, col, !lk, lk ? Math.max(2, lw * 0.5) : 1.6);
       if (lk) {
@@ -4571,7 +4575,7 @@
       } else if (active) {
         // 待接通：边缘线上的接驳口（建设工具下呼吸闪烁，鼠标靠近时变实线）
         const pulse = building ? 0.5 + 0.5 * Math.sin(this.time * 4) : 0, hot = hov === f.id, rr = 7.5 + (hot ? 2.5 : 0);
-        if (building) { ctx.beginPath(); ctx.arc(e.x, e.y, rr + 3 + pulse * 6, 0, Math.PI * 2); ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.globalAlpha = alpha * (0.55 - pulse * 0.45); ctx.stroke(); ctx.globalAlpha = alpha; }
+        if (building) { ctx.beginPath(); ctx.arc(e.x, e.y, rr + 3 + pulse * 6, 0, Math.PI * 2); ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.globalAlpha = opacity * (0.55 - pulse * 0.45); ctx.stroke(); ctx.globalAlpha = opacity; }
         ctx.beginPath(); ctx.arc(e.x, e.y, rr, 0, Math.PI * 2);
         ctx.fillStyle = hot ? col : (TH.night ? 'rgba(20,30,46,0.92)' : 'rgba(255,255,255,0.94)'); ctx.fill();
         ctx.setLineDash(hot ? [] : [3, 2.5]); ctx.lineWidth = 2; ctx.strokeStyle = col; ctx.stroke(); ctx.setLineDash([]);
@@ -5034,7 +5038,10 @@
       for (const it of this._facPx) { const d = Math.hypot(sx - it.x, sy - it.y); if (d <= it.r && d < bd) { bd = d; best = it.id; } }
       if (best) return best;
     } else if (this._portals) {
-      for (const p of this._portals) if (p.card && sx >= p.card.x - 3 && sx <= p.card.x + p.card.w + 3 && sy >= p.card.y - 3 && sy <= p.card.y + p.card.h + 3) return p.f.id;   // 地图外设施的提示卡
+      for (let i = this._portals.length - 1; i >= 0; i--) {
+        const { f, card } = this._portals[i];
+        if (card && sx >= card.x - 3 && sx <= card.x + card.w + 3 && sy >= card.y - 3 && sy <= card.y + card.h + 3) return f.id;
+      }
     }
     let best = null, bd = 1e9;
     for (const f of model.fn.list) {

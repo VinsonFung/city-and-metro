@@ -878,7 +878,7 @@
     }
     this.solveLimit = cycles || 2; this.settled = false; this.gen = null; this.epoch = (this.epoch || 0) + 1;
   };
-  Model.prototype.setYear = function (y) { if (this.year !== y) this.wake(1); this.year = y; this.capF = U.interp(CFG.road.capGrowth, y); };
+  Model.prototype.setYear = function (y) { if (this.year !== y) { this.year = y; this.wake(1); } this.capF = U.interp(CFG.road.capGrowth, y); };
   // 当天的日类型：实时画面（车流、客流、拥堵）与当天的票款使用对应的求解结果；两套结果都在后台保持收敛
   Model.prototype.setDayType = function (dt) {
     dt = dt === 'we' ? 'we' : 'wd';
@@ -1401,7 +1401,13 @@
     // 地图外设施的接驳口（v2.1）：在地图边缘接驳口建成并接入线路的车站，直接服务该设施的全部接驳出行（步行约 1 分钟）
     if (fn && CM.Fac) for (let k = 0; k < F; k++) {
       const f = fn.list[k]; if (!f.ext) continue;
-      if (f.ext.gate) { zCov[Z + k] = 0; zWalk[Z + k] = 0; zl[Z + k] = null; }
+      if (f.ext.gate) {
+        const entries = CM.Fac.gateStations(f, C).slice(0, 4), walk = 1 + this.crossMin(f);
+        zCov[Z + k] = entries.length ? 1 : 0;
+        zWalk[Z + k] = entries.length ? 1 : 0;
+        zl[Z + k] = entries.length ? entries.map(function (e) { return { s: e.i, w: walk, share: 1 }; }) : null;
+        continue;
+      }
       const link = CM.Fac.extLink(f, { compiled: C });
       if (link && link.portal) {
         zCov[Z + k] = 1; zWalk[Z + k] = 1; zl[Z + k] = [{ s: link.i, w: 1 + this.crossMin(f), share: 1 }];

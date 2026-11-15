@@ -70,7 +70,40 @@ const gateWalk=(g)=>g.model.net.acc.zl[g.model.Z+g.model.fn.ids.indexOf(gate.id)
 assert.ok(Math.abs(gateWalk(restored)-(1+restored.model.crossMin(gate)))<1e-6,'restored access cost must use the saved custom fare from its first calculation');
 restored.econ.fare.flat=6;restored.model.wake(2);
 assert.ok(Math.abs(gateWalk(restored)-(1+restored.model.crossMin(gate)))<1e-6,'fare changes must refresh cached border costs without rebuilding walking paths');
+restored.model.setYear(2025);
+assert.ok(Math.abs(gateWalk(restored)-(1+restored.model.crossMin(gate)))<1e-6,'year changes must use the new reference prices');
+restored.model.setYear(restored.year());
 console.log('PASS Shenzhen, border access with and without snapping, fare cost, income and save restoration');
+
+// The closest station can have no trains while another nearby station still serves the gate.
+{
+ const city=new C.City();
+ city.generate(20200101,2020);
+ const luohu=C.Fac.byId('sz_gate_lw'),p=C.Fac.portal(luohu);
+ const net=M.empty(),underground={size:'M',type:'underground'};
+ const link=(x,y,endX,endY,options)=>{
+   const line=M.newLine(net);
+   const first=M.addStation(net,x,y,options,city);
+   const end=M.addStation(net,endX,endY,underground,city);
+   M.addSegment(net,line,first,end,[],'underground');
+   return line;
+ };
+ const stopped=link(p.x,p.y,p.x+4,p.y-6,{...underground,portal:luohu.id});
+ const running=link(p.x+.65,p.y,p.x-7,p.y-8,underground);
+ const compiled=M.compile(net,city),model=new C.Model(city,{deferDemand:true});
+ model.setYear(2020);
+ for(const _ of model.refreshCityGen(compiled)) {}
+ const period=model.ctxs.wd.per[0];
+ compiled.routes.forEach((route,i)=>{
+   assert.ok(route.lineId===stopped||route.lineId===running);
+   const frequency=route.lineId===running?12:0;
+   period.freq[i]=period.freqDir[2*i]=period.freqDir[2*i+1]=frequency;
+ });
+ for(const _ of model.iterate(model.net,period,0,{noSmooth:true,buf:{}})) {}
+ const index=model.fn.ids.indexOf(luohu.id);
+ assert.ok(period.fInM[index]>0&&period.fOutM[index]>0,'An open alternate station must carry riders when the closest station is shut');
+}
+console.log('PASS period-specific border ridership uses alternate station');
 
 // Choose newest normal save across progress groups, preserving the mode boundary.
 const list=C.Save.list;C.Save.list=()=>[{mode:'challenge',slots:[{slotId:'old',savedAt:5},{slotId:'backup',kind:'backup',savedAt:100}]},{mode:'free',slots:[{slotId:'free',savedAt:200}]},{mode:'challenge',slots:[{slotId:'new',savedAt:20}]}];

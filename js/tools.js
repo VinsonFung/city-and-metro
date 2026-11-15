@@ -208,22 +208,40 @@
   };
   // 地图外设施的接驳口（v2.1）：建站 / 绘线工具靠近地图边缘线上的接驳口（地图外侧也可以），或指向地图外的提示卡时，
   // 落点自动吸附到接驳口；该处已有接驳口车站时改为选中 / 连接那座车站。返回 { f, x, y, sid }
-  Tools.prototype.portalPick = function (sx, sy) {
+  Tools.prototype.portalPick = function (sx, sy, pickedStation) {
     if (this.tool !== 'station' && this.tool !== 'line') return null;
-    const R = this.R, list = R._portals || [], net = this.net();
+    const R = this.R, list = R._portals || [], net = this.net(), game = this.game();
     let best = null, bd = Math.max(30, Math.min(48, R.z * 1.2));
     for (const p of list) {
+      const gate = p.f.ext.gate;
+      if (gate && !CM.Fac.active(p.f, game.year(), game.city)) continue;
       let d = Math.hypot(sx - p.sx, sy - p.sy);
       const c = p.card;
-      if (c) d = Math.min(d, Math.hypot(Math.max(c.x - sx, 0, sx - c.x - c.w), Math.max(c.y - sy, 0, sy - c.y - c.h)) + 2);
-      if (d < bd) { bd = d; best = p; }
+      const onCard = c && sx >= c.x && sx <= c.x + c.w && sy >= c.y && sy <= c.y + c.h;
+      if (gate) {
+        // 口岸卡片在可建区域上，卡片外的地图点击仍可用来绘制相邻路段。
+        if (!onCard && d > (pickedStation ? 7 : 18)) continue;
+        if (onCard) d = -1;
+      } else {
+        if (pickedStation) continue;
+        if (c) d = Math.min(d, Math.hypot(Math.max(c.x - sx, 0, sx - c.x - c.w), Math.max(c.y - sy, 0, sy - c.y - c.h)) + 2);
+      }
+      // 口岸卡片重叠时，命中最后绘制、显示在最上面的那张卡片。
+      if (d < bd || d === -1) { bd = d; best = p; }
     }
     if (!best) return null;
-    // 口岸只在运营期间开放建设接驳。
-    if (best.f.ext.gate && !CM.Fac.active(best.f, this.game().year(), this.game().city)) return null;
     const P = CM.Fac.portal(best.f);
-    let sid = null;
-    for (const id in net.stations) if (CM.Fac.isPortalStation(net.stations[id], best.f)) { sid = id; break; }
+    const link = best.f.ext.gate ? CM.Fac.extLink(best.f, game) : null;
+    let sid = link && CM.Fac.isPortalStation(net.stations[link.st.id], best.f) ? link.st.id : null;
+    if (!sid) {
+      let nearest = Infinity;
+      for (const id in net.stations) {
+        const s = net.stations[id];
+        if (!CM.Fac.isPortalStation(s, best.f)) continue;
+        const d = U.dist(s.x, s.y, P.x, P.y);
+        if (d < nearest) { nearest = d; sid = id; }
+      }
+    }
     return { f: best.f, x: P.x, y: P.y, sid: sid };
   };
   // 选址检查（接驳口不受限制）
@@ -234,7 +252,7 @@
     let w = this.world(sx, sy, this.buildH());
     this.cursor = { sx: sx, sy: sy, x: w.x, y: w.y, mod: mod }; this.cursorOut = false;
     this.snapPt = null;
-    const pp = !mod && !R.pickStation(sx, sy) ? this.portalPick(sx, sy) : null;
+    const pp = !mod ? this.portalPick(sx, sy, R.pickStation(sx, sy)) : null;
     if (pp) {
       this.hover = pp.sid ? { kind: 'station', id: pp.sid } : null;
       this.portalHover = pp.f.id;
@@ -594,7 +612,11 @@
     let st = R.pickStation(sx, sy);
     let seg = st ? null : R.pickSegment(sx, sy);
     // 地图外设施的接驳口：吸附到接驳口（已有接驳口车站时连接该站）
-    if (!st && !mod) { const pp = this.portalPick(sx, sy); if (pp) { seg = null; if (pp.sid) st = pp.sid; else w = { x: pp.x, y: pp.y, portal: pp.f.id }; } }
+    const portal = !mod ? this.portalPick(sx, sy, st) : null;
+    if (portal) {
+      seg = null; st = portal.sid;
+      if (!st) w = { x: portal.x, y: portal.y, portal: portal.f.id };
+    }
     if (!w.portal && this.snapWanted(st, seg, mod)) {
       const r = this.snapPick(w, mod);
       if (r && r.st) { st = r.st; seg = null; }
