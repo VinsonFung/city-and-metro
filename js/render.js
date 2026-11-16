@@ -3153,6 +3153,7 @@
     if (z >= 16 && agentAlpha > 0.3 && !g.preview && this.agentsOn) this.drawCranes(ctx, agentAlpha);
     // ---- 图层（线状） ----
     if (this.layer === 'cong') this.drawCongestion(ctx);
+    if (this.layer === 'walk') this.drawWalkLayer(ctx);
     if (this.layer === 'flow') this.drawDesire(ctx);
     if (this.layer === 'bgt' && CM.BgNet) CM.BgNet.draw(ctx, this, this.layerOpt.bgK);
     if (this.layer === 'cover') this.drawCoverExtras(ctx, ui);
@@ -4066,6 +4067,127 @@
     ctx.setTransform(dpr * M[0] * z / sb, dpr * M[2] * z / sb, dpr * M[1] * z / sb, dpr * M[3] * z / sb,
       dpr * (this.ox + z * (M[0] * c.x0 + M[1] * c.y0)), dpr * (this.oy + z * (M[2] * c.x0 + M[3] * c.y0)));
     ctx.drawImage(c.cv, 0, 0);
+    ctx.restore();
+  };
+  // ---- 步行道路图层（v2.10） ----
+  // 只画模拟里真正能走的街道（城市的步行图：已建成的次干道与支路、有通道的铁路道口、桥梁），
+  // 按走到车站的步行时间着色：选中车站时看走到这座站，否则看走到最近的运营车站。
+  // 15 分钟内走不到任何车站的道路画成灰色；车站周边根本没有可步行道路时，用红圈标出车站并连到最近的可步行道路。
+  // 性能与拥堵图层相同：把几万段街道描进一张与世界坐标对齐的位图，每帧按地图变换贴图。
+  const WALK_COLS = ['#1aa05a', '#7ecb6b', '#d5edb0'], WALK_COLS_AX = ['#2f6fd0', '#7aa6e6', '#c3d8f7'], WALK_FAR = '#9fb0bf', WALK_NONE = '#ff5544';
+  Renderer.WALK_COLS = WALK_COLS;
+  Renderer.prototype.walkTimes = function () {
+    const g = this.game, city = g.city, walk = city.walk, model = g.model;
+    const acc = model && model.net ? model.net.acc : null, C = model && model.net ? model.net.C : null;
+    if (!walk || !walk.start || !acc || !acc.trees || !C || !C.stations) return null;
+    let focus = -1;
+    const ui = CM.ui, sel = ui && ui.selection;
+    if (sel && sel.kind === 'station') {
+      for (let k = 0; k < C.stations.length; k++) if (C.stations[k].id === sel.id) { focus = k; break; }
+      if (focus >= 0 && !acc.trees[focus]) focus = -1;   // 选中的车站没有步行道路：仍显示全网，红圈会标出它
+    }
+    const cached = this._wk;
+    if (cached && cached.walk === walk && cached.acc === acc && cached.focus === focus) return cached;
+    const V = city.V, D = new Float32Array(V).fill(Infinity), use = [];
+    if (focus >= 0) use.push(focus);
+    else for (let k = 0; k < C.stations.length; k++) if ((!C.serviced || C.serviced[k]) && acc.trees[k]) use.push(k);
+    for (const k of use) { const t = acc.trees[k]; for (let q = 0; q < t.verts.length; q++) { const v = t.verts[q], d = t.dist[q]; if (d < D[v]) D[v] = d; } }
+    const cut = [5 * CFG.walk.mPerMin, 10 * CFG.walk.mPerMin, CFG.walk.maxAccessM];
+    const paths = [new Path2D(), new Path2D(), new Path2D(), new Path2D()], halo = new Path2D(), lens = [0, 0, 0, 0];
+    const n = Math.min(walk.start.length - 1, V);
+    for (let u = 0; u < n; u++) {
+      const ax = city.vx[u], ay = city.vy[u];
+      for (let e = walk.start[u]; e < walk.start[u + 1]; e++) {
+        const v = walk.to[e]; if (v < u || v >= V) continue;   // 无向边只画一次
+        const d = Math.min(D[u], D[v]);                        // 这一段路上最靠近车站的一端
+        const b = d <= cut[0] ? 0 : d <= cut[1] ? 1 : d <= cut[2] ? 2 : 3;
+        const p = paths[b], bx = city.vx[v], by = city.vy[v];
+        p.moveTo(ax, ay); p.lineTo(bx, by); halo.moveTo(ax, ay); halo.lineTo(bx, by);
+        lens[b] += walk.len[e];
+      }
+    }
+    this._wk = { walk: walk, acc: acc, focus: focus, D: D, paths: paths, halo: halo, lens: lens, name: focus >= 0 && C.stations[focus] ? C.stations[focus].name : '' };
+    this._wkBmp = null;
+    return this._wk;
+  };
+  Renderer.prototype.walkStats = function () {
+    const w = this.walkTimes(); if (!w) return null;
+    const total = w.lens[0] + w.lens[1] + w.lens[2] + w.lens[3], covered = w.lens[0] + w.lens[1] + w.lens[2];
+    const acc = this.game.model.net.acc; let noRoad = 0;
+    for (let k = 0; k < acc.trees.length; k++) if (!acc.trees[k]) noRoad++;
+    return { total: total, covered: total > 0 ? covered / total : 0, noRoad: noRoad, focus: w.focus, name: w.name };
+  };
+  function strokeWalk(ctx, w, z) {
+    const lw = U.clamp(z * 0.06, 1.5, 5.4) / z, halo = 2.6 / z;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = TH.halo; ctx.lineWidth = lw * 1.5 + halo; ctx.stroke(w.halo);
+    const cols = AX.enabled() ? WALK_COLS_AX : WALK_COLS;
+    for (let k = 0; k < 3; k++) { ctx.strokeStyle = cols[k]; ctx.lineWidth = lw * (k === 0 ? 1.25 : 1); ctx.stroke(w.paths[k]); }
+    // 走不到任何车站的道路：灰色虚线，弱化但看得见（城市继续发展、修站后会接上）
+    ctx.save(); ctx.globalAlpha = 0.8; ctx.strokeStyle = WALK_FAR; ctx.lineWidth = lw * 0.85;
+    ctx.setLineDash([3.4 / z, 2.4 / z]); ctx.stroke(w.paths[3]); ctx.restore();
+  }
+  Renderer.prototype.drawWalkLayer = function (ctx) {
+    const w = this.walkTimes(); if (!w) return;
+    const M = this.M, z = this.z, dpr = this.dpr, city = this.game.city, now = performance.now();
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const s of [[0, 0], [this.w, 0], [0, this.h], [this.w, this.h]]) { const p = this.unproject(s[0], s[1]); x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+    x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(city.W, x1); y1 = Math.min(city.H, y1);
+    if (x1 > x0 && y1 > y0) {
+      let c = this._wkBmp;
+      const fresh = c && c.city === city && c.halo === TH.halo;
+      const inside = fresh && x0 >= c.x0 && y0 >= c.y0 && x1 <= c.x1 && y1 <= c.y1;
+      const zoomed = fresh && Math.abs(z - c.z) > c.z * 0.2;
+      if (!inside || (zoomed && now - c.t > 120) || (c.wk !== w && now - c.t > 400)) {
+        const mx = (x1 - x0) * 0.3, my = (y1 - y0) * 0.3;
+        const bx0 = Math.max(0, x0 - mx), by0 = Math.max(0, y0 - my), bx1 = Math.min(city.W, x1 + mx), by1 = Math.min(city.H, y1 + my);
+        const area = (bx1 - bx0) * (by1 - by0);
+        const sb = Math.min(z * dpr, Math.sqrt(6e6 / area));   // 位图每世界单位的像素数（上限约 600 万像素）
+        const cw = Math.ceil((bx1 - bx0) * sb), ch = Math.ceil((by1 - by0) * sb);
+        const cv = c && c.cv.width === cw && c.cv.height === ch ? c.cv : makeCanvas(cw, ch);
+        const x = cv.getContext('2d');
+        x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, cw, ch);
+        x.setTransform(sb, 0, 0, sb, -bx0 * sb, -by0 * sb);
+        strokeWalk(x, w, z);
+        c = this._wkBmp = { city: city, halo: TH.halo, cv: cv, x0: bx0, y0: by0, x1: bx1, y1: by1, sb: sb, z: z, wk: w, t: now };
+      }
+      ctx.save();
+      ctx.setTransform(dpr * M[0] * z / c.sb, dpr * M[2] * z / c.sb, dpr * M[1] * z / c.sb, dpr * M[3] * z / c.sb,
+        dpr * (this.ox + z * (M[0] * c.x0 + M[1] * c.y0)), dpr * (this.oy + z * (M[2] * c.x0 + M[3] * c.y0)));
+      ctx.drawImage(c.cv, 0, 0);
+      ctx.restore();
+    }
+    this.drawWalkMarks(ctx);
+  };
+  // 没有步行道路的车站：红圈 + 叉，虚线连到最近的一段可步行道路并标出距离
+  Renderer.prototype.drawWalkMarks = function (ctx) {
+    const g = this.game, model = g.model, acc = model && model.net ? model.net.acc : null, C = model && model.net ? model.net.C : null;
+    if (!acc || !acc.trees || !C || !C.stations) return;
+    const v = this.view, zk = U.clamp(this.z / 26, 0.55, 1.2), a0 = this.layerFade == null ? 1 : this.layerFade;
+    ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round'; ctx.globalAlpha = a0;
+    for (let k = 0; k < acc.trees.length && k < C.stations.length; k++) {
+      if (acc.trees[k]) continue;
+      const s = C.stations[k]; if (!s) continue;
+      if (s.x < v.x0 - 1 || s.x > v.x1 + 1 || s.y < v.y0 - 1 || s.y > v.y1 + 1) continue;
+      const p = this.P(s.x, s.y, 0);
+      const h = model.walkRoadHint ? model.walkRoadHint(s.x, s.y) : null;
+      if (h && isFinite(h.d)) {
+        const hp = this.P(h.x, h.y, 0);
+        ctx.strokeStyle = 'rgba(255,85,68,0.9)'; ctx.lineWidth = 1.8; ctx.setLineDash([5, 4]);
+        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(hp.x, hp.y); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = WALK_NONE; ctx.beginPath(); ctx.arc(hp.x, hp.y, 3.4, 0, Math.PI * 2); ctx.fill();
+        if (this.z >= 12) {
+          const text = '最近步行道路 ' + U.fmtKm(h.d), ty = hp.y + 14;
+          ctx.font = '700 11px ' + FONT; ctx.lineWidth = 3.4; ctx.strokeStyle = TH.halo; ctx.strokeText(text, hp.x, ty);
+          ctx.fillStyle = '#ff9d8f'; ctx.fillText(text, hp.x, ty);
+        }
+      }
+      const r = 9 * zk;
+      ctx.strokeStyle = WALK_NONE; ctx.lineWidth = 2.2;
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(p.x - r * 0.45, p.y - r * 0.45); ctx.lineTo(p.x + r * 0.45, p.y + r * 0.45);
+      ctx.moveTo(p.x + r * 0.45, p.y - r * 0.45); ctx.lineTo(p.x - r * 0.45, p.y + r * 0.45); ctx.stroke();
+    }
     ctx.restore();
   };
   // 出行方向图层：按片区（城市区域；老城区再分为越秀、东山、荔湾）汇总当前时段的出行，每个片区画出它最主要的出行方向

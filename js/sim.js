@@ -1294,6 +1294,38 @@
       if(best>limit)continue;const path=[];let v=end,guard=0;while(v>=0&&guard++<city.V){path.push([city.vx[v],city.vy[v]]);v=tree.pred.get(v)??-1;}path.reverse();path.unshift([from.x,from.y]);path.push([s.x,s.y]);links.push({station:s.id,metres:best,path});
     }return links;
   };
+  // 步行道路诊断（v2.10）：车站周边没有步行道路时，找出最近的一段可以走的街道、方向与原因，
+  // 让玩家知道“哪里能走、还差多远”，而不是只看到一句“暂无覆盖”。结果按步行图缓存，道路更新后自动失效。
+  Model.prototype.walkRoadHint = function (x, y) {
+    const city = this.city, walk = city.walk, scale = CFG.CELL_M;
+    if (!walk || !walk.start || walk.start.length < 2) return null;
+    if (this._whWalk !== walk) { this._whWalk = walk; this._whMap = new Map(); }
+    const hit = this._whMap.get(x + ':' + y);
+    if (hit !== undefined) return hit;
+    const n = walk.start.length - 1;
+    let best = Infinity, bx = 0, by = 0;
+    for (let u = 0; u < n; u++) {
+      const ax = city.vx[u], ay = city.vy[u];
+      for (let e = walk.start[u]; e < walk.start[u + 1]; e++) {
+        const v = walk.to[e]; if (v < u) continue;   // 无向边只算一次
+        const cx = city.vx[v], cy = city.vy[v], dx = cx - ax, dy = cy - ay, L2 = dx * dx + dy * dy;
+        const t = L2 > 0 ? U.clamp(((x - ax) * dx + (y - ay) * dy) / L2, 0, 1) : 0;
+        const px = ax + dx * t, py = ay + dy * t, d = Math.hypot(x - px, y - py);
+        if (d < best) { best = d; bx = px; by = py; }
+      }
+    }
+    const c = city.cellAt(x, y), pop = c >= 0 ? city.pop[c] : 0, jobs = c >= 0 ? city.jobs[c] : 0;
+    const street = c >= 0 && city.street && city.street[c] === 1;
+    const out = { d: best * scale, x: bx, y: by, dx: bx - x, dy: by - y, pop: pop, jobs: jobs, street: street, water: false, reason: 'entry' };
+    if (best < Infinity) {
+      for (let q = 0.2; q < 1 && !out.water; q += 0.2) if (city.waterDistAt(x + (bx - x) * q, y + (by - y) * q) < 0) out.water = true;
+      // 所在街区还停在“有楼、没有街道”的阶段：支路与次干道随人口与岗位增加才生成
+      out.reason = (!street && pop + jobs < 160) ? 'fabric' : 'entry';
+    } else out.reason = 'fabric';
+    if (this._whMap.size >= 256) this._whMap.delete(this._whMap.keys().next().value);
+    this._whMap.set(x + ':' + y, out);
+    return out;
+  };
   // 小区与重要设施节点的接驳表：可步行到达的车站（最多 ACC_MAX 个，v2.9 由 4 个增至 6 个）、覆盖比例与平均步行时间
   const ACC_MAX = 6;   // 接驳组合缓存按每端 3 位编码（a << 3 | b），不能超过 8
   // 分步执行（v2.5 性能）：月结时每处理一批车站让出主线程；结果与一次算完相同

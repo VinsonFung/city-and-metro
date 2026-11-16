@@ -25,7 +25,7 @@
   })();
   CM.fillRange = fillRange;   // 只改了 min / max 时手动刷新
 
-  // 分析图层（v1.9 起分为三组）：城市（人口、职住、设施出行需求、发展）· 交通（拥堵、出行方向、通勤时间、乘地铁比例）· 地铁（覆盖、车站客流、服务缺口、商业开发）
+  // 分析图层（v1.9 起分为三组）：城市（人口、职住、设施出行需求、发展）· 交通（拥堵、出行方向、通勤时间、乘地铁比例）· 地铁（步行道路、覆盖、车站客流、服务缺口、商业开发）
   const LAYER_GROUPS = [['city', '城市'], ['traffic', '交通'], ['metro', '地铁']];
   const LAYERS = [
     { id: 'pop', metric: true, group: 'city', name: '人口密度', icon: 'lyPop', color: '#e9641f', desc: '各街区常住人口' },
@@ -35,6 +35,7 @@
     { id: 'flow', group: 'traffic', name: '出行与通勤', icon: 'lyFlow', color: '#2557d6', desc: '箭头显示主要出行方向，底色显示各片区的通勤时间' },
     { id: 'mshare', group: 'traffic', name: '乘地铁比例', icon: 'metro', color: '#0f7fb0', desc: '各片区居民的出行有多少乘地铁' },
     { id: 'bgt', group: 'traffic', name: '背景交通', icon: 'train', color: '#8a6a3c', desc: '普通铁路与渡轮的主要线路、客流和对地铁的竞争' },
+    { id: 'walk', group: 'metro', name: '步行道路', icon: 'lyWalk', color: '#1f7a3f', desc: '可以步行通过的道路，以及走得到、走不到车站的地方' },
     { id: 'cover', group: 'metro', name: '地铁覆盖', icon: 'lyCover', color: '#14a252', desc: '步行可达车站的范围与阻隔', metric: true },
     { id: 'station', group: 'metro', name: '车站客流', icon: 'lyStation', color: '#109e90', desc: '客流与运力负荷' },
     { id: 'gap', group: 'metro', name: '地铁服务缺口', icon: 'lyGap', color: '#b91c1c', desc: '出行需求大但地铁服务不足的地方' },
@@ -1744,6 +1745,23 @@
         grad(['#40aa78', '#f5c850', '#cd3232'], sc.lo + ' 分钟以内', sc.hi + ' 分钟以上'); note += ' 底色为工作日早高峰门到门通勤时间。';
         break;
       }
+      case 'walk': {
+        // v2.10：步行道路图层——按走到车站的步行时间着色，灰色是走不到车站的道路；没有步行道路的车站单独标出
+        const st = R.walkStats ? R.walkStats() : null;
+        const WC = R.WALK_COLS || ['#1aa05a', '#7ecb6b', '#d5edb0'];
+        li(WC[0], '步行 5 分钟内到车站', 'line');
+        li(WC[1], '步行 5–10 分钟', 'line');
+        li(WC[2], '步行 10–15 分钟', 'line');
+        li('#9fb0bf', '可以走，但 15 分钟内走不到车站', 'line');
+        li('#ff5544', '车站周边没有可步行道路（虚线指向最近的道路）', 'ring');
+        if (st && st.total > 0) box.appendChild(h('div', { class: 'lg-sum' },
+          h('span', null, '步行道路 ' + U.fmtKm(st.total) + '，其中 ' + U.fmtPct(st.covered, 0) + ' 在车站 15 分钟步行范围内'),
+          st.noRoad ? h('small', null, st.noRoad + ' 座车站周边没有可步行道路') : null));
+        box.appendChild(h('div', { class: 'note', style: { marginTop: '4px' } },
+          st && st.focus >= 0 ? ('当前显示走到「' + st.name + '」的时间。') : '选中车站后，改为显示走到这座车站的时间。'));
+        note = '按实际可以走的街道显示：支路与次干道随街区开发自动出现（每格人口与岗位合计超过 160 才生成街道），快速路、河流与没有道口的地面铁路不能步行通过。';
+        break;
+      }
       case 'cover': opts('cover', [['time', '步行时间'], ['station', '所属车站']]);
         if (R.layerOpt.cover === 'station') { li('rgba(20,162,82,0.5)', '每个颜色块为步行最近的车站（细线为分界）'); li('#d73027', '人口密集但无地铁'); }
         else { li('#1b7837', '步行 5 分钟内'); li('#5aae61', '步行 10 分钟内'); li('#acdc8c', '步行 15 分钟内'); li('#d73027', '人口密集但无地铁'); }
@@ -2082,6 +2100,7 @@
   // ======================== 选择 ========================
   UI.prototype.select = function (sel, noPage) {
     this.selection = sel;
+    if (this.layer === 'walk' && this.R) this.renderDock();   // 步行道路图例：选中车站后显示“走到这座车站”的时间说明
     if (CM.Quick) CM.Quick.show(sel);   // 地图上的快捷操作条（选择工具下的车站、线路）
     if (!sel) { this.highlightLine = null; if (!noPage && this.stack.length && ['station', 'line', 'road', 'zone', 'facility'].indexOf(this.stack[this.stack.length - 1].kind) >= 0) this.back(); return; }
     if (noPage) return;

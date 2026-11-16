@@ -551,7 +551,7 @@
   };
   // 步行覆盖（沿实际道路）；potential：未通车站接入线路后的潜在覆盖
   UI.prototype.coverBlock = function (s, k, potential) {
-    const g = this.g(), acc = g.model.net.acc, tree = acc.trees[k];
+    const g = this.g(), acc = g.model.net.acc, tree = acc.trees[k], self = this;
     if (!tree) return this.noWalkBlock(s);
     const vm = new Map(); for (let q = 0; q < tree.verts.length; q++) vm.set(tree.verts[q], tree.dist[q]);
     const city = g.city, VW = city.VW, ci = Math.floor(s.x), cj = Math.floor(s.y);
@@ -564,7 +564,9 @@
       for (let q = 0; q < 3; q++) if (m <= (q + 1) * 5 * CFG.walk.mPerMin) { sums[q] += city.pop[c]; jobs[q] += city.jobs[c]; }
     }
     return h('div', null, this.kv([['步行 5 分钟内', U.fmtPeople(sums[0]) + ' 人 · ' + U.fmtPeople(jobs[0]) + ' 岗位'], ['步行 10 分钟内', U.fmtPeople(sums[1]) + ' 人 · ' + U.fmtPeople(jobs[1]) + ' 岗位'], ['步行 15 分钟内', U.fmtPeople(sums[2]) + ' 人 · ' + U.fmtPeople(jobs[2]) + ' 岗位']]),
-      h('div', { class: 'note', style: { marginTop: '6px' } }, (potential ? '预览：通车前不计入覆盖。' : '') + '按实际道路步行计算，河流与地面铁路会阻隔。'));
+      h('div', { class: 'note', style: { marginTop: '6px' } }, (potential ? '预览：通车前不计入覆盖。' : '') + '按实际道路步行计算，河流与地面铁路会阻隔。'),
+      h('div', { class: 'row', style: { marginTop: '6px' } },
+        h('button', { class: 'btn sm ghost', onclick: function () { self.setLayer('walk'); } }, ic('lyWalk', 14), '在步行道路图层中查看')));
   };
   // 车站周边没有可步行的道路（v3.1 玩家建议：以前只有一句「暂无覆盖」）：说明原因（附近只有快速路，或还没有街道），
   // 指出最近可步行道路的方向、距离与路名，可在地图上定位它，或直接移动车站
@@ -581,6 +583,7 @@
   UI.prototype.noWalkActions = function (s, nw) {
     const self = this, station = this.g().net.stations[s.id];
     return h('div', { class: 'row walk-actions' },
+      h('button', { class: 'btn sm ghost', 'data-walk-action': 'layer', onclick: function () { self.setLayer('walk'); } }, ic('lyWalk', 14), '在步行道路图层中查看'),
       nw !== null ? h('button', { class: 'btn sm', 'data-walk-action': 'locate', onclick: function () { self.locateNearestWalk(s, nw); } }, CM.icon('pin', 14), '定位最近道路') : null,
       station && !station.tk ? h('button', { class: 'btn sm ghost', 'data-walk-action': 'move', onclick: function () { self.tools.setTool('edit'); self.select({ kind: 'station', id: s.id }); } }, '移动车站') : null);
   };
@@ -2533,7 +2536,7 @@
     el.appendChild(h('h3', null, '设施、出行目的与工作日 / 周末'));
     el.appendChild(h('div', { class: 'note' }, '独立车站最小间距为 ' + CFG.metro.minSpacingM + ' m；不同线路可通过道路步行换乘，实际步行路径需在 ' + CFG.walk.transferMaxM + ' m 内，并受水域、铁路等阻隔影响。绘线时淡虚线预览可用换乘，景点附近的地下站可建范围也会标出，最终仍需通过建设检查。'));
     el.appendChild(h('div', { class: 'note' }, '居民出行分为通勤、上学、购物、医疗、旅游休闲与交通枢纽接驳六类。火车站、机场、大学、医院、商圈、景点、公园、体育场馆等重要设施按真实位置与年代单独计算，点击地图上的设施（或在「设施出行需求」图层中点击圆点）可查看到访量、出行目的与附近车站；普通设施按片区汇总。工作日通勤、上学集中在早晚高峰，周末购物与休闲更多。火车站与机场的旅客量是给定的，修地铁只改变他们的接驳方式。'));
-    el.appendChild(h('div', { class: 'note', style: { marginTop: '6px' } }, '图层分三组：城市（人口密度、住宅与就业、设施出行需求）、交通（道路拥堵、出行方向）、地铁（地铁覆盖、车站客流、地铁服务缺口）。「地铁服务缺口」显示出行多但步行 15 分钟内没有车站、或已有地铁但高峰超载的地方。地面铁路在没有道口、地道或天桥的地方阻隔步行；地铁地面线不能与铁路平交，地下或高架跨越铁路会增加费用。'));
+    el.appendChild(h('div', { class: 'note', style: { marginTop: '6px' } }, '图层分三组：城市（人口密度、住宅与就业、设施出行需求）、交通（道路拥堵、出行方向、乘地铁比例）、地铁（步行道路、地铁覆盖、车站客流、地铁服务缺口、商业开发）。「步行道路」显示实际可以走的街道、走到车站的步行时间，以及走不到车站的地方；「地铁服务缺口」显示出行多但步行 15 分钟内没有车站、或已有地铁但高峰超载的地方。地面铁路在没有道口、地道或天桥的地方阻隔步行；地铁地面线不能与铁路平交，地下或高架跨越铁路会增加费用。'));
     el.appendChild(h('h3', null, '地图外的机场与风景区里的景点'));
     el.appendChild(h('div', { class: 'note' }, '部分机场在地图之外：地图边缘外侧有它的提示卡（飞机徽标指向机场方向，并写明距离），边缘线上是虚线圆圈的接驳口。用「绘线」或「建站」把线路修到接驳口附近（在地图外侧或点提示卡也可以），落点会自动吸附到边缘线上；线路开通后接驳口变成线路颜色的双向箭头，机场的接驳出行就可以全部乘地铁。修往接驳口的线路可以穿过尚未开放的区域。'));
     el.appendChild(h('div', { class: 'note', style: { marginTop: '6px' } }, '山地风景区一般不能设站，但运营中的景点（如杭州灵隐寺、动物园）约 600 m 内可以建地下「景区站」。选中建站或绘线工具时，这些景点周围会用淡绿色标出可建范围（只含风景区内、不在水面上的部分）。在风景区内建站或铺设轨道需另付风景区环境保护费（车站按造价的一半、轨道按单价的 35%）。'));

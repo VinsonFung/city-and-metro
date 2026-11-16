@@ -18701,3 +18701,30 @@ Object.assign(window.CM.I18N_EN_MAP.tk, {
   "芝南": "South Shiba",
   "芝北": "North Shiba"
 });
+
+// 步行道路图层（v2.7.3 分支合入）。
+Object.assign(window.CM.I18N_EN, {
+  "存档来自 v{v0}。已按新的枢纽接驳和换乘规则重算客流。原有线网、资金、债务和已结算历史保留，升级当月保护满意度与任务。": "This save is from v{v0}. Ridership has been recalculated using the new hub access and interchange rules. Your network, funds, debt and settled history are preserved. Satisfaction and tasks are protected during the upgrade month.",
+  "步行道路": "Walking Roads",
+  "可以步行通过的道路，以及走得到、走不到车站的地方": "Roads you can actually walk on, and where a station is reachable on foot — or not",
+  "车站周边没有可步行道路": "No walkable road nearby",
+  "最近的可步行道路": "Nearest walkable road",
+  "东南": "Southeast",
+  "西南": "Southwest",
+  "西北": "Northwest",
+  "东北": "Northeast",
+  "{d}（{dir}方向）": "{d} to the {dir}",
+  "在步行道路图层中查看": "Show in the Walking Roads layer",
+  "步行 5 分钟内到车站": "Within a 5-min walk of a station",
+  "步行 5–10 分钟": "5–10 min walk",
+  "步行 10–15 分钟": "10–15 min walk",
+  "可以走，但 15 分钟内走不到车站": "Walkable, but no station within 15 min",
+  "车站周边没有可步行道路（虚线指向最近的道路）": "No walkable road at the station (the dashed line points to the nearest one)",
+  "步行道路 {km}，其中 {pct} 在车站 15 分钟步行范围内": "{km} of walkable roads, {pct} of it within a 15-min walk of a station",
+  "{n} 座车站周边没有可步行道路": "{n} stations have no walkable road nearby",
+  "按实际可以走的街道显示：支路与次干道随街区开发自动出现（每格人口与岗位合计超过 160 才生成街道），快速路、河流与没有道口的地面铁路不能步行通过。": "Shows only streets you can actually walk: side and secondary roads appear automatically as blocks develop (once residents and jobs in a cell total more than 160), while expressways, rivers and surface railways without crossings cannot be walked.",
+  "当前显示走到「{name}」的时间。": "Showing walking time to “{name}”.",
+  "选中车站后，改为显示走到这座车站的时间。": "Select a station to show walking time to it instead.",
+  "最近步行道路 {d}": "Nearest walkable road {d}",
+  "图层分三组：城市（人口密度、住宅与就业、设施出行需求）、交通（道路拥堵、出行方向、乘地铁比例）、地铁（步行道路、地铁覆盖、车站客流、地铁服务缺口、商业开发）。「步行道路」显示实际可以走的街道、走到车站的步行时间，以及走不到车站的地方；「地铁服务缺口」显示出行多但步行 15 分钟内没有车站、或已有地铁但高峰超载的地方。地面铁路在没有道口、地道或天桥的地方阻隔步行；地铁地面线不能与铁路平交，地下或高架跨越铁路会增加费用。": "Layers come in three groups: City (Population Density, Homes & Jobs, Facility Demand), Traffic (Road Congestion, Travel & Commute, Metro Share) and Metro (Walking Roads, Metro Coverage, Station Ridership, Metro Service Gap, Commercial Development). Walking Roads shows the streets you can actually walk, the walking time to a station, and the places with no walkable station; Metro Service Gap highlights places with heavy travel but no station within a 15-minute walk, or with overcrowded peak service. Surface railways block walking where there is no level crossing, underpass or bridge; metro surface lines cannot cross railways at grade, and crossing over or under costs more."
+});

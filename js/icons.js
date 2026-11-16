@@ -91,6 +91,7 @@
     lyCong: F('<path fill-rule="evenodd" d="M10.4 2.4h3.2a3 3 0 0 1 3 3v13.2a3 3 0 0 1-3 3h-3.2a3 3 0 0 1-3-3V5.4a3 3 0 0 1 3-3zM12 4.7a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0 5.3a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0 5.3a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/><path d="M5.6 6.2l1.8 1.1v2.4L5.6 8.6zM18.4 6.2l-1.8 1.1v2.4l1.8-1.1z"/>'),
     lyFlow: S('<g stroke-width="2.4"><path d="M3.5 8h14"/><path d="M14 4.2L17.8 8 14 11.8"/><path d="M20.5 16h-14"/><path d="M10 12.2L6.2 16l3.8 3.8"/></g>'),
     lyCover: S('<g stroke-width="2.1"><circle cx="12" cy="12" r="2.6" fill="currentColor"/><circle cx="12" cy="12" r="6.2"/><circle cx="12" cy="12" r="9.6" stroke-dasharray="2.4 2.6"/></g>'),
+    lyWalk: S('<g stroke-width="2" stroke-linecap="round"><circle cx="13.6" cy="5.4" r="2.4" fill="currentColor"/><path d="M13.6 9.2l-1.5 4.3 3.7 2 1.3 5.1"/><path d="M12.1 13.5l-3.7 1.7-2 5.4"/><path d="M3 4.4h3.6M2 9.2h3"/></g>'),
     lyStation: S('<g stroke-width="2.2"><circle cx="12" cy="12" r="4.2"/><path d="M12 1.8v4.4M9.4 4.2L12 1.8l2.6 2.4"/><path d="M12 17.8v4.4M9.4 19.8L12 22.2l2.6-2.4"/><path d="M2.2 12h3.6M18.2 12h3.6"/></g>'),
     star: S('<path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/>'),
     starOn: F('<path d="M12 2.9l2.8 5.6 6.2.9-4.5 4.4 1.1 6.2L12 17.1 6.4 20l1.1-6.2L3 9.4l6.2-.9z"/>'),

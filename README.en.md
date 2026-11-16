@@ -8,7 +8,9 @@ City & Metro is a single-player metro planning and city management game for your
 
 **[Play online](https://city-and-metro.pages.dev)** · [Source repository](https://github.com/VinsonFung/city-and-metro) · [License](./LICENSE.txt)
 
-The current web edition is **v2.9.4**.
+The current web edition is **v2.9.5**.
+
+v2.9.5 adds a Walking Roads analysis layer: it colours every street you can actually walk on by the walking time to the nearest open station (5, 10 or 15 minutes), and dashes the streets that are walkable but lead to no station. Selecting a station switches it to the walking time to that station. A station with no walking coverage now states how far the nearest walkable road is, which way it lies and its name, and whether the block has no streets yet, only has an expressway, or lies beyond the ~430 m automatic entrance connection range. This changes only how the game is observed and explained, not how walking access, coverage or ridership are computed.
 
 v2.9 adds Sydney (2000) with three local train models and 13 historical tasks. Suburban rail and ferries follow their historical opening and closure dates. Build across Sydney Harbour, serve the Olympics, and reach development areas early. Kingsford Smith Airport is on the map, and Western Sydney International Airport opens its western gateway in December 2026.
 
