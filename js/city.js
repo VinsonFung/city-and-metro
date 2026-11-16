@@ -513,8 +513,16 @@
     for (let y = 0; y < BH; y++) for (let x = 0; x < BW; x++) { const i = y * BW + x; if (bm[i] === 3 && !wm[((y >> 1) * FW) + (x >> 1)]) bm[i] = 0; }
     const free = function (v) { return v === 0; };
     for (const r of list) for (const k of Geo.query(Geo.streetBk, r._f.bbox[0], r._f.bbox[1], r._f.bbox[2], r._f.bbox[3])) Geo.stroke(bm, BW, BH, BS, Geo.streets[k].p, 0.035, 1, free);
-    // 道路格网的跨水标记
-    for (let e = 0; e < this.eBlock.length; e++) this.eBlock[e] = this.edgeBlock(e);
+    // 道路格网的跨水标记：只重算本次填海范围附近的边（v2.9 性能）。跨水标记只取决于边两端附近的水面，
+    // 填海只改变范围内的水面，范围外 3 格以上的边结果不变；以前每次填海都重算全图十几万条边
+    const bx = [Infinity, Infinity, -Infinity, -Infinity];
+    for (const r of list) { const b = r._f && r._f.bbox; if (!b) { bx[0] = -Infinity; bx[1] = -Infinity; bx[2] = Infinity; bx[3] = Infinity; break; } bx[0] = Math.min(bx[0], b[0]); bx[1] = Math.min(bx[1], b[1]); bx[2] = Math.max(bx[2], b[2]); bx[3] = Math.max(bx[3], b[3]); }
+    const VW = this.VW, x0 = bx[0] - 3, y0 = bx[1] - 3, x1 = bx[2] + 3, y1 = bx[3] + 3;
+    for (let e = 0; e < this.eBlock.length; e++) {
+      const uv = this.edgeVerts(e), ax = uv[0] % VW, ay = (uv[0] / VW) | 0;
+      if (ax < x0 || ax > x1 || ay < y0 || ay > y1) continue;
+      this.eBlock[e] = this.edgeBlock(e);
+    }
     // 新土地可能把隔开的片区连起来（v2.2 可建设范围按格计算）：范围有变化的格重画
     const prevLock = this._lkPrevMask;
     if (prevLock) { const now = this.lockState().mask; for (let c = 0; c < N; c++) if (prevLock[c] !== now[c]) this.dirty.add(c); }
@@ -1716,15 +1724,18 @@
       const lm = D.landmarks[k], c = self.cellAt(lm.x, lm.y);
       return fill && c >= 0 && fill[c] && lm.year <= fy ? 1 : 0;
     });
+    // sited：场地内至少有一格在存档里是地标用地（与相邻地标共用的格也算，如星海音乐厅与广东美术馆共用一格，
+    // 共用格的编号归表中靠后的地标，靠前的一个不能因此被当成「已迁址」熄灭）
+    const sited = new Uint8Array(D.landmarks.length);
     for (let k = 0; k < D.landmarks.length; k++) {
       if (!on[k]) continue;
       this.landmarkOn[k] = 1;
-      for (const c of this.landmarkCells(D.landmarks[k])) if (this.lu[c] === LU.LANDMARK || (D.landmarks[k].kind === 'campus' && this.lu[c] !== LU.WATER)) this.protectedId[c] = k + 1;
+      for (const c of this.landmarkCells(D.landmarks[k])) if (this.lu[c] === LU.LANDMARK || (D.landmarks[k].kind === 'campus' && this.lu[c] !== LU.WATER)) { this.protectedId[c] = k + 1; sited[k] = 1; }
     }
     // v2.3 位置校正后，旧存档里地标原址留下的场地格不再属于任何地标：恢复为规划用地，之后照常开发；
     // 地标新址的格在下一次月度更新时按年份启用并受保护
     for (let c = 0; c < N; c++) if (this.lu[c] === LU.LANDMARK && !this.protectedId[c]) this.lu[c] = this.plan[c] === LU.LANDMARK ? LU.RES : this.plan[c];
-    for (let k = 0; k < D.landmarks.length; k++) if (this.landmarkOn[k] && !D.landmarks[k].shore && !this.landmarkCells(D.landmarks[k]).some((c) => this.protectedId[c] === k + 1)) this.landmarkOn[k] = 0;
+    for (let k = 0; k < D.landmarks.length; k++) if (this.landmarkOn[k] && !D.landmarks[k].shore && !sited[k]) this.landmarkOn[k] = 0;
     this.applyReclaim(year, true);   // 历史海岸线恢复到存档年份（用地已从存档恢复）
     this.applyReplan(year, true);
     // 同范围地形修订：填海 / 机场边界校正及武汉河渠异常宽度修复，按当前地理重新核验旧档用地。

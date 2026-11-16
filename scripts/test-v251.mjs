@@ -10,7 +10,7 @@ for(const[,src]of(await readFile(new URL('index.html',root),'utf8')).matchAll(/<
 const C=c.CM,M=C.Metro,copy=x=>JSON.parse(JSON.stringify(x));
 C.UI=function(){};for(const src of ['settings','corp','fleet','screens'])await load('js/'+src+'.js');
 const F=C.Fleet;
-assert.equal(C.CFG.GAME_VERSION,'2.7.1');assert.equal(C.CFG.RULES_REVISION,11);
+assert.equal(C.CFG.GAME_VERSION,'2.7.2');assert.equal(C.CFG.RULES_REVISION,12);
 assert.equal(C.MAP_ORDER.length,12);assert.equal(F.MODELS.length,56);assert.ok(C.MAPS.ld&&C.Traits);
 memory.set('cm1.newsSeen','2.7.0');assert.equal(C.UI.prototype.newsUnread(),false);
 memory.set('cm1.newsSeen','2.4.0');assert.equal(C.UI.prototype.newsUnread(),true);

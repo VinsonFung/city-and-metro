@@ -5,7 +5,7 @@ const load=async f=>vm.runInContext(await fs.readFile(new URL(f,root),'utf8'),c,
 for(const[,f]of(await fs.readFile(new URL('index.html',root),'utf8')).matchAll(/<script src="([^"]+)"/g)){await load(f);if(f==='js/save.js')break;}
 const C=c.CM,M=C.Metro,copy=x=>JSON.parse(JSON.stringify(x)),sum=a=>a.reduce((s,n)=>s+n,0);C.UI=function(){};
 for(const f of ['settings','icons','pages','corp','fleet','opsapp','render','sites','scenery'])await load('js/'+f+'.js');
-assert.equal(C.CFG.GAME_VERSION,'2.7.1');assert.equal(C.CFG.RULES_REVISION,11);assert.equal(C.MAP_ORDER.length,12);assert.equal(C.Fleet.MODELS.length,56);assert.ok(!C.MAPS.sg&&!C.MAPS.ny&&!C.Achievements&&!C.Desktop);
+assert.equal(C.CFG.GAME_VERSION,'2.7.2');assert.equal(C.CFG.RULES_REVISION,12);assert.equal(C.MAP_ORDER.length,12);assert.equal(C.Fleet.MODELS.length,56);assert.ok(!C.MAPS.sg&&!C.MAPS.ny&&!C.Achievements&&!C.Desktop);
 C.useMap('tutorial');const g=C.Game.create({mode:'free',tutorial:true,seed:20000101}),F=C.Fleet;F.ensure(g);let fixture;
 for(let y=5;y<g.city.H-5&&!fixture;y++)for(let x=5;x<g.city.W-22&&!fixture;x++){
  if([0,4,8,12,16].some(d=>!M.checkSite(g.city,x+d,y,'underground').ok))continue;
@@ -31,11 +31,52 @@ const express=F.saveService(g,lid,{name:'Express',skip:ids.slice(1,-1)});assert.
 const pred=F.plan(g,{C:M.compile(M.clone(g.net),g.city)});assert.equal(pred[0].avail[0],0);assert.ok(pred[1].avail[0]>0);g.model.solveNow(3);assert.ok(g.model.daily.metro>0);
 console.log('PASS no-train and per-period shutdown, restored service, zero residual demand, express-only prediction and load diagnostics');
 
+// Use the real tutorial rail terminal and a network with three different interchange pairs.
+{
+ const net=M.empty(),type='underground',add=(x,y)=>M.addStation(net,x,y,{size:'M',type},g.city);
+ const terminal=C.Fac.byId('qw_rail'),hub=add(terminal.x,terminal.y),exchange=add(terminal.x,terminal.y+6);
+ const south=add(terminal.x,terminal.y+12),east=add(terminal.x+6,terminal.y+6),west=add(terminal.x-6,terminal.y+6);
+ const a=M.newLine(net),b=M.newLine(net),c=M.newLine(net),d=M.newLine(net);
+ M.addSegment(net,a,hub,exchange,[],type);
+ M.addSegment(net,b,exchange,south,[],type);
+ M.addSegment(net,c,exchange,east,[],type);
+ M.addSegment(net,d,exchange,west,[],'elevated');
+ net.stations[exchange].lv={[d]:'elevated'};
+ net.stations[west].type='elevated';
+ M.normalizeLevels(net);
+ const compiled=M.compile(net,g.city),i=compiled.sIndex.get(exchange);
+ const same=M.xferKind(compiled,i,a,b),cross=M.xferKind(compiled,i,a,c),level=M.xferKind(compiled,i,a,d);
+ assert.equal(same.kind,'same');assert.equal(cross.kind,'cross');assert.equal(level.kind,'level');
+ assert.ok(same.min<cross.min&&cross.min<level.min);
+ const model=new C.Model(g.city);model.setYear(2000);model.setNetwork(compiled);model.syncSolve=true;
+ const measure=()=>{
+   const period=model.makePer(model.net);
+   period.freq.fill(12);period.freqDir.fill(12);
+   const buf={};
+   for(const _ of model.iterate(model.net,period,0,{noSmooth:true,buf})) {}
+   const k=model.fn.ids.indexOf(terminal.id);
+   return {metro:period.fInM[k]+period.fOutM[k],skim:buf.skim};
+ };
+ const enabled=measure(),choice=C.CFG.choice,bias=choice.hubAsc,feed=choice.hubFeed;
+ let disabled;
+ try { choice.hubAsc=0;choice.hubFeed=null;disabled=measure(); }
+ finally { choice.hubAsc=bias;choice.hubFeed=feed; }
+ assert.ok(enabled.metro>disabled.metro,'The rail terminal should attract more riders with hub access enabled');
+ assert.ok(model.net.acc.zFeedS.some((s,z)=>s>=0&&model.net.acc.zCov[z]<1));
+ assert.ok(model.net.exits[i]>=compiled.stations.length);
+ const n=model.net.N,from=compiled.sIndex.get(hub);
+ for(const id of [exchange,south,east,west]) {
+   assert.ok(enabled.skim.km[from*n+compiled.sIndex.get(id)]>0);
+ }
+}
+console.log('PASS tutorial rail hub ridership, all three interchange types and reachable exit paths');
+
 // Old-rule progress is backed up byte-for-byte, without changing assets or past accounts.
-const payload=copy(g.serialize());payload.rulesRevision=10;const body=JSON.stringify(payload),raw=JSON.stringify({format:C.CFG.SAVE_FORMAT,version:2,gameVersion:'2.7.0',savedAt:Date.now(),body,checksum:C.U.fnv(body)}),imp=await C.Save.importText(raw),old=await C.Save.load(imp.slotId);
+const payload=copy(g.serialize());payload.rulesRevision=11;payload.traffic.v=4;
+const body=JSON.stringify(payload),raw=JSON.stringify({format:C.CFG.SAVE_FORMAT,version:2,gameVersion:'2.7.1',savedAt:Date.now(),body,checksum:C.U.fnv(body)}),imp=await C.Save.importText(raw),old=await C.Save.load(imp.slotId);
 assert.ok(old.__backupSlot);assert.equal(JSON.parse(memory.get(C.Save.slotInfo(old.__backupSlot).key)).body,body);
-const restored=C.Game.restore(copy(old));assert.equal(restored.econ.funds,payload.econ.funds);assert.equal(JSON.stringify(restored.net),JSON.stringify(payload.net));assert.equal(JSON.stringify(restored.econ.ledger),JSON.stringify(payload.econ.ledger));
-console.log('PASS exact v2.7 rules-10 backup and preserved network, funds and historical ledger');
+const restored=C.Game.restore(copy(old));assert.equal(restored.econ.funds,payload.econ.funds);assert.equal(JSON.stringify(restored.net),JSON.stringify(payload.net));assert.equal(JSON.stringify(restored.econ.ledger),JSON.stringify(payload.econ.ledger));assert.equal(restored.traffic.v,5);
+console.log('PASS exact v2.7.1 backup, traffic rebuild and preserved network, funds and historical ledger');
 
 const byId=C.Fac.byId,facIndex=g.model.facIndex,facStats=g.model.facStats,ready=g.model.trafficReady,verified=g.model.trafficVerified,clock={...g.clock},fare=g.econ.fare;
 try{

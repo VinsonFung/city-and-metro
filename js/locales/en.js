@@ -10843,3 +10843,18 @@ Object.assign(window.CM.I18N_EN, {
   "{v0} 将于 {v1} 年 {v2} 月启用，启用后开始统计": "{v0} opens in {v1}-{v2}; it is measured once it opens",
   "{v0} {v1} 年 {v2} 月启用，运营结果要启用后才能统计，截止时间放到 {v3} 年 {v4} 月": "{v0} opens in {v1}-{v2}. Operating results can only be measured after that, so the deadline moves to {v3}-{v4}"
 });
+
+Object.assign(window.CM.I18N_EN, {
+  "这个接驳口还没开放，开放后建在接驳口上的车站才能接通。": "This connection point has not opened yet. Once it opens, a station built on it will connect.",
+  "车站周围没有能走进来的道路（四周是快速路、水面或没有街道的地块），乘客到不了。把车站挪到路边，或在附近另设车站。": "No walkable road leads into this station (it is surrounded by expressways, water or blocks without streets), so passengers cannot reach it. Move the station next to a road or build another one nearby.",
+  "附近的乘客都有更近、更方便的车站，这座站暂时没人进出。": "Nearby passengers all have a closer, more convenient station, so nobody uses this one for now.",
+  "步行 15 分钟内几乎没有居民和岗位（周边还没发展起来或尚未开放），暂时没有乘客。": "Almost no residents or jobs lie within a 15-minute walk (the area has not developed or opened yet), so there are no passengers for now.",
+  "能走到这座站的人很少乘地铁：他们要去的地方线网还到不了，或者绕行太远、不如打车。": "Few people within walking distance use the metro: the network does not reach where they are going yet, or the detour is too long compared with a taxi.",
+  "同台换乘": "Cross-platform interchange",
+  "十字节点换乘": "Cross-shaped node interchange",
+  "斜交节点换乘": "Angled node interchange",
+  "两线走向相近、站台同层为同台换乘，换乘最快；交叉为节点换乘，要上下楼梯；站台不在同一层（高架、地面与地下）为天地换乘，最慢。": "Lines running side by side on the same level give a cross-platform interchange, the fastest; crossing lines give a node interchange with stairs; platforms on different levels (elevated, surface and underground) give a split-level interchange, the slowest.",
+  "这个口岸尚未接通。请在接驳口标记约 250 米内建站，接入运营线路并确认建设。": "This crossing is not connected yet. Build a station within about 250 m of the marker, connect it to a line and confirm construction.",
+  "本站所有交路均停运。恢复列车班次后才能进出站。": "No trains serve this station. Restore scheduled service to open it to passengers.",
+  "存档来自 v{v0}。已按新的枢纽接驳和换乘规则重算客流。原有线网、资金、债务和已结算历史保留，升级当月保护满意度与任务。": "This save is from v{v0}. Ridership has been recalculated using the new hub access and interchange rules. Your network, funds, debt and settled history are preserved. Satisfaction and tasks are protected during the upgrade month."
+});

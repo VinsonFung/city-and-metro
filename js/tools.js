@@ -907,7 +907,7 @@
       this.escape();
       return;
     }
-    if (this.ui.dropdown || this.ui.searchEl) { this.keys.clear(); this.keyMods = {}; return; }
+    if (this.ui.dropdown || this.ui.searchEl || this.ui.opsApp || this.ui.voApp) { this.keys.clear(); this.keyMods = {}; return; }
     // 拆除工具已有多选：Enter 或 Delete 拆除所选
     if (this.tool === 'demolish' && this.ui.multi && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat && (e.code === 'Delete' || (/^(Numpad)?Enter$/.test(e.code) && tag !== 'BUTTON'))) { e.preventDefault(); this.ui.demolishMulti(); return; }
     // 线路选择框打开时：数字键选择对应线路，Esc 关闭（保留当前选择）

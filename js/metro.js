@@ -1028,8 +1028,35 @@
     for (const r of C.routes) for (const si of r.stIdx) { C.stationRoutes[si].push(r.id); C.stationLines[si].add(r.lineId); }
     C.serviced = C.stations.map(function (s, i) { return C.stationRoutes[i].length > 0; });
     C.stLevels = C.stations.map(function (s) { return s.lv ? M.stationLevels(net, s.id) : null; });
+    // 换乘站的线位关系（v2.9 玩家反馈：换乘要分辨两条线的线位关系）：各线在车站的走向取自线路几何。
+    C.lineDir = C.stations.map(function () { return null; });
+    for (const r of C.routes) r.stIdx.forEach(function (si, k) {
+      if (C.stationLines[si].size < 2) return;
+      const m = C.lineDir[si] || (C.lineDir[si] = new Map()); if (m.has(r.lineId)) return;
+      m.set(r.lineId, M.routeDirAt(r, k));
+    });
     return C;
   }
+  const XFER_OFF = 0.5;
+  // 线路在第 k 站的走向（单位向量）：取站前、站后各约 100 m 处的线路点
+  M.routeDirAt = function (r, k) {
+    const P = r.pts, i = r.stopPt ? r.stopPt[k] : -1;
+    if (!P || i < 0 || i >= P.length) return [1, 0];
+    const far = function (step) { let j = i; while (j + step >= 0 && j + step < P.length) { j += step; if (U.dist(P[j][0], P[j][1], P[i][0], P[i][1]) >= 0.4) break; } return P[j]; };
+    const a = far(-1), b = far(1); let dx = b[0] - a[0], dy = b[1] - a[1]; const d = Math.hypot(dx, dy) || 1;
+    return [dx / d, dy / d];
+  };
+  // 两条线在同一车站的线位关系：kind same 同台（走向夹角 < 25° 且站台同层）/ cross 节点（交叉）/ level 天地（站台不同层）；
+  // off 为各自站台多走的换乘通道（分钟），min 为估计的换乘步行时间（不含候车，界面显示用）
+  M.xferKind = function (C, si, la, lb) {
+    const st = C.stations[si], ta = M.platType(st, la), tb = M.platType(st, lb), mc = CFG.metro, ch = CFG.choice;
+    const base = ch.xferBase != null ? ch.xferBase : ch.transferPen, ww = ch.walkW;
+    if (ta !== tb) return { kind: 'level', label: '天地换乘', off: 0, min: base + ww * 2 * mc.levelXferMin, angle: null };
+    const m = C.lineDir && C.lineDir[si], da = m && m.get(la), db = m && m.get(lb);
+    const ang = da && db ? Math.acos(Math.min(1, Math.abs(da[0] * db[0] + da[1] * db[1]))) * 180 / Math.PI : 90;
+    if (ang < 25) return { kind: 'same', label: '同台换乘', off: 0, min: base, angle: ang };
+    return { kind: 'cross', label: ang > 65 ? '十字节点换乘' : '斜交节点换乘', off: XFER_OFF, min: base + ww * 2 * XFER_OFF, angle: ang };
+  };
 
   // ---------------- 草案差异、费用与冲突 ----------------
   function costIndex(year) { return U.priceIndex(year, CFG.cost.inflation, CFG.econBase || 1990) * (CM.Eras ? CM.Eras.finance(year).cost : 1); }

@@ -1004,7 +1004,7 @@
       window.removeEventListener('pointerup', endEditPointer, true);
       window.removeEventListener('pointercancel', endEditPointer, true);
       clearTimeout(refreshTimer);
-      if (self.opsApp === api) self.opsApp = null;
+      if (self.opsApp === api) { self.opsApp = null; self._opsDaily = null; }
       document.body.classList.remove('ops-open');
       if (self.opsDock) self.opsDock.classList.remove('vx-on');
       if (!instant) sfx('appClose');

@@ -183,8 +183,8 @@
     return { conn: !!sc.ok, lf: lf, lim: lim, crowd: crowd, n: (sc.ok ? 1 : 0) + (crowd ? 1 : 0), inn: inn, r: c.forecast > 0 && ctx.sd ? inn / c.forecast : null };
   };
   // 物业收益与持有成本记入车站商业收入 / 成本（月末流水按月汇总），其余逐笔记入合同收支
-  const pay = function (g, c, key, v, note) { if (!(v > 0.05)) return; const prop = key === 'prop'; g.econ.income(prop ? 'commerce' : 'ppp', v); c.paid[key] = (c.paid[key] || 0) + v; if (!prop) g.econ.log('ppp', v, 'gen', note + '：' + c.title, when(g)); };
-  const charge = function (g, c, key, v, note) { if (!(v > 0.05)) return; const hold = key === 'hold'; g.econ.spend(hold ? 'todCost' : 'pppOut', v); c.paid[key] = (c.paid[key] || 0) + v; if (!hold) g.econ.log('pppOut', -v, 'gen', note + '：' + c.title, when(g)); };
+  const pay = function (g, c, key, v, note) { if (!(v > CM.Economy.MONEY_EPS)) return; const prop = key === 'prop'; g.econ.income(prop ? 'commerce' : 'ppp', v); c.paid[key] = (c.paid[key] || 0) + v; if (!prop) g.econ.log('ppp', v, 'gen', note + '：' + c.title, when(g)); };
+  const charge = function (g, c, key, v, note) { if (!(v > CM.Economy.MONEY_EPS)) return; const hold = key === 'hold'; g.econ.spend(hold ? 'todCost' : 'pppOut', v); c.paid[key] = (c.paid[key] || 0) + v; if (!hold) g.econ.log('pppOut', -v, 'gen', note + '：' + c.title, when(g)); };
   const close = function (g, P, c, status, why) {
     c.status = status; c.closed = g.ym(); if (why) c.why = why;
     P.contracts.splice(P.contracts.indexOf(c), 1); P.closed.push(c); if (P.closed.length > 30) P.closed.shift();

@@ -337,7 +337,7 @@
     if (this.trafficChangedYm == null) this.trafficChangedYm = ym;
     // 线网刚变化时客流还在爬升，勤算；越稳定越省。半年以上的长跳看不到每月的变化，节奏再放宽（v2.6）
     const long = this.jumping && this.jumping.months >= 6;
-    const age = ym - this.trafficChangedYm, every = long ? (age < 6 ? 3 : age < 24 ? 6 : 12) : (age < 6 ? 1 : age < 24 ? 3 : 6);
+    const age = ym - this.trafficChangedYm, every = long ? (age < 6 ? 6 : 12) : (age < 6 ? 1 : age < 24 ? 3 : 6);
     if (ym % every === 0) return true;
     // 重要设施开放或停用：设施表一变，客流去向就变
     if (CM.Fac && model.fn) { const city = this.city, key = CM.Fac.list(city).filter(function (f) { return CM.Fac.active(f, yr, city); }).map(function (f) { return f.id; }).join(','); if (key !== model.fn.key) return true; }
@@ -439,7 +439,8 @@
     yield;
     // 交通刷新节奏（v2.6）：见 trafficDue。不刷新的月份沿用上次的出行结果（模型年份也不变，结果仍算有效），城市发展与经营照常按月结算
     this._graphsDirty = this._graphsDirty || gr.streetsChanged;
-    const bigChange = roadsChanged || regionOpened || gr.newUrban >= Math.max(32, Math.ceil(city.N * .005));
+    const longJump = this.jumping && this.jumping.months >= 6;
+    const bigChange = roadsChanged || regionOpened || (!longJump && gr.newUrban >= Math.max(32, Math.ceil(city.N * .005)));
     if (this.trafficDue(yr, bigChange)) {
       model.setYear(yr);
       if (this._graphsDirty || roadsChanged) { if (roadsChanged) city.updateStreets(); yield* city.buildGraphsGen(); this._graphsDirty = false; yield; }
@@ -1028,7 +1029,7 @@
         if (g.model.trafficReady()) g.tasks.rebaseCongestion(g);
         for (const t of g.tasks.active) if (t.type === 'ridership' && !t.basis) t.basis = 'wd';   // 进行中的客流任务沿用发布时的口径（典型工作日）
         if (g.macro && CM.Macro && CM.Macro.rebaseTE) { try { CM.Macro.rebaseTE(g); } catch (e) { console.error(e); } }
-        g.logEvent({ tag: '版本', title: '交通模型升级（v' + CFG.GAME_VERSION + '）', desc: '存档来自 v' + g.traffic.from + '。日常交通改为轻量增量更新，重大变化增加计算，交通任务接近奖惩门槛时复核。旧拥堵目标按可替代需求调整，无法改善时不处罚；原有线网、资金、债务和已结算历史保留，升级当月保护满意度与任务。' });
+        g.logEvent({ tag: '版本', title: '交通模型升级（v' + CFG.GAME_VERSION + '）', desc: '存档来自 v' + g.traffic.from + '。已按新的枢纽接驳和换乘规则重算客流。原有线网、资金、债务和已结算历史保留，升级当月保护满意度与任务。' });
         g.backupFailed = s.__backupFailed || null;
         g.upgradeNote = (s.__backupFailed ? '存档已在内存中升级到 v' + CFG.GAME_VERSION + ' 交通模型；升级前备份未能建立（' + s.__backupFailed + '），不会自动保存，原存档保持不变' :
           '存档已升级到 v' + CFG.GAME_VERSION + ' 交通模型（升级前的原存档已另存为「升级前备份」，可在存档列表中载入或导出）') + (s.__mapMigratedFrom ? '；地图范围同时扩展' : '');

@@ -47,7 +47,7 @@
   Fac.isPortalStation = function (st, f) {
     if (!st) return false;
     // 没经吸附、直接建在接驳口上的普通车站（250 m 内）同样算接通（v2.7.1 玩家反馈：香港罗湖接驳口里的车站离接驳口约 1 m，仍提示没接通）
-    if (!st.portal) { const p0 = f && f.ext && f.ext.gate ? Fac.portal(f) : null; return !!p0 && U.dist(st.x, st.y, p0.x, p0.y) < 1; }
+    if (!st.portal) { const p0 = Fac.portal(f); return !!p0 && U.dist(st.x, st.y, p0.x, p0.y) < 1; }
     if (f && st.portal !== f.id) return false;
     const pf = f || Fac.byId(st.portal), p = Fac.portal(pf);
     return !!p && U.dist(st.x, st.y, p.x, p.y) < 1.2;   // 车站被拖离接驳口后不再算接通

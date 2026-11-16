@@ -373,12 +373,29 @@
       const sIn = this.stat('日进站（周平均）', '—'), sOut = this.stat('日出站（周平均）', '—'), sX = this.stat('日换乘（周平均）', '—'), sP = this.stat('当前小时负荷', '—');
       grid.append(sIn, sOut, sX, sP);
       el.appendChild(grid);
+      // 没有人进出时说明原因（v2.9 玩家反馈：车站进站人数莫名变成 0）
+      const why = h('div', { class: 'callout warn', style: { display: 'none' } });
+      el.appendChild(why);
+      const zeroWhy = function () {
+        const acc = g.model.net.acc; if (!acc) return '';
+        const routes = C.stationRoutes[k];
+        const runs = ['wd', 'we'].some(d => g.model.resultsFor(d).per.some(p => routes.some(r => CM.Model.boardFreq(p, g.model.net, r) > 0)));
+        if (!runs) return '本站所有交路均停运。恢复列车班次后才能进出站。';
+        if (acc.accessible && !acc.accessible[k]) return '车站周围没有能走进来的道路（四周是快速路、水面或没有街道的地块），乘客到不了。把车站挪到路边，或在附近另设车站。';
+        let listed = false;
+        for (let z = 0; z < acc.zl.length && !listed; z++) { const L = acc.zl[z]; if (L) for (const e of L) if (e.s === k) { listed = true; break; } }
+        if (!listed) return (acc.catchPop && acc.catchPop[k] >= 50) ? '附近的乘客都有更近、更方便的车站，这座站暂时没人进出。' : '步行 15 分钟内几乎没有居民和岗位（周边还没发展起来或尚未开放），暂时没有乘客。';
+        return '能走到这座站的人很少乘地铁：他们要去的地方线网还到不了，或者绕行太远、不如打车。';
+      };
       const cap = CFG.metro.stationCap[C.stations[k].size];
       this.live.push(function () {
         const d2 = g.model.stDaily, dw = g.model.stDailyWk, de = g.model.stDailyWe;   // 每次读取最新统计（模型收敛过程中会不断替换）
         if (!d2 || !dw || !de || g.model.dailyStale || g.model.net.C !== C || k >= d2.inn.length) return;
         const sub = function (a, b) { return '工作日 ' + U.fmtPeople(a) + ' · 周末 ' + U.fmtPeople(b); };
         sIn.setV(U.fmtPeople(d2.inn[k]) + ' 人次', sub(dw.inn[k], de.inn[k])); sOut.setV(U.fmtPeople(d2.out[k]) + ' 人次', sub(dw.out[k], de.out[k])); sX.setV(U.fmtPeople(d2.xfer[k]) + ' 人次', sub(dw.xfer[k], de.xfer[k]));
+        const zero = d2.inn[k] + d2.out[k] < 1;
+        if (zero) { const t = zeroWhy(); if (why.textContent !== t) why.textContent = t; }
+        why.style.display = zero && why.textContent ? '' : 'none';
         const W = g.model.weights(g.clock.minute);
         const f = g.model.stFlowAt(k, W, 'stIn') + g.model.stFlowAt(k, W, 'stOut') + g.model.stFlowAt(k, W, 'stXfer');
         sP.setV(U.fmtPct(f / cap, 0), U.fmtInt(f) + ' / ' + U.fmtInt(cap) + ' 人次/时', f / cap > 1 ? 'bad' : (f / cap > 0.8 ? 'warn' : 'muted'));
@@ -388,6 +405,12 @@
       el.appendChild(this.sec('st-xfer', '换乘关系', '', function () {
         const b = h('div');
         if (lines.length > 1) b.appendChild(h('div', { class: 'small' }, '站内换乘：' + lines.map(function (l) { return l.name; }).join('、')));
+        // 两两线位关系（v2.9）：同台、节点（十字 / 斜交）或天地换乘，及估计的换乘步行时间（不含候车）
+        if (lines.length > 1 && CM.Metro.xferKind) for (let i = 0; i < lines.length; i++) for (let j = i + 1; j < lines.length; j++) {
+          const x = CM.Metro.xferKind(C, k, lines[i].id, lines[j].id);
+          b.appendChild(h('div', { class: 'chg small' }, h('span', null, h('span', { class: 'dot', style: { background: AX.line(lines[i]), marginRight: '4px' } }), lines[i].name, ' ⇄ ', h('span', { class: 'dot', style: { background: AX.line(lines[j]), marginRight: '4px' } }), lines[j].name, ' · ', x.label), h('span', { class: 'num' }, '约 ' + U.fmtNum(x.min, 1) + ' 分钟')));
+        }
+        if (lines.length > 1) b.appendChild(h('div', { class: 'note' }, '两线走向相近、站台同层为同台换乘，换乘最快；交叉为节点换乘，要上下楼梯；站台不在同一层（高架、地面与地下）为天地换乘，最慢。'));
         const acc = g.model.net.acc;
         const xs = acc.transfers.filter(function (t) { return t.a === k; });
         if (xs.length) for (const t of xs) { const o = C.stations[t.b]; b.appendChild(h('div', { class: 'small clickable', style: { padding: '3px 4px' }, onclick: function () { self.select({ kind: 'station', id: o.id }); } }, '站外换乘：步行 ' + Math.round(t.m) + ' m（约 ' + Math.ceil(t.m / CFG.walk.mPerMin) + ' 分钟）至「' + o.name + '」')); }
@@ -1043,6 +1066,7 @@
     if (f.note) el.appendChild(h('div', { class: 'note', style: { margin: '4px 0 8px' } }, f.note));
     if (!active) {
       el.appendChild(this.callout('info', 'info', '设施' + status + '，目前不参与出行计算。'));
+      if (f.ext?.gate && g.year() < f.open) el.appendChild(this.callout('info', 'info', '这个接驳口还没开放，开放后建在接驳口上的车站才能接通。'));
     } else {
       const hub = !!f.T.hub;
       // 到访量（模拟结果）：工作日 / 周末 / 周平均
@@ -1077,7 +1101,9 @@
           const C = model.net ? model.net.C : null; let ns = null, nd = 1e9;
           if (C) C.stations.forEach(function (s, i) { if (!C.serviced[i]) return; const d = U.dist(s.x, s.y, f.x, f.y); if (d < nd) { nd = d; ns = s; } });
           const m = nd * CFG.CELL_M;
-          bx.appendChild(h('div', { class: 'callout warn' }, ns && m < 3000 ? '最近的运营车站「' + ns.name + '」直线约 ' + U.fmtKm(m) + '，但沿道路走不到这里：步行按道路计算，要绕过水面、铁路和没有路的地方，上限 15 分钟。在设施 400 m 内设站并接入线网后，' + (hub ? '旅客' : '到访者') + '才能乘地铁前往。' : '步行 15 分钟内没有运营中的地铁站。在附近设站并接入线网后，' + (hub ? '旅客' : '到访者') + '才能乘地铁前往。'));
+          // 口岸（城市连接的接驳口）不按步行算：只认建在接驳口上的车站，或还没到开放年份（v2.9 玩家反馈：提示「沿道路走不到」让人摸不着头脑）
+          if (f.ext?.gate) bx.appendChild(h('div', { class: 'callout warn' }, '这个口岸尚未接通。请在接驳口标记约 250 米内建站，接入运营线路并确认建设。'));
+          else bx.appendChild(h('div', { class: 'callout warn' }, ns && m < 3000 ? '最近的运营车站「' + ns.name + '」直线约 ' + U.fmtKm(m) + '，但沿道路走不到这里：步行按道路计算，要绕过水面、铁路和没有路的地方，上限 15 分钟。在设施 400 m 内设站并接入线网后，' + (hub ? '旅客' : '到访者') + '才能乘地铁前往。' : '步行 15 分钟内没有运营中的地铁站。在附近设站并接入线网后，' + (hub ? '旅客' : '到访者') + '才能乘地铁前往。'));
         } else for (const e of list) {
           const s = model.net.C.stations[e.s]; if (!s) continue;
           const lines = Array.from(model.net.C.stationLines[e.s] || []).map(function (lid) { return g.net.lines[lid]; }).filter(Boolean);

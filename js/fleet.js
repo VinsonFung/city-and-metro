@@ -718,15 +718,14 @@
       nameIn.addEventListener('input', function () { name = nameIn.value; named = true; });
       box.appendChild(h('div', { class: 'fo-sv-row' }, h('small', null, '名称'), nameIn));
       if (bases.length > 1) {
-        const sel = h('select', { 'aria-label': '支线方向' });
-        bases.forEach(function (r, i) { sel.appendChild(h('option', { value: String(i), selected: i === ri ? 'selected' : null }, r.label)); });
+        const sel = CM.UI.dropdown({ label: '支线方向', value: ri, items: bases.map(function (r, i) { return [i, r.label]; }) });
         sel.addEventListener('change', function () { ri = +sel.value; ia = 0; ib = bases[ri].stIds.length - 1; skip = new Set(); autoName(); draw(); });
         box.appendChild(h('div', { class: 'fo-sv-row' }, h('small', null, '方向'), sel));
       }
       if (!loop) {
         const pick = function (label, cur, lo, hi, set) {
-          const sel = h('select', { 'aria-label': label });
-          for (let i = lo; i <= hi; i++) sel.appendChild(h('option', { value: String(i), selected: i === cur ? 'selected' : null }, nameOf(st[i])));
+          const items = []; for (let i = lo; i <= hi; i++) items.push([i, nameOf(st[i])]);
+          const sel = CM.UI.dropdown({ label: label, value: cur, items: items });
           sel.addEventListener('change', function () { set(+sel.value); autoName(); draw(); });
           return h('div', { class: 'fo-sv-row' }, h('small', null, label), sel);
         };

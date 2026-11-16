@@ -5,6 +5,60 @@ export async function runV27Checks({evaluate:E,send,until,screenshot,delay,task,
  const tap=async sel=>{const p=await E(`(()=>{const e=document.querySelector(${JSON.stringify(sel)});if(!e)throw Error('Missing ${sel}');const r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,n=document.elementFromPoint(x,y);if(!r.width||!e.contains(n))throw Error('Covered ${sel}: '+n?.outerHTML.slice(0,180));return {x,y};})()`);await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[p]});await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await delay(80);};
  const audit=async(label,selector)=>{const r=await E(`(()=>{const out={bad:[],hits:0};for(const e of document.querySelectorAll(${JSON.stringify(selector)})){const s=getComputedStyle(e),r=e.getBoundingClientRect();if(!r.width||!r.height||s.visibility==='hidden'||e.disabled)continue;let a={l:Math.max(0,r.left),t:Math.max(0,r.top),r:Math.min(innerWidth,r.right),b:Math.min(innerHeight,r.bottom)};for(let p=e.parentElement;p;p=p.parentElement){const t=getComputedStyle(p),b=p.getBoundingClientRect();if(/auto|scroll|hidden|clip/.test(t.overflowX)){a.l=Math.max(a.l,b.left);a.r=Math.min(a.r,b.right);}if(/auto|scroll|hidden|clip/.test(t.overflowY)){a.t=Math.max(a.t,b.top);a.b=Math.min(a.b,b.bottom);}}if(a.r-a.l<5||a.b-a.t<5)continue;const n=document.elementFromPoint((a.l+a.r)/2,(a.t+a.b)/2);out.hits++;if(!e.contains(n))out.bad.push({text:e.innerText,by:n?.outerHTML.slice(0,120)});}return out})()`);report.states++;report.hits+=r.hits;if(r.bad.length)throw Error(label+' '+JSON.stringify(r.bad));};
  const close=async()=>{await E('CM.ui.opsApp?.close(null,true);CM.Stats.close();CM.NetMap.close();CM.ui.closeScreen();CM.ui.closePanel(true);true');};
+ if(process.env.CM_V272_ONLY){
+  await send('Emulation.setHardwareConcurrencyOverride',{hardwareConcurrency:12});
+  await E('CM.Settings.set("language","zh-CN");CM.newGame({map:"tutorial",mode:"free",seed:20000101});true');
+  await until('!CM.isLoading()&&CM.game?.mapId==="tutorial"');
+  await close();
+  await E(`(async()=>{
+    const {game:g,Metro:M}=CM;
+    g.setSpeed(0);
+    const net=M.empty(),a=M.newLine(net),b=M.newLine(net),stops=[];
+    const add=(x,y)=>M.addStation(net,x,y,{size:'M',type:'underground'},g.city);
+    for(let row=0;row<6;row++)for(let col=0;col<9;col++){
+      stops.push(add(6.5+4*(row%2?8-col:col),3.75+4*row));
+    }
+    for(let i=1;i<stops.length;i++)M.addSegment(net,a,stops[i-1],stops[i],[],'underground');
+    const interchange=stops[3];
+    M.addSegment(net,b,interchange,add(18.5,6),[],'underground');
+    const compiled=M.compile(net,g.city),model=new CM.Model(g.city);
+    model.setYear(g.year());model.setNetwork(compiled);
+    const period=()=>{const p=model.makePer(model.net);p.freq.fill(12);p.freqDir.fill(12);return p;};
+    const local=period(),worker=period(),localBuf={},workerBuf={};
+    model.syncSolve=true;
+    for(const _ of model.iterate(model.net,local,0,{noSmooth:true,buf:localBuf})) {}
+    model.syncSolve=false;
+    for(const _ of model.iterate(model.net,worker,0,{noSmooth:true,buf:workerBuf})){
+      if(_===CM.SIM_WAIT)await new Promise(resolve=>setTimeout(resolve,5));
+    }
+    if(!workerBuf.skim.parts?.length||!CM.OdPool.list?.length||CM.OdPool.off)
+      throw Error('Traffic did not run in both browser workers');
+    for(const [left,right] of [[localBuf.skim.gt,workerBuf.skim.gt],[local.stIn,worker.stIn],[local.stOut,worker.stOut],[local.fInM,worker.fInM],[local.fOutM,worker.fOutM],[local.load,worker.load]]){
+      if(left.length!==right.length||left.some((v,i)=>v!==right[i]))throw Error('Worker traffic differs from the main thread');
+    }
+    CM.Fleet.ensure(g); // Start with an empty fleet so the synthetic lines are physically connected but unserved.
+    g.net=net;g.compiled=compiled;g.netVersion++;
+    g.model.setNetwork(compiled);g.model.applyFleet();g.model.solveNow(1);
+    CM.ui.openPage('station',interchange,{root:true});
+    CM.ui.live.forEach(update=>update());
+    return true;
+  })()`);
+  const detail=await E('CM.ui.rBody.textContent');
+  if(!detail.includes('十字节点换乘')||!detail.includes('本站所有交路均停运'))throw Error('Station detail did not render expected diagnostics: '+detail);
+  console.log('PASS browser worker parity, interchange types and no-train diagnostic');
+  await close();
+  await E('CM.ui.openOpsApp("stations");true');
+  await settle();
+  if(!await E('(()=>{const b=document.querySelector(\'.mc-nav[data-v=fare]\');b.focus();return document.activeElement===b})()'))
+    throw Error('The fare tab could not receive keyboard focus');
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',text:'\r',unmodifiedText:'\r',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
+  await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
+  const state=await E('({view:CM.ui.opsApp?.state().root,speed:CM.game.speed})');
+  if(state.view!=='fare'||state.speed!==0)throw Error('Enter did not select fare management: '+JSON.stringify(state));
+  await close();
+  console.log('PASS mobile Metro Core keyboard');
+  await fs.writeFile(path.join(task,'report.json'),JSON.stringify(report));return;
+ }
  if(process.env.CM_BORDER_BUILD_ONLY){
   for(const map of ['hk','sz']){
    await E(`CM.newGame({map:${JSON.stringify(map)},mode:'free',startYear:2020,seed:20200101});true`);
