@@ -240,7 +240,18 @@
   };
 
   // ---------------- 时钟 ----------------
-  Game.prototype.setSpeed = function (s) { this.speed = s; this.emit('speed', s); };
+  Game.prototype.setSpeed = function (s) { this.speed = this.settlementError ? 0 : s; this.emit('speed', this.speed); };
+  // 生成器抛错后已经关闭；再次 next() 得到的 done 并不代表结算成功。
+  Game.SETTLEMENT_ERROR = '本次结算未完成，请读取之前的存档后继续。';
+  Game.prototype.failSettlement = function (error) {
+    const j = this.jumping;
+    if (j && CM.CarPool && CM.CarPool.onReq === j.resume) CM.CarPool.onReq = null;
+    this.jumping = this.pending = null;
+    this.settlementError = error;
+    this.setSpeed(0);
+    console.error(error);
+    this.emit('settlementError', error);
+  };
   Game.validImpact = function (r) {
     return !!r && r.status === 'done' && Array.isArray(r.at) && r.at.length === 2 && r.at.every(Number.isFinite) &&
       ['base', 'draft'].every(k => r[k] && ['car', 'commute', 'cong'].every(v => Number.isFinite(r[k][v]))) &&
@@ -266,6 +277,7 @@
     }, beforeC);
   };
   Game.prototype.update = function (dt) {
+    if (this.settlementError) return;
     // 交通求解的每帧预算（v2.3 高密度线网）：上一帧除求解外的主线程耗时较少时，把余量让给求解（最多 solverBudgetMaxMs），
     // 大线网改线后更快收敛；画面吃紧时回到基础预算，不降低帧率
     // 镜头移动、拖动时（v2.5 性能）优先保证画面与输入：求解和月结只拿最低预算。只改调度，计算轮次与结果不变
@@ -275,14 +287,19 @@
     if (this.pending) {
       const t0 = performance.now(), slice = moving ? 3 : 6;
       while (this.pending && performance.now() - t0 < slice) {
-        const r = this.pending.next();
+        let r;
+        try { r = this.pending.next(); }
+        catch (error) { this.failSettlement(error); return; }
         if (r.done) this.pending = null;
         else if (r.value === CM.SIM_WAIT) break;
       }
       this.model.step(moving ? 1 : 2);
       return;
     }
-    if (this.speed > 0 && !this.econ.failed) this.advanceClock(dt);
+    if (this.speed > 0 && !this.econ.failed && this.model.trafficReady()) {
+      try { this.advanceClock(dt); }
+      catch (error) { this.failSettlement(error); return; }
+    }
     const ts = performance.now();
     this.model.step(budget);
     this._solveMs = performance.now() - ts;
@@ -476,7 +493,6 @@
     // 经营与任务：最后按本月任务结果发放拨款
     // 满意度按周平均日（5 个工作日 + 2 个周末日）计算，通勤时间按工作日；升级过渡期内不因统计口径变化而下降
     this.econ.updateSatisfaction(model.daily, model, y, m, { protect: this.inTransition(this.ym()) });
-    this.econ.openMonth(y, m);
     if (model.trafficReady()) this.tasks.rebaseCongestion(this);
     this.tasks.monthly(this).forEach((o) => this.logTask(o));
     if(model.hasReviewWork()){yield* model.solveReviewsGen();this.tasks.monthly(this).forEach(o=>this.logTask(o));}
@@ -524,23 +540,28 @@
 
   // ---------------- 跳月 / 跳年 ----------------
   Game.prototype.startJump = function (months) {
-    if (this.jumping || this.pending) return false;
+    if (this.settlementError || this.jumping || this.pending) return false;
     if (this.draft) this.invalidatePrediction();
     const t = U.ymIndex(this.clock.y, this.clock.m) + months;
     const ty = Math.floor(t / 12), tm = t % 12 + 1;
     const td = Math.min(this.clock.d, U.daysInMonth(ty, tm));
     const snap = this.snapshotMetrics();
     const total = Math.max(1, months * 30);
-    this.jumping = { months: months, target: [ty, tm, td], from: [this.clock.y, this.clock.m, this.clock.d], snap: snap, progress: 0, total: total, gen: this.jumpGen(ty, tm, td, months, total) };
+    this.jumping = { months: months, target: [ty, tm, td], from: [this.clock.y, this.clock.m, this.clock.d], snap: snap, progress: 0, total: total, gen: this.jumpGen(ty, tm, td, total) };
     this.prevSpeed = this.speed;
     this.speed = 0;
     this.emit('jump', this.jumping);
     return true;
   };
-  Game.prototype.jumpGen = function* (ty, tm, td, months, total) {
+  Game.prototype.jumpGen = function* (ty, tm, td, total) {
     let n = 0;
     const tgt = U.ymIndex(ty, tm) * 32 + td;
     while (U.ymIndex(this.clock.y, this.clock.m) * 32 + this.clock.d < tgt && !this.econ.failed) {
+      // 建设、调价或配车刚变更时，先算本线网的客流，再开始结算。
+      if (!this.model.trafficReady()) {
+        yield* this.model.solveGen(1);
+        if (!this.model.trafficReady()) throw new Error('客流数据未准备好，无法结算票款和运营费用。');
+      }
       const crossed = this.endDay();
       n++;
       this.jumping.progress = Math.min(0.98, n / total);
@@ -550,7 +571,7 @@
       }
       if ((n & 7) === 0) yield;
     }
-    if (!this.model.trafficReady()) yield* this.model.solveGen(1);
+    if (!this.econ.failed && !this.model.trafficReady()) yield* this.model.solveGen(1);
   };
   // 跳转时求解在等工作线程（v2.1）：本次先返回、不空转，分配一完成（CarPool.onReq）就立即继续，不必等下一帧
   // 时间推进卡片覆盖地图期间（v2.3）：地图降频重绘（见 main.js），只改调度、不改结算结果
@@ -566,7 +587,9 @@
     if (!j || this.model.retired) return;
     j.waiting = false;
     while (performance.now() - t0 < CFG.perf.jumpSliceMs) {
-      const r = j.gen.next();
+      let r;
+      try { r = j.gen.next(); }
+      catch (error) { this.failSettlement(error); return; }
       if (!r.done && r.value === CM.SIM_WAIT) {
         j.waiting = true;
         const self = this;
@@ -575,10 +598,14 @@
         break;
       }
       if (r.done) {
+        const [y, m, d] = j.target;
+        if (!this.econ.failed && (this.clock.y !== y || this.clock.m !== m || this.clock.d !== d)) {
+          this.failSettlement(new Error('时间推进未到达目标日期'));
+          return;
+        }
         if (CM.CarPool && CM.CarPool.onReq === j.resume) CM.CarPool.onReq = null;
         this.jumping = null;
         this.speed = 0;
-        this.recordHistoryIfNeeded();
         const res = { from: j.from, to: [this.clock.y, this.clock.m, this.clock.d], before: j.snap, after: this.snapshotMetrics(), failed: this.econ.failed };
         this.emit('jumpDone', res);
         return;
@@ -591,7 +618,6 @@
       nextTask(function () { j.next = false; if (self.jumping === j && !j.waiting && !self.model.retired) self.stepJump(); });
     }
   };
-  Game.prototype.recordHistoryIfNeeded = function () {};
   Game.prototype.snapshotMetrics = function () {
     const d = this.model.daily || {};
     const tot = this.city.totals();
@@ -916,6 +942,8 @@
 
   // ---------------- 存档 ----------------
   Game.prototype.serialize = function () {
+    if (this.settlementError) throw new Error(Game.SETTLEMENT_ERROR);
+    if (this.pending || this.jumping) throw new Error('正在进行月度结算，请稍候再保存');
     return {
       meta: { gameId: this.id, name: this.name, mode: this.mode, seed: this.seed, createdAt: this.createdAt, gameVersion: CFG.GAME_VERSION, map: this.mapId || 'gz', mapVersion: (CM.MAPS[this.mapId || 'gz'] || {}).mapVersion || 1, scenario: (CM.MAPS[this.mapId || 'gz'] || {}).scenario || '', mapFp: (CM.MAPS[this.mapId || 'gz'] || {}).fp || '' },
       clock: Object.assign({}, this.clock),

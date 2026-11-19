@@ -1763,11 +1763,10 @@
   // ---------- 财政：月度账本（科目分开：财政收入、融资到账、建设支出、运营成本、利息、本金偿还、逾期费用） ----------
   const BK = CM.Economy.BUILD_KINDS;
   const buildOf = function (r) { let s = 0; for (const k of BK) s += r[k] || 0; return s; };
-  const incomeOf = function (r) { return (r.grant || 0) + (r.fare || 0) + (r.reward || 0) + (r.commerce || 0) + (r.ppp || 0) + (r.fleetSale || 0); };
+  const incomeOf = CM.Economy.incomeOf;
   const serviceOf = function (r) { return (r.interest || 0) + (r.principal || 0) + (r.penalty || 0); };
   UI.prototype.ledgerBlock = function () {
-    const g = this.g(), E = g.econ, c = E.cur, free = E.isFree(), oi = E.opsIndex(g.clock.y), M = function (v) { return U.fmtMoney(v || 0); };
-    let st = 0; for (const s of g.compiled.stations) st += CFG.ops.stationDaily[s.size] * oi;
+    const g = this.g(), E = g.econ, c = E.cur, free = E.isFree(), M = function (v) { return U.fmtMoney(v || 0); };
     const box = h('div');
     const group = function (title, rows, cls) { box.appendChild(h('div', { class: 'fl-g ' + (cls || '') }, h('div', { class: 'fl-h' }, title), this.kv(rows))); }.bind(this);
     if (!free) box.appendChild(this.kv([['期初一般资金', M(c.start)], ['期初建设专项资金', M(c.capexStart)]]));
@@ -1777,10 +1776,10 @@
     group('运营成本', [['列车运行与车站', '− ' + M(c.ops)], c.todCost ? ['车站商业运营与维护', '− ' + M(c.todCost)] : null], 'out');
     if (!free && (c.pppOut || g.corp)) group('合同支出', [['保证金、地价、超额分成与违约金', '− ' + M(c.pppOut)]], 'out');
     if (!free) group('偿债', [['利息', '− ' + M(c.interest)], ['本金偿还', '− ' + M(c.principal)], ['逾期费用', '− ' + M(c.penalty)]], 'debt');
-    box.appendChild(h('div', { class: 'note', style: { marginTop: '6px' } }, '每日运营成本约 ' + U.fmtMoney(((g.model.daily && g.model.daily.carKm) || 0) * CFG.ops.carKmCost * oi + st) + '（列车运行 + ' + g.compiled.stations.length + ' 座车站），票款与运营成本逐日结算；利息与本金在每月初拨款之后支付。'));
+    box.appendChild(h('div', { class: 'note', style: { marginTop: '6px' } }, '每日运营成本约 ' + U.fmtMoney(E.dailyOps(g.model.daily, g.compiled, g.clock.y)) + '（列车运行 + ' + g.compiled.stations.length + ' 座车站），票款与运营成本逐日结算；利息与本金在每月初拨款之后支付。'));
     if (E.ledger.length) {
       const t = h('table', { class: 'tbl', style: { marginTop: '8px' } }, h('tr', null, h('th', null, '月份'), h('th', null, '财政收入'), !free ? h('th', null, '融资') : null, h('th', null, '建设'), h('th', null, '运营'), !free ? h('th', null, '偿债') : null, h('th', null, '期末')));
-      for (const r of E.ledger.slice(-12).reverse()) t.appendChild(h('tr', null, h('td', null, r.y + '.' + r.m), h('td', null, U.fmtYi(incomeOf(r), 2)), !free ? h('td', null, r.bond ? U.fmtYi(r.bond, 2) : '—') : null, h('td', null, U.fmtYi(buildOf(r), 2)), h('td', null, U.fmtYi(r.ops || 0, 2)), !free ? h('td', null, serviceOf(r) ? U.fmtYi(serviceOf(r), 2) : '—') : null, h('td', { class: r.end < 0 ? 'bad' : '' }, free ? '—' : U.fmtYi(r.end, 1))));
+      for (const r of E.ledger.slice(-12).reverse()) t.appendChild(h('tr', null, h('td', null, r.y + '.' + r.m), h('td', null, U.fmtYi(incomeOf(r), 2)), !free ? h('td', null, r.bond ? U.fmtYi(r.bond, 2) : '—') : null, h('td', null, U.fmtYi(buildOf(r), 2)), h('td', null, U.fmtYi(CM.Economy.opsOf(r), 2)), !free ? h('td', null, serviceOf(r) ? U.fmtYi(serviceOf(r), 2) : '—') : null, h('td', { class: r.end < 0 ? 'bad' : '' }, free ? '—' : U.fmtYi(r.end, 1))));
       box.append(h('div', { class: 'tiny muted', style: { marginTop: '8px' } }, '最近 12 个月（' + CFG.money.yi + '；期末为一般资金）'), h('div', { class: 'tbl-wrap' }, t));
     }
     return box;

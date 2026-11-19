@@ -44,6 +44,11 @@
     this.fareAuto = null; if (mode !== 'free') this.setFareAuto(true, y);   // 随物价自动调价默认开启（v3.0 玩家建议）；读档时按存档里的设置
   }
   CM.Economy = Economy;
+  // 财政收入不含借款。运营补贴和跨境附加费已分别计入拨款与票款。
+  Economy.incomeOf = function (row) {
+    return (row.grant || 0) + (row.fare || 0) + (row.reward || 0) + (row.commerce || 0) + (row.ppp || 0) + (row.fleetSale || 0);
+  };
+  Economy.opsOf = function (row) { return (row.ops || 0) + (row.todCost || 0); };
 
   Economy.prototype.isFree = function () { return this.mode === 'free'; };
   Economy.prototype.spend = function (kind, amount) {
@@ -106,17 +111,20 @@
     const crossWan = daily && daily.ready && cross > 0 ? cross / 10000 : 0;
     const fareWan = daily && daily.ready ? daily.fare / 10000 + crossWan : 0;
     if (crossWan) this.cur.crossFee = (this.cur.crossFee || 0) + crossWan;
-    let ops = 0;
-    if (daily && compiled) {
-      const oi = this.opsIndex(year);
-      ops += (daily.carKmW != null ? daily.carKmW : daily.carKm) * CFG.ops.carKmCost * oi;   // v2.5：车厢公里按车型的运营成本系数加权
-      for (const s of compiled.stations) ops += CFG.ops.stationDaily[s.size] * oi;
-    }
+    const ops = this.dailyOps(daily, compiled, year);
     this.income('fare', fareWan);
     this.spend('ops', ops);
     this.cur.days++;
     if (dt === 'we') this.cur.weDays = (this.cur.weDays || 0) + 1; else if (dt === 'wd') this.cur.wdDays = (this.cur.wdDays || 0) + 1;
     this.lastDay = { fare: fareWan, ops: ops, dt: dt || null };
+  };
+
+  Economy.prototype.dailyOps = function (daily, compiled, year) {
+    if (!daily || !compiled) return 0;
+    // 车厢公里按车型运营成本系数加权，旧的统计结果回退到普通车厢公里。
+    const km = daily.carKmW ?? daily.carKm ?? 0;
+    const stationCost = compiled.stations.reduce(function (cost, station) { return cost + CFG.ops.stationDaily[station.size]; }, 0);
+    return (km * CFG.ops.carKmCost + stationCost) * this.opsIndex(year);
   };
 
   // 拨款与满意度调整（mods）：until 为最后一个生效的月份（含当月），N 个月的效果记为 ym + N − 1

@@ -212,26 +212,62 @@
   // 离开该地图、缩略图画完后由 releaseGeo 释放；地面块线程自行载入同一文件。避免全部城市同时常驻内存
   const GEO_HEAVY = ['water', 'roads', 'streets', 'rail', 'parks', 'reserves', 'woods', 'admin'], geoLoads = {}, geoHold = {};
   const GEO_LOAD_TIMEOUT = 60000;
+  const isHttp = typeof location !== 'undefined' && /^https?:$/.test(location.protocol);
+  let geoRetrySerial = 0;
+  // 正常请求按资源内容使用固定地址。失败后请求新地址，避免反复命中旧缓存。
+  CM.geoAssetPath = function (geo, retry) {
+    if (!isHttp) return geo.file;
+    const params = new URLSearchParams();
+    if (geo.integrity) params.set('v', geo.integrity.slice('sha256-'.length));
+    if (retry) params.set('retry', Date.now().toString(36) + '-' + (++geoRetrySerial).toString(36));
+    const query = params.toString();
+    return query ? geo.file + '?' + query : geo.file;
+  };
   CM.geoReady = function (id) { const m = MAPS[id]; return !!(m && m.geo && (!m.geo.file || m.geo.water)); };
+  function requestGeo(m, retry) {
+    const stub = m.geo;
+    return new Promise(function (resolve) {
+      const script = document.createElement('script');
+      let settled = false;
+      const finish = function (full) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        script.remove();
+        resolve(full);
+      };
+      const timer = setTimeout(function () { finish(null); }, GEO_LOAD_TIMEOUT);
+      script.onload = function () {
+        const full = CM.GEOS[m.id];
+        CM.GEOS[m.id] = stub;   // 超时后的迟到脚本也只恢复原引用，不能替换当前数据。
+        const valid = full !== stub && Array.isArray(full?.water) && Array.isArray(full.roads) &&
+          (!stub.count || (full.water.length === stub.count.water && full.roads.length === stub.count.roads));
+        finish(valid ? full : null);
+      };
+      script.onerror = function () { finish(null); };
+      if (isHttp && stub.integrity) script.integrity = stub.integrity;
+      script.src = CM.geoAssetPath(stub, retry);
+      document.head.appendChild(script);
+    });
+  }
   CM.loadGeo = function (id) {
     const m = MAPS[id];
     if (!m || CM.geoReady(id)) return Promise.resolve(m || null);
-    if (geoLoads[id]) return geoLoads[id];
-    const stub = m.geo;
-    return (geoLoads[id] = new Promise(function (res, rej) {
-      const s = document.createElement('script');
-      const timer = setTimeout(function () { end(false); }, GEO_LOAD_TIMEOUT);
-      const end = function (ok) {
-        clearTimeout(timer);
-        s.onload = s.onerror = null;
-        s.remove(); delete geoLoads[id];
-        const full = CM.GEOS[id]; CM.GEOS[id] = stub;   // 数据文件整体替换 CM.GEOS[id]：取出完整数据补进原对象
-        if (ok && full && full !== stub) for (const k of GEO_HEAVY) stub[k] = full[k];
-        if (stub.water) res(m); else rej(new Error('地图数据载入失败：' + (m.data.city || id) + '（' + stub.file + '）'));
-      };
-      s.onload = function () { end(true); }; s.onerror = function () { end(false); };
-      s.src = stub.file; document.head.appendChild(s);
-    }));
+    if (!geoLoads[id]) geoLoads[id] = (async function () {
+      let full = await requestGeo(m, false);
+      if (!full) {
+        await new Promise(function (resolve) { setTimeout(resolve, 400); });
+        full = await requestGeo(m, true);
+      }
+      if (!full) {
+        const error = new Error('地图数据载入失败：' + (m.data.city || id));
+        error.code = 'GEO_LOAD'; error.file = m.geo.file;
+        throw error;
+      }
+      for (const key of GEO_HEAVY) m.geo[key] = full[key];
+      return m;
+    })().finally(function () { delete geoLoads[id]; });
+    return geoLoads[id];
   };
   // 占用期间（缩略图绘制中）不释放；当前地图与正在进行的进度所在地图始终保留（载入别的存档失败时要切回）
   CM.holdGeo = function (id) {

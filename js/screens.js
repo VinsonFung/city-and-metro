@@ -460,7 +460,7 @@
       list.appendChild(sec);
     });
     const card = h('div', { class: 'card news' },
-      h('div', { class: 'card-head' }, h('span', { class: 'badge b-violet' }, ic('megaphone')), h('div', { class: 'grow' }, h('h2', null, '更新公告'), h('div', { class: 'tiny muted' }, '当前版本 V' + ((CM.NEWS || [])[0]?.v || CFG.GAME_VERSION))),
+      h('div', { class: 'card-head' }, h('span', { class: 'badge b-violet' }, ic('megaphone')), h('div', { class: 'grow' }, h('h2', null, '更新公告'), h('div', { class: 'tiny muted' }, '当前版本 V' + CFG.GAME_VERSION)),
         h('button', { class: 'iconbtn', 'data-tip': '关闭', 'data-key': 'Esc', onclick: close }, ic('close'))),
       list);
     this.openScreen(card, close);

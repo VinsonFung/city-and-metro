@@ -333,8 +333,8 @@
       const cy = new Map(); for (const r of E.ledger) cy.set(r.y, (cy.get(r.y) || 0) + (r.commerce || 0));
       for (const o of rows) o.r.commerce = cy.get(o.r.y) || 0;
     }
-    const inc = function (r) { return (r.grant || 0) + (r.fare || 0) + (r.reward || 0) + (r.commerce || 0) + (r.ppp || 0) + (r.fleetSale || 0); };
-    const exp = function (r) { return (r.construction || 0) + (r.demolition || 0) + (r.upgrade || 0) + (r.relocation || 0) + (r.ops || 0) + (r.todCost || 0) + (r.pppOut || 0); };
+    const inc = CM.Economy.incomeOf;
+    const exp = function (r) { return (r.construction || 0) + (r.demolition || 0) + (r.upgrade || 0) + (r.relocation || 0) + CM.Economy.opsOf(r) + (r.pppOut || 0); };
     const svc = function (r) { return (r.interest || 0) + (r.principal || 0) + (r.penalty || 0); };
     const anyDebt = E.ledger.some(function (r) { return r.bond || svc(r); }) || E.bonds.length;
     const cg = h('div', { class: 'chart-grid' });

@@ -5,6 +5,10 @@ export async function runV27Checks({evaluate:E,send,until,screenshot,delay,task,
  const tap=async sel=>{const p=await E(`(()=>{const e=document.querySelector(${JSON.stringify(sel)});if(!e)throw Error('Missing ${sel}');const r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,n=document.elementFromPoint(x,y);if(!r.width||!e.contains(n))throw Error('Covered ${sel}: '+n?.outerHTML.slice(0,180));return {x,y};})()`);await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[p]});await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await delay(80);};
  const audit=async(label,selector)=>{const r=await E(`(()=>{const out={bad:[],hits:0};for(const e of document.querySelectorAll(${JSON.stringify(selector)})){const s=getComputedStyle(e),r=e.getBoundingClientRect();if(!r.width||!r.height||s.visibility==='hidden'||e.disabled)continue;let a={l:Math.max(0,r.left),t:Math.max(0,r.top),r:Math.min(innerWidth,r.right),b:Math.min(innerHeight,r.bottom)};for(let p=e.parentElement;p;p=p.parentElement){const t=getComputedStyle(p),b=p.getBoundingClientRect();if(/auto|scroll|hidden|clip/.test(t.overflowX)){a.l=Math.max(a.l,b.left);a.r=Math.min(a.r,b.right);}if(/auto|scroll|hidden|clip/.test(t.overflowY)){a.t=Math.max(a.t,b.top);a.b=Math.min(a.b,b.bottom);}}if(a.r-a.l<5||a.b-a.t<5)continue;const n=document.elementFromPoint((a.l+a.r)/2,(a.t+a.b)/2);out.hits++;if(!e.contains(n))out.bad.push({text:e.innerText,by:n?.outerHTML.slice(0,120)});}return out})()`);report.states++;report.hits+=r.hits;if(r.bad.length)throw Error(label+' '+JSON.stringify(r.bad));};
  const close=async()=>{await E('CM.ui.opsApp?.close(null,true);CM.Stats.close();CM.NetMap.close();CM.ui.closeScreen();CM.ui.closePanel(true);true');};
+ if (process.env.CM_SETTLEMENT_ONLY) {
+  const {runSettlementChecks}=await import('./settlement-browser-cases.mjs');
+  await runSettlementChecks({E,until,fs,path,task,close,tap});return;
+ }
  if (process.env.CM_MAP_OPENING_ONLY) {
   await E('CM.Settings.set("language","zh-CN");CM.newGame({map:"sg",mode:"free",seed:19800101});true');
   await until('!CM.isLoading()&&CM.game?.mapId==="sg"&&!CM.game.pending',180000);
@@ -268,7 +272,7 @@ export async function runV27Checks({evaluate:E,send,until,screenshot,delay,task,
  await E(`(async()=>{
   const id='tk',stub=CM.MAPS[id].geo,head=document.head,append=head.appendChild;
   if(CM.geoReady(id))throw Error('Tokyo unexpectedly resident');
-  head.appendChild=function(node){if(node.tagName==='SCRIPT'&&node.src.endsWith('/geo_tk.js')){queueMicrotask(()=>node.onerror());return node;}return append.call(this,node);};
+  head.appendChild=function(node){if(node.tagName==='SCRIPT'&&new URL(node.src).pathname.endsWith('/geo_tk.js')){queueMicrotask(()=>node.onerror());return node;}return append.call(this,node);};
   try{const first=CM.loadGeo(id);if(first!==CM.loadGeo(id))throw Error('Duplicate geography request');
    const outcomes=await Promise.allSettled([first]);if(outcomes[0].status!=='rejected')throw Error('Geography failure was ignored');
   }finally{head.appendChild=append;}

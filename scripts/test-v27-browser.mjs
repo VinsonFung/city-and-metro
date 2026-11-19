@@ -1,9 +1,29 @@
 import {runV27Checks} from './v27-browser-cases.mjs';
 // Real Chromium hit-testing in an isolated profile; never opens player storage.
-import os from 'node:os';import {fileURLToPath} from 'node:url';import fs from 'node:fs/promises';import path from 'node:path';import http from 'node:http';import {spawn} from 'node:child_process';
+import os from 'node:os';import {fileURLToPath,pathToFileURL} from 'node:url';import fs from 'node:fs/promises';import path from 'node:path';import http from 'node:http';import {spawn} from 'node:child_process';
 const candidates=[process.env.CM_BROWSER,'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe','C:/Program Files/Google/Chrome/Application/chrome.exe','/usr/bin/chromium','/usr/bin/google-chrome','/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].filter(Boolean);let browser;for(const p of candidates){try{await fs.access(p);browser=p;break;}catch{}}if(!browser)throw Error('No Chromium browser found. Set CM_BROWSER to its executable path.');
 const root=path.resolve(fileURLToPath(new URL('..',import.meta.url))),tempRoot=os.tmpdir(),task=await fs.mkdtemp(path.join(tempRoot,'city-metro-mobile-')),profile=path.join(task,'profile');await fs.mkdir(profile);const output=process.env.CM_MOBILE_OUTPUT&&path.resolve(process.env.CM_MOBILE_OUTPUT);if(output)await fs.mkdir(output,{recursive:true});
-const server=http.createServer(async(req,res)=>{try{const u=new URL(req.url,'http://localhost'),f=path.resolve(root,'.'+(u.pathname==='/'?'/index.html':decodeURIComponent(u.pathname)));if(!f.startsWith(root+path.sep))throw Error('outside');const b=await fs.readFile(f);res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.webp':'image/webp','.json':'application/json'})[path.extname(f)]||'application/octet-stream');res.end(b);}catch{res.writeHead(404);res.end();}});await new Promise((r,j)=>server.once('error',j).listen(0,'127.0.0.1',r));
+const geoFixture=process.env.CM_GEO_RECOVERY_ONLY?{faults:new Map([['bj',[503]]]),requests:[]}:null;
+async function simulateGeoFailure(url, response) {
+  if (!geoFixture) return false;
+  const map = /^\/js\/geo_([a-z]+)\.js$/.exec(url.pathname)?.[1];
+  if (!map) return false;
+  geoFixture.requests.push(url);
+  const fault = geoFixture.faults.get(map)?.shift();
+  if (fault === 503) {
+    response.writeHead(503);
+    response.end('Test outage');
+    return true;
+  }
+  if (fault === 'stale') {
+    response.writeHead(200, {'Content-Type': 'text/javascript'});
+    response.end('window.staleGeoExecuted=true;');
+    return true;
+  }
+  if (fault === 'delay') await new Promise(resolve => setTimeout(resolve, 450));
+  return false;
+}
+const server=http.createServer(async(req,res)=>{try{const u=new URL(req.url,'http://localhost'),f=path.resolve(root,'.'+(u.pathname==='/'?'/index.html':decodeURIComponent(u.pathname)));if(!f.startsWith(root+path.sep))throw Error('outside');if(await simulateGeoFailure(u,res))return;const b=await fs.readFile(f);res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.webp':'image/webp','.json':'application/json'})[path.extname(f)]||'application/octet-stream');res.end(b);}catch{res.writeHead(404);res.end();}});await new Promise((r,j)=>server.once('error',j).listen(0,'127.0.0.1',r));
 const edge=spawn(browser,['--headless=new','--disable-gpu','--disable-extensions','--disable-sync','--no-first-run','--no-default-browser-check','--remote-debugging-port=0','--user-data-dir='+profile],{windowsHide:true,stdio:'ignore'}),delay=ms=>new Promise(r=>setTimeout(r,ms));let ws,send;
 try{let port;for(let i=0;i<100;i++){try{port=Number((await fs.readFile(path.join(profile,'DevToolsActivePort'),'utf8')).split('\n')[0]);break;}catch{}await delay(100);}if(!port)throw Error('No debug port');const target=await(await fetch('http://127.0.0.1:'+port+'/json/new?'+encodeURIComponent('http://127.0.0.1:'+server.address().port+'/'),{method:'PUT'})).json();ws=new WebSocket(target.webSocketDebuggerUrl);await new Promise((r,j)=>{ws.onopen=r;ws.onerror=j;});let seq=0;const waiting=new Map(),errors=[];
 ws.onclose=()=>{for(const w of waiting.values()){clearTimeout(w.timer);w.bad(Error('Browser closed'));}waiting.clear();};
@@ -13,6 +33,6 @@ const evaluate=async exp=>{const r=await send('Runtime.evaluate',{expression:exp
 const until=async(exp,ms=120000)=>{const start=Date.now();while(Date.now()-start<ms){if(await evaluate(exp))return;await delay(150);}throw Error('Wait '+exp+' '+errors.join('\n'));};
 const screenshot=async(name)=>{if(output)await fs.writeFile(path.join(output,name+'.png'),Buffer.from((await send('Page.captureScreenshot',{format:'png'})).data,'base64'));};
 await send('Runtime.enable');await send('Page.enable');await send('Emulation.setFocusEmulationEnabled',{enabled:true});await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});await send('Emulation.setTouchEmulationEnabled',{enabled:true});await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});await until('!!window.CM?.ui&&!!document.querySelector(".start-menu")');await evaluate('CM.Settings.set("autosave",false);CM.Settings.set("sound",false);CM.newGame({map:"bj",mode:"challenge",seed:19900101});true');await until('!CM.isLoading()&&!!CM.game&&!CM.game.pending');await evaluate('CM.ui.closeScreen();CM.ui.closePanel(true);CM.game.setSpeed(0);CM.ui.toasts.replaceChildren();CM.ui.clearCelebrations();true');
-await runV27Checks({evaluate,send,until,screenshot,delay,task,fs,path});if(output)await fs.copyFile(path.join(task,'report.json'),path.join(output,'report.json'));
+if(geoFixture){const{runGeoLoadChecks}=await import('./geo-loader-browser-cases.mjs');await runGeoLoadChecks({E:evaluate,send,until,task,fs,path,geoFixture,localIndex:pathToFileURL(path.join(root,'index.html')).href});}else await runV27Checks({evaluate,send,until,screenshot,delay,task,fs,path});if(output)await fs.copyFile(path.join(task,'report.json'),path.join(output,'report.json'));
 if(errors.length)throw Error('Browser errors:\n'+[...new Set(errors)].join('\n'));console.log('PASS isolated Edge browser checks');
 }catch(error){if(output&&send){try{const shot=await send('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(output,'failure.png'),Buffer.from(shot.data,'base64'));}catch{}}throw error;}finally{if(send)await Promise.race([send('Browser.close').catch(()=>{}),delay(1500)]);if(ws)ws.close();edge.kill();server.closeAllConnections();await new Promise(r=>server.close(r));if(path.dirname(task)!==tempRoot||!path.basename(task).startsWith('city-metro-mobile-')||(await fs.lstat(task)).isSymbolicLink())throw Error('Refusing to clean an unexpected profile path');await fs.rm(task,{recursive:true,force:true,maxRetries:6,retryDelay:100});}

@@ -598,6 +598,13 @@
     g.on('network', function () { self.updateOpsDock(); });
     g.on('autosave', function () { self.scheduleAutosave(); });
     g.on('failed', function (f) { snd('fail'); if (!g.jumping) self.showFailure(f); });
+    g.on('settlementError', function () {
+      clearTimeout(self._autoT);
+      self._jp = null;
+      self.markUnsaved();
+      snd('error');
+      self.showSettlementError();
+    });
     g.on('jump', function () { snd('whoosh'); self.showJump(); });
     g.on('jumpProgress', function (p) { self.updateJump(p); });
     g.on('jumpDone', function (r) { snd('chime'); self.rerenderPage(); self.showJumpResult(r); self.scheduleAutosave(); if (r.failed) self.showFailure(r.failed); });
@@ -1130,6 +1137,7 @@
   UI.prototype.setSpeed = function (s) {
     this.closeTimeOptions();
     const g = this.g(); if (!g || g.jumping) return;
+    if (g.settlementError) { this.showSettlementError(); return; }
     s = U.clamp(s, 0, CFG.time.speeds.length);
     if (g.econ.failed && s > 0) { this.toast('经营挑战已失败，请选择后续操作', 'bad'); this.showFailure(g.econ.failed); return; }
     if (s > 0) this.prevSpeed = s;
@@ -1185,6 +1193,7 @@
   UI.prototype.jump = function (n) {
     this.closeTimeOptions();
     const g = this.g(); if (!g) return;
+    if (g.settlementError) { this.showSettlementError(); return; }
     if (g.econ.failed) { this.showFailure(g.econ.failed); return; }
     if (!g.startJump(n)) this.toast('正在结算，请稍候', 'info');
   };
@@ -2995,7 +3004,7 @@
     const g = this.g();
     // 回主菜单（v2.3）：开始界面整体淡入，标题与按钮不再逐个重新弹出
     const go = function () { CM.endGame(); if (typeof after === 'function') after(); else self.showStart(null, true); };
-    if (!g) { go(); return; }
+    if (!g || g.settlementError) { go(); return; }
     const leave = function () {
       if (g.speed > 0) self.setSpeed(0);   // 先暂停，保证保存的就是离开时的状态
       if (self.isSaved()) { go(); return; }
@@ -3034,7 +3043,7 @@
   UI.prototype.markSaved = function (g, at, snap) { this.save = Object.assign({ state: 'saved', at: at, msg: '' }, snap || this.saveSnap(g)); };
   UI.prototype.scheduleAutosave = function () {
     const self = this;
-    if (!CM.Settings.get('autosave')) return;
+    if (!CM.Settings.get('autosave') || this.g()?.settlementError) return;
     clearTimeout(this._autoT);
     this._autoT = setTimeout(function () { const g = self.g(); if (g && !g.jumping && !g.pending) self.doAutosave(); else if (g) self.scheduleAutosave(); }, 700);
   };
@@ -3042,6 +3051,7 @@
   UI.prototype.doAutosave = function (force) {
     if (CM.isLoading && CM.isLoading()) return Promise.resolve({ ok: false, error: '正在载入游戏，请稍后保存' });
     const g = this.g(); if (!g) return Promise.resolve({ ok: true });
+    if (g.settlementError) return Promise.resolve({ ok: false, error: CM.Game.SETTLEMENT_ERROR });
     this.lastAuto = performance.now();
     const self = this;
     // 旧存档升级但升级前备份未能建立：暂停自动保存，避免自动存档轮换覆盖原存档（手动保存为新存档不受影响）
@@ -3064,6 +3074,7 @@
   UI.prototype.manualSave = function (slotId, label) {
     if (CM.isLoading && CM.isLoading()) return Promise.resolve({ ok: false, error: '正在载入游戏，请稍后保存' });
     const g = this.g(); if (!g) return Promise.resolve();
+    if (g.settlementError) { this.showSettlementError(); return Promise.resolve({ ok: false, error: CM.Game.SETTLEMENT_ERROR }); }
     if (g.pending || g.jumping) { this.toast('正在进行月度结算，请稍候再保存', 'info'); return Promise.resolve({ ok: false, error: '正在结算' }); }
     const self = this, snap = this.saveSnap(g);
     const pending = CM.Save.save(g, 'manual', { slotId: slotId, label: label || ('手动存档 ' + g.clock.y + '年' + g.clock.m + '月') }).then(function (r) {
@@ -3156,11 +3167,19 @@
     // ---- 财政（经营挑战）：期间已封账月份的收支 ----
     if (!free) {
       const rows = g.econ.ledger.filter(function (x) { const ym = U.ymIndex(x.y, x.m); return ym >= fromYm && ym < toYm; });
-      let inc = 0, ops = 0, bld = 0, svc = 0, bond = 0;
-      for (const x of rows) { inc += (x.grant || 0) + (x.fare || 0) + (x.reward || 0); ops += x.ops || 0; for (const k of CM.Economy.BUILD_KINDS) bld += x[k] || 0; svc += (x.interest || 0) + (x.principal || 0) + (x.penalty || 0); bond += x.bond || 0; }
+      let inc = 0, ops = 0, bld = 0, svc = 0, bond = 0, contractOut = 0;
+      for (const x of rows) {
+        inc += CM.Economy.incomeOf(x);
+        ops += CM.Economy.opsOf(x);
+        contractOut += x.pppOut || 0;
+        for (const k of CM.Economy.BUILD_KINDS) bld += x[k] || 0;
+        svc += (x.interest || 0) + (x.principal || 0) + (x.penalty || 0);
+        bond += x.bond || 0;
+      }
       const fb = h('div', { class: 'jr-fin' },
         h('div', null, h('small', null, '财政收入'), h('b', { class: 'good' }, '+' + U.fmtMoney(inc))),
         h('div', null, h('small', null, '运营成本'), h('b', { class: 'warn' }, '−' + U.fmtMoney(ops))),
+        contractOut > 0.5 ? h('div', null, h('small', null, '合同支出'), h('b', { class: 'warn' }, '−' + U.fmtMoney(contractOut))) : null,
         bld > 0.5 ? h('div', null, h('small', null, '建设支出'), h('b', { class: 'warn' }, '−' + U.fmtMoney(bld))) : null,
         svc > 0.5 ? h('div', null, h('small', null, '偿债'), h('b', { class: 'bad' }, '−' + U.fmtMoney(svc))) : null,
         bond > 0.5 ? h('div', null, h('small', null, '债券募集'), h('b', null, '+' + U.fmtMoney(bond))) : null,
@@ -3188,6 +3207,14 @@
       h('div', { class: 'jr-scroll' }, tl, parts),
       h('div', { class: 'modal-actions' }, h('button', { class: 'btn', onclick: function () { self.closeScreen(); self.openStats(); } }, ic('chart'), '查看统计'), h('button', { class: 'btn primary', onclick: function () { self.closeScreen(); } }, '继续')));
     this.openScreen(card, function () { self.closeScreen(); });
+  };
+  UI.prototype.showSettlementError = function () {
+    const self = this;
+    this.openScreen(h('div', { class: 'card' }, this.cardHead('error', 'b-red', '结算中断'),
+      this.callout('bad', 'error', CM.Game.SETTLEMENT_ERROR),
+      h('div', { class: 'modal-actions' },
+        h('button', { class: 'btn', onclick: function () { self.backToMenu(); } }, ic('home'), '主菜单'),
+        h('button', { class: 'btn primary', onclick: function () { self.showSaveManager(true); } }, ic('folder'), '读取存档'))));
   };
   UI.prototype.showFailure = function (f) {
     const g = this.g(), self = this;

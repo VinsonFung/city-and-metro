@@ -119,7 +119,7 @@
       const cores = navigator.hardwareConcurrency || 2, n = (navigator.deviceMemory <= 4 || matchMedia('(pointer:coarse)').matches) ? 1 : cores >= 8 ? 2 : 1, id = CM.mapId, mp = CM.curMap ? CM.curMap() : null;
       const data = { landmarks: D.landmarks, runways: D.runways, airport: D.airport, reclaim: (D.reclaim || []).map(function (r) { return { id: r.id, year: r.year, name: r.name }; }), hsrYear: D.hsrYear, railYears: D.railYears, walls: D.walls };
       const regionalRailYears = D.railByRegion ? CM.Geo.rail.map(function (r) { return r.year || 0; }) : null;
-      const geoFile = id === 'gz' ? 'geo_gz.js' : mp && mp.geo.file ? mp.geo.file.split('/').pop() : null;
+      const geoFile = id === 'gz' ? 'geo_gz.js' : mp && mp.geo.file ? CM.geoAssetPath(mp.geo).split('/').pop() : null;
       const msg = { type: 'map', regionalRailYears: regionalRailYears, data: data, cfg: { W: CFG.W, H: CFG.H, START: CFG.START }, region: mp ? mp.region : null, geoId: id, geoFile: geoFile, geo: geoFile ? null : CM.GEO };
       this.list = [];
       for (let i = 0; i < n; i++) {

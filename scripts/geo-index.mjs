@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import vm from 'node:vm';
+import { createHash } from 'node:crypto';
 
 export async function geoIndex(root, write = false) {
   const html = await readFile(path.join(root, 'index.html'), 'utf8');
@@ -9,10 +10,12 @@ export async function geoIndex(root, write = false) {
   const index = {};
   for (const [, file, id] of entries) {
     const CM = {};
-    vm.runInNewContext(await readFile(path.join(root, file), 'utf8'), { window: { CM } }, { filename: file, timeout: 10000 });
+    const bytes = await readFile(path.join(root, file));
+    vm.runInNewContext(bytes.toString('utf8'), { window: { CM } }, { filename: file, timeout: 10000 });
     const G = CM.GEOS?.[id];
     if (!G?.proj || !G.water || !G.roads) throw new Error('地图数据不完整：' + file);
-    index[id] = { file, proj: G.proj, names: G.names || [], places: G.places || [], count: { water: G.water.length, roads: G.roads.length } };
+    const integrity = 'sha256-' + createHash('sha256').update(bytes).digest('base64');
+    index[id] = { file, integrity, proj: G.proj, names: G.names || [], places: G.places || [], count: { water: G.water.length, roads: G.roads.length } };
   }
   const output = "'use strict';\n// 由 scripts/geo-index.mjs 根据各城市地理数据生成。\n" +
     '(function (CM) {\n  const geos = CM.GEOS = CM.GEOS || {};\n  const index = {\n' +

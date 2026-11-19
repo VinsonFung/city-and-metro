@@ -114,6 +114,21 @@
     ui.openScreen(CM.U.h('div', { class: 'card' }, CM.U.h('h2', null, what + '失败'), CM.U.h('div', { class: 'callout bad' }, String(e && e.message || e)),
       CM.U.h('div', { class: 'modal-actions' }, CM.U.h('button', { class: 'btn primary', onclick: function () { if (CM.game) ui.closeScreen(); else ui.showStart(); } }, '确定'))));
   }
+  function geoLoadError(error, mapId, retry, isNew) {
+    const h = CM.U.h;
+    console.warn(error.message, error.file);
+    const back = function () {
+      if (CM.game) ui.closeScreen();
+      else if (isNew) ui.showMapSelect(mapId);
+      else ui.showSaveManager(false, mapId);
+    };
+    ui.openScreen(h('div', { class: 'card' }, ui.cardHead('error', 'b-red', '无法载入地图'),
+      ui.callout('bad', 'error', error.message),
+      h('p', { class: 'note' }, '请检查网络连接后重试。若游戏刚更新，可以刷新页面后再进入。'),
+      h('div', { class: 'modal-actions' },
+        h('button', { class: 'btn', onclick: back }, '返回'),
+        h('button', { class: 'btn primary', onclick: retry }, '重试载入'))), back);
+  }
   function start(g, isNew) {
     if (CM.Soundscape) CM.Soundscape.reset();
     if (CM.Follow) CM.Follow.stop(true);
@@ -188,6 +203,7 @@
     if (prev && prev.model) prev.model.retired = true;
     if (CM.CarPool) CM.CarPool.onReq = null;
     ui.showLoading(message, isNew ? (message.includes('推演') ? 'pre' : 'new') : 'load', mapId);
+    if (!CM.geoReady(mapId)) CM.loadProgress(0.02, '正在下载地图数据…');
     const end = function () {
       clearTimeout(job.timer);
       if (CM.CarPool && CM.CarPool.onReq === job.resume) CM.CarPool.onReq = null;
@@ -236,7 +252,8 @@
           if (prev.model) prev.model.retired = job.prevRetired;
           if (CM.applyMoneyEra) CM.applyMoneyEra(prev.clock.y, prev.clock.m);
         }
-        if (what === '载入存档') ui.showLoadError(e, ui._loadingSlotId); else fail(e, what);
+        if (e?.code === 'GEO_LOAD') geoLoadError(e, mapId, function () { runLoad(mapId, message, makeGen, isNew, what); }, isNew);
+        else if (what === '载入存档') ui.showLoadError(e, ui._loadingSlotId); else fail(e, what);
       }
     };
     job.resume = function () { if (loading === job) { clearTimeout(job.timer); job.timer = setTimeout(step, 0); } };
