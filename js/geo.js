@@ -72,6 +72,14 @@
     Geo.roads = G.roads.map(function (r) { const p = dec(r[3]); return { name: names[r[0]] || '', cls: r[1], flags: r[2], p: p, bbox: bboxOf(p) }; });
     Geo.streets = G.streets ? G.streets.split('!').map(function (s) { const p = dec(s); return { p: p, bbox: bboxOf(p) }; }) : [];
     Geo.rail = G.rail.map(function (r) { const p = dec(r[2]); return { name: names[r[0]] || '', flags: r[1], p: p, bbox: bboxOf(p), year: r[3] || 0 }; });   // year：开通年份（可缺省）
+    // 地图数据的 railYears（v2.9）：线路名（完全相同或前缀）→ 通车年份，或 [通车, 停运]；写了年份的线路 dated，通车后即使全在隧道里也显示
+    { const RY = CM.DATA.railYears; if (RY) for (const r of Geo.rail) {
+      if (!r.name) continue;
+      let v = RY[r.name], bl = 0;
+      if (v == null) for (const k in RY) if (k.length > bl && r.name.indexOf(k) === 0) { v = RY[k]; bl = k.length; }
+      if (v == null) continue;
+      r.dated = true; if (Array.isArray(v)) { r.year = v[0]; r.close = v[1]; } else r.year = v;
+    } }
     Geo.parks = G.parks.map(function (r) { return polyFeat(r, names); });
     Geo.reserves = G.reserves.map(function (r) { return polyFeat(r, names); });
     Geo.woods = G.woods.map(function (r) { return polyFeat(r, names); });
@@ -83,6 +91,8 @@
     Geo.src = G; Geo.ready = true;
     return Geo;
   };
+  // 丢掉某一数据源的解码结果（v3.0 内存）：该地图的完整地理数据被释放时（maps.js releaseGeo）一并释放，正在使用的不动
+  Geo.forget = function (G) { if (G !== Geo.src) cache.delete(G); };
 
   // 多边形扫描线填充（每个要素内部按奇偶规则，要素之间取并集）。S 为每格子像素数。
   Geo.fill = function (mask, FW, FH, S, feats, valueOf) {
@@ -195,6 +205,109 @@
     seen = seen || new Set();
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) for (const k of bk.b[j * bk.TW + i]) if (!seen.has(k)) { seen.add(k); out.push(k); }
     return out;
+  };
+  // ---------- 铁路的显示规则与连续性（v2.9） ----------
+  // 地铁线、主要走隧道的线路（规划中的城际等）不算地图上的铁路，地面图只有这些线路的地面段
+  const NOT_RAIL = /地铁|轨道交通|轻轨|轻铁|metro|subway|mrt|lrt/i, railInfo = new WeakMap();
+  const lineLen = function (p) { let L = 0; for (let i = 0; i + 3 < p.length; i += 2) L += Math.hypot(p[i + 2] - p[i], p[i + 3] - p[i + 1]); return L; };
+  function undergroundNames(rail) {
+    let S = railInfo.get(rail); if (S) return S;
+    const all = new Map(), tun = new Map();
+    for (const r of rail) { const L = lineLen(r.p), n = r.name || ''; all.set(n, (all.get(n) || 0) + L); if (r.flags & 2) tun.set(n, (tun.get(n) || 0) + L); }
+    S = new Set(); all.forEach(function (L, n) { if (n && (tun.get(n) || 0) > 0.6 * L) S.add(n); });
+    railInfo.set(rail, S); return S;
+  }
+  Geo.railIsMetro = function (r) { return NOT_RAIL.test(r.name || ''); };
+  Geo.railShown = function (r) { return r.p.length >= 4 && !NOT_RAIL.test(r.name || '') && (r.dated || !(r.name && undergroundNames(Geo.rail).has(r.name))); };   // 写了通车年份的隧道线（如高铁）通车后要显示
+  // 线路自己的开通年份优先。只有未标年份的高铁才用地图的统一年份。
+  Geo.railOpenYear = function (r) { return r.year || ((r.flags & 16) ? (CM.DATA.hsrYear || 2009) : 0); };
+  // 连接段：地面图和图层都不画隧道，线路在隧道、有盖路段和很短的数据缺口处会断开。这里找出「地面段—隧道链—地面段」和相距很近的同线路断头，
+  // 生成连接段（字段与 Geo.rail 相同，只用于显示，不影响步行阻隔和模拟）。隧道链不超过 3.5 km（JOIN_MAX 格），长隧道标记 dash 画虚线
+  const JOIN_TOL = 0.06, JOIN_MAX = 14, GAP_MAX = 1.6, joinCache = new WeakMap();
+  Geo.resetRailJoins = function () { if (Geo.rail) joinCache.delete(Geo.rail); };
+  Geo.railJoins = function () {
+    const rail = Geo.rail || []; let J = joinCache.get(rail); if (J) return J;
+    J = [];
+    const surf = [], tun = [], W = CM.CFG.W, H = CM.CFG.H, CM_M = CM.CFG.CELL_M;
+    const under = undergroundNames(rail), whole = [];   // 写了年份、主要走隧道的线路：隧道段整段显示，不用再找接续
+    for (const r of rail) if (Geo.railShown(r)) (r.flags & 2 ? (r.dated && under.has(r.name) ? whole : tun) : surf).push(r);
+    const G = new Map(), ends = new Map(), put = function (m, k, v) { let a = m.get(k); if (!a) m.set(k, a = []); a.push(v); }, key = function (x, y) { return Math.floor(x) * 100000 + Math.floor(y); };
+    for (const r of surf) for (let i = 0; i + 3 < r.p.length; i += 2) {
+      const n = Math.max(1, Math.ceil(Math.hypot(r.p[i + 2] - r.p[i], r.p[i + 3] - r.p[i + 1]))), seen = new Set();
+      for (let q = 0; q <= n; q++) { const k = key(r.p[i] + (r.p[i + 2] - r.p[i]) * q / n, r.p[i + 1] + (r.p[i + 3] - r.p[i + 1]) * q / n); if (!seen.has(k)) { seen.add(k); put(G, k, [r.p[i], r.p[i + 1], r.p[i + 2], r.p[i + 3], r]); } }
+    }
+    tun.forEach(function (t) { const n = t.p.length; put(ends, key(t.p[0], t.p[1]), [t, false]); put(ends, key(t.p[n - 2], t.p[n - 1]), [t, true]); });
+    const around = function (m, x, y, fn) { const cx = Math.floor(x), cy = Math.floor(y); for (let a = cx - 1; a <= cx + 1; a++) for (let b = cy - 1; b <= cy + 1; b++) { const L = m.get(a * 100000 + b); if (L) for (const v of L) if (fn(v) === true) return; } };
+    // (x, y) 附近的另一条地面铁路（skip 除外）
+    const touch = function (x, y, skip) { let hit = null; around(G, x, y, function (s) { if (s[4] !== skip && CM.U.distToSeg(x, y, s[0], s[1], s[2], s[3]) <= JOIN_TOL) { hit = s[4]; return true; } }); return hit; };
+    // 沿 (dx, dy) 方向约 110 m 处有没有地面铁路（双线铁路的两条股道挨得很近，只看端点会把并行股道当成接上了）
+    const ahead = function (x, y, dx, dy, skip) {
+      const L = Math.hypot(dx, dy) || 1, px = x + dx / L * 0.45, py = y + dy / L * 0.45; let hit = null;
+      around(G, px, py, function (s) { if (s[4] !== skip && CM.U.distToSeg(px, py, s[0], s[1], s[2], s[3]) <= 0.14) { hit = s[4]; return true; } });
+      return hit;
+    };
+    // 从地面段的断头沿隧道走，找到最短能回到地面铁路的隧道链
+    const idx = new Map(tun.map(function (t, i) { return [t, i]; })), lens = tun.map(function (t) { return lineLen(t.p); });
+    const walk = function (x0, y0, r0) {
+      // 按里程从短到长展开（每段隧道每个方向只走一次），隧道很密的城市也不会变慢
+      const open = [{ x: x0, y: y0, len: 0, prev: null, e: null }], done = new Set();
+      while (open.length) {
+        let bi = 0; for (let i = 1; i < open.length; i++) if (open[i].len < open[bi].len) bi = i;
+        const cur = open[bi]; open[bi] = open[open.length - 1]; open.pop();
+        if (cur.e) {
+          // 隧道出口前方要有继续往前的地面铁路，只是挨着并行的另一条股道不算走出隧道
+          const t = cur.e[0].p, m = t.length, ax = cur.e[1] ? t[0] - t[2] : t[m - 2] - t[m - 4], ay = cur.e[1] ? t[1] - t[3] : t[m - 1] - t[m - 3];
+          const o = ahead(cur.x, cur.y, ax, ay, r0);
+          if (o) { const parts = []; for (let q = cur; q.e; q = q.prev) parts.unshift(q.e); return { len: cur.len, parts: parts, end: o }; }
+        }
+        around(ends, cur.x, cur.y, function (e) {
+          const t = e[0], rev = e[1], n = t.p.length, i = idx.get(t), k = i * 2 + (rev ? 1 : 0);
+          if (done.has(k)) return;
+          const sx = rev ? t.p[n - 2] : t.p[0], sy = rev ? t.p[n - 1] : t.p[1]; if (Math.hypot(sx - cur.x, sy - cur.y) > JOIN_TOL) return;
+          const nl = cur.len + lens[i]; if (nl > JOIN_MAX) return;
+          done.add(k);
+          open.push({ x: rev ? t.p[0] : t.p[n - 2], y: rev ? t.p[1] : t.p[n - 1], len: nl, prev: cur, e: e });
+        });
+      }
+      return null;
+    };
+    const make = function (p, src, dash) {
+      let hsr = 0, year = 0;
+      for (const r of src) {
+        if (r.flags & 16) hsr = 16;
+        year = Math.max(year, Geo.railOpenYear(r));
+      }
+      const m = lineLen(p) * CM_M, named = src.find(function (r) { return r.name; });
+      let close = 0; for (const r of src) if (r.close && (!close || r.close < close)) close = r.close;
+      J.push({ name: named ? named.name : '', flags: hsr, p: p, bbox: bboxOf(p), year: year, close: close, m: m, dash: dash || m > 350, join: true });
+    };
+    for (const t of whole) make(t.p, [t], true);
+    const seen = new Set(), free = [];
+    for (const r of surf) for (const atEnd of [false, true]) {
+      const n = r.p.length, x = atEnd ? r.p[n - 2] : r.p[0], y = atEnd ? r.p[n - 1] : r.p[1], dx = atEnd ? x - r.p[n - 4] : x - r.p[2], dy = atEnd ? y - r.p[n - 3] : y - r.p[3];
+      if (x < 0.3 || y < 0.3 || x > W - 0.3 || y > H - 0.3 || ahead(x, y, dx, dy, r)) continue;   // 到了地图边缘，或前方还有地面铁路
+      const b = walk(x, y, r);
+      if (!b) { if (!touch(x, y, r)) free.push({ x: x, y: y, r: r, dx: dx, dy: dy }); continue; }
+      const id = b.parts.map(function (e) { return idx.get(e[0]); }).sort(function (a, c) { return a - c; }).join('-');
+      if (seen.has(id)) continue; seen.add(id);
+      const p = [x, y]; for (const e of b.parts) { const t = e[0].p, m = t.length; if (e[1]) for (let i = m - 2; i >= 0; i -= 2) p.push(t[i], t[i + 1]); else for (let i = 0; i < m; i += 2) p.push(t[i], t[i + 1]); }
+      make(p, [r, b.end].concat(b.parts.map(function (e) { return e[0]; })));
+    }
+    // 很短的数据缺口：同名（或都没有名字）、方向接得上的两个断头直接连起来
+    const paired = new Set();
+    for (const a of free) {
+      if (paired.has(a)) continue;
+      let best = null, bd = GAP_MAX;
+      for (const c of free) {
+        if (c === a || paired.has(c) || c.r === a.r || c.r.name !== a.r.name) continue;
+        const vx = c.x - a.x, vy = c.y - a.y, d = Math.hypot(vx, vy); if (d >= bd || d < 1e-6) continue;
+        if ((vx * a.dx + vy * a.dy) / d / (Math.hypot(a.dx, a.dy) || 1) < 0.5 || -(vx * c.dx + vy * c.dy) / d / (Math.hypot(c.dx, c.dy) || 1) < 0.5) continue;
+        bd = d; best = c;
+      }
+      if (best) { paired.add(a); paired.add(best); make([a.x, a.y, best.x, best.y], [a.r, best.r]); }
+    }
+    joinCache.set(rail, J);
+    return J;
   };
   // 在画布上描出要素路径
   Geo.tracePoly = function (ctx, f) {

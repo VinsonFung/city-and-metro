@@ -11,7 +11,7 @@ for (const [,src] of (await readFile(new URL('index.html',root),'utf8')).matchAl
 }
 const C = context.CM, M = C.Metro;
 assert.ok(parseFloat(C.CFG.GAME_VERSION)>=2.4); assert.ok(C.CFG.RULES_REVISION>=5);
-assert.equal(C.MAP_ORDER.length,12); assert.equal(C.MAPS.bj.cfg.W,204); assert.equal(C.MAPS.bj.cfg.H,156);
+assert.equal(C.MAP_ORDER.length,15); assert.equal(C.MAPS.bj.cfg.W,204); assert.equal(C.MAPS.bj.cfg.H,172);
 assert.ok(C.MAPS.bj.data.initialNetwork);
 if (!process.argv.includes('--tasks-only')) {
 C.useMap('bj');
@@ -74,7 +74,7 @@ const oldServable=C.Tasks.facServable,oldShare=C.Tasks.facShareOf,oldGoals=C.Era
 try {
   C.Tasks.facServable=()=>true; C.Tasks.facShareOf=()=>({share:.02,vol:10000}); C.Eras.goals=()=>[];
   const facility={id:'fixture-fac',name:'测试设施',t:'rail',T:{hub:true},x:20,y:0,r:1,lmK:-1};
-  const fixture={clock:{y:2000,m:1},econ:{mode:'free',costIndex:()=>1,fare:{mode:'flat',flat:10}},city:{landFrac:[1],region:[0],regions:[{scenic:false}],cellLocked:()=>false},compiled:{stations:[{id:'edge',name:'线网端点',x:0,y:0,size:'M'}],serviced:[true]},model:{Z:0,net:{acc:null},daily:{metro:0,metroShare:.1},trafficReady:()=>true,facDaily:{},fn:{list:[facility]}},zoneCong:()=>1.5,zoneName:()=> '测试片区'};
+  const fixture={clock:{y:2000,m:1},econ:{mode:'free',costIndex:()=>1,fare:{mode:'flat',flat:10}},city:{landFrac:[1],region:[0],regions:[{scenic:false}],cellAt:()=>0,cellLocked:()=>false},compiled:{stations:[{id:'edge',name:'线网端点',x:0,y:0,size:'M'}],serviced:[true]},model:{Z:0,net:{acc:null},daily:{metro:0,metroShare:.1},trafficReady:()=>true,facDaily:{},fn:{list:[facility]}},zoneCong:()=>1.5,zoneName:()=> '测试片区'};
   let generated=new C.Tasks().generate(fixture);
   assert.equal(generated.type,'connect'); assert.equal(generated.anchors.length,2); assert.equal(generated.anchors[1].name,'线网端点');
   facility.x=10; generated=new C.Tasks().generate(fixture); assert.equal(generated.type,'facShare'); assert.equal(generated.target,.07); assert.equal(generated.fare0,10);

@@ -5,7 +5,7 @@
 self.window = self;
 importScripts('util.js', 'config.js', 'accessibility.js');
 self.CM.DATA = {};
-importScripts('geo.js', 'city.js', 'render.js', 'sites.js', 'scenery.js');
+importScripts('geo.js', 'city.js', 'render.js', 'terminals.js', 'sites.js', 'scenery.js');
 self.document = { createElement: function (tag) { if(tag !== 'canvas') throw Error('Unsupported worker element'); return new OffscreenCanvas(1,1); } };
 CM.Settings = { get: function (key) { return key === 'lighting' ? (!CM.workerRenderer || CM.workerRenderer.lightOn) : key === 'gfx' ? 'auto' : null; } };
 self.matchMedia = function () { return {matches:false}; };
@@ -21,6 +21,10 @@ self.matchMedia = function () { return {matches:false}; };
     Object.assign(CFG, m.cfg);
     CM.curMap = function () { return { region: m.region }; };
     Geo.ready = false; Geo.init();
+    if (m.regionalRailYears && m.regionalRailYears.length === Geo.rail.length) {
+      m.regionalRailYears.forEach(function (year, i) { if (year) Geo.rail[i].year = year; });
+      Geo.resetRailJoins();
+    }
     R = new CM.Renderer(new OffscreenCanvas(1, 1)); CM.workerRenderer = R;
     city = null; game = null;
   };

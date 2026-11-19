@@ -105,15 +105,18 @@
       { id: 'tucheng', name: '土城', district: ['土城区'], open: 1997, plan: 'resind' },
       { id: 'xizhi', name: '汐止', district: ['汐止区'], open: 1999, plan: 'resind' },
       // v2.1 扩大范围：盆地边缘的淡水、林口台地、树林·莺歌·三峡与基隆七堵
-      { id: 'keelung', name: '七堵·安乐（基隆）', district: ['七堵区', '安乐区'], open: 2003, plan: 'resind' },
-      { id: 'shulin', name: '树林·莺歌', district: ['树林区', '莺歌区'], open: 2000, plan: 'resind', pop: 5.95e6 },
-      { id: 'tamsui', name: '淡水·八里', district: ['淡水区', '八里区'], open: 1997, plan: 'res', pop: 5.75e6, note: '淡水新市镇 1990 年代后期起开发（史实）' },
-      { id: 'linkou', name: '林口·龟山', district: ['林口区', '龟山区'], open: 2002, plan: 'resind', pop: 6.0e6, note: '林口新市镇 1990 年代后期起大规模开发（史实）' },
-      { id: 'sanxia', name: '三峡', district: ['三峡区'], open: 2005, plan: 'res', pop: 6.15e6, note: '台北大学三峡校区与北大特定区 2000 年代起开发（史实）' },
+      { id: 'keelung', name: '基隆', poly: poly([[25.2300, 121.6974], [25.2300, 121.7966], [25.0700, 121.7966], [25.0700, 121.6974]]), district: ['七堵区', '安乐区', '暖暖区', '仁爱区'], open: 2003, plan: 'resind', island: true },
+      { id: 'shulin', name: '树林·莺歌', district: ['树林区', '莺歌区'], open: 2000, plan: 'resind', pop: 7.04e6 },
+      { id: 'tamsui', name: '淡水·八里', district: ['淡水区', '八里区'], open: 1997, plan: 'res', pop: 6.85e6, note: '淡水新市镇 1990 年代后期起开发（史实）' },
+      { id: 'linkou', name: '林口·龟山', district: ['林口区', '龟山区'], open: 2002, plan: 'resind', pop: 7.1e6, note: '林口新市镇 1990 年代后期起大规模开发（史实）' },
+      { id: 'taoyuan', name: '桃园', district: ['桃园区', '八德区', '芦竹区'], open: 2004, plan: 'mix', pop: 7.21e6 },
+      { id: 'sanxia', name: '三峡', district: ['三峡区'], open: 2005, plan: 'res', pop: 7.27e6, note: '台北大学三峡校区与北大特定区 2000 年代起开发（史实）' },
     ],
-    defaultRegion: { id: 'outer', name: '外围（五股·泰山·深坑·北海岸等）', open: 2003, plan: 'res', pop: 6.05e6 },
+    defaultRegion: { id: 'outer', name: '外围（五股·泰山·深坑·北海岸等）', open: 2003, plan: 'res', pop: 7.15e6 },
     plans: CM.DATA.plans,
     // 1990 年人口与就业中心（估算，人/km²；r 约为影响半径 km）
+    // 片区设施（商业中心、区域医院、文体公园）出现门槛的人口基准：保持扩图前 2020 年的全图人口，原有片区不因 v2.9 扩图推迟
+    facPopRef: 6.42e6,
     centers: [
       at(25.0450, 121.5130, { pop: 25000, jobs: 70000, r: 1.2 }),   // 台北车站、西门、博爱特区
       at(25.0350, 121.5000, { pop: 35000, jobs: 15000, r: 1.0 }),   // 万华（艋舺）
@@ -145,15 +148,30 @@
       at(24.9340, 121.3690, { pop: 7000, jobs: 3000, r: 0.9 }),     // 三峡
       at(25.0770, 121.3910, { pop: 3000, jobs: 1500, r: 1.0 }),     // 林口
       at(25.0930, 121.6940, { pop: 9000, jobs: 4000, r: 0.9 }),     // 七堵
+      // v2.9 扩大范围（起始年估算，OSM 坐标；pop、jobs 为中心密度，已按本图的总量归一化倍率换算，使归一化后接近当年规模）
+      at(25.128, 121.741, { pop: 20000, jobs: 12000, r: 1.8 }),   // 基隆
+      at(25.101, 121.738, { pop: 7200, jobs: 3500, r: 1 }),   // 暖暖
+      at(25.013, 121.308, { pop: 19200, jobs: 13400, r: 1.7 }),   // 桃园
+      at(24.955, 121.31, { pop: 8400, jobs: 4900, r: 1.2 }),   // 八德
+      at(25.048, 121.305, { pop: 7200, jobs: 5300, r: 1 }),   // 南崁
+      at(24.865, 121.55, { pop: 2900, jobs: 2100, r: 0.5 }),   // 乌来
+      at(25.222, 121.636, { pop: 5700, jobs: 2800, r: 0.8 }),   // 金山
+      at(25.026, 121.739, { pop: 2900, jobs: 1100, r: 0.5 }),   // 平溪
     ],
     rural: { pop: 500, jobs: 150 },
     // 1990 年后通车的快速道路与高速公路（参考）；未列出的道路与跨河桥梁视为 1990 年已有
+    // 铁路通车年份（线路名或前缀 → 年份，或 [通车, 停运]）：开局后才通车或停运的线路，按公开通车时间整理
+    railYears: { '台湾高速铁路': 2007, '龟山隧道': 2007, '回龙隧道': 2007, '纵贯线西正线': 1989, '纵贯线东正线': 1989 },
     roadYears: {
       '福尔摩沙高速公路': 1996, '台北联络线': 1996, '市民大道高架道路': 1997, '信义快速道路': 2002, '环东大道': 2003,
       '东西向快速公路 八里新店线': 2005, '蒋渭水高速公路': 2006, '南港联络道': 2006, '五股土城线': 2008, '洲美快速道路': 2009,
     },
     bridgeYears: {}, bridgeDefaultYear: 1990,
     simRoads: [],
+    // 代表性的渡轮航线：两端都是地图上标注的码头（v2.9）
+    bgViz: { ferries: [
+      { name: '淡水—八里渡轮', piers: ['淡水码头', '八里码头'], n: 2, color: '#f4f1e8', pts: [[55.81, 23.72], [52.26, 27.65]] },
+    ] },
     landmarks: [
       Object.assign(at(25.0372, 121.4999), { id: 'tp_longshan', name: '龙山寺', w: 100, d: 120, year: 1900, kind: 'temple' }),
       Object.assign(at(25.0400, 121.5119), { id: 'tp_office', name: '总统府', w: 140, d: 130, year: 1919, kind: 'colonial' }),
@@ -181,7 +199,7 @@
       { id: 'tp_banqiao', n: '板桥车站', t: 'rail', lm: 'tp_banqiao', pax: [[1999, 1.5], [2007, 3], [2015, 4.5], [2030, 5]] },
       { id: 'tp_songshan_rail', n: '松山车站', t: 'rail', at: ll(25.0493, 121.5781), pax: [[1990, 1], [2008, 1.5], [2030, 2]] },
       { id: 'tp_nangang_rail', n: '南港车站', t: 'rail', at: ll(25.0530, 121.6070), pax: [[1990, 0.4], [2008, 0.6], [2016.5, 2], [2030, 2.5]], note: '2016 年 7 月高铁延伸至南港。' },
-      { id: 'tp_tpe', n: '桃园机场（林口接驳）', t: 'air', ext: ['W', 13],at: ll(25.0610, 121.3700), pax: [[1990, 1.8], [2000, 3], [2010, 4], [2019, 6.5], [2030, 7.5]], note: '桃园国际机场（2006 年前称中正国际机场，1979 年启用）在地图西缘以西约 13 km。此处为机场方向的高速公路与轨道交通出图的接驳点。' },
+      { id: 'tp_tpe', n: '桃园机场（西部接驳）', t: 'air', ext: ['W', 7],at: ll(25.0610, 121.3050), pax: [[1990, 1.8], [2000, 3], [2010, 4], [2019, 6.5], [2030, 7.5]], note: '桃园国际机场（2006 年前称中正国际机场，1979 年启用）在地图西缘以西约 7 km。此处为机场方向的高速公路与轨道交通出图的接驳点。' },
       { id: 'tp_tsa', n: '松山机场', t: 'air', at: ll(25.0630, 121.5520), pax: [[1990, 1.85], [1997, 4], [2003, 3], [2007, 2], [2009, 1.2], [2012, 1.5], [2019, 1.6], [2030, 1.7]], note: '国内航线 1990 年代快速增长，2007 年高铁通车后大幅减少，2008 年起增开两岸与东北亚城市航线。' },
       { id: 'tp_ntu', n: '台湾大学', t: 'uni', lm: 'tp_ntu', w: 0.03 },
       { id: 'tp_ntnu', n: '台湾师范大学', t: 'uni', at: ll(25.0262, 121.5276), w: 0.015 },
@@ -226,8 +244,8 @@
       { y: 1990, m: 3, tag: '史实', title: '台北市行政区调整为 12 区', desc: '原 16 个区合并调整为中正、大同、中山、松山、大安、万华、信义、士林、北投、内湖、南港、文山 12 区。' },
       { y: 1993, m: 12, tag: '史实', title: '基隆河截弯取直完工', desc: '大直、内湖一带的弯曲河道被拉直，旧河道整理为新的城市用地，1994 年起开放开发。', fx: { grow: { region: 'newland', pop: 1.3, jobs: 1.5, years: 8 } } },
       { y: 1994, m: 10, tag: '史实', title: '台北市政府迁入信义计划区', desc: '市政中心东移，信义计划区成为台北的新都心。', fx: { grow: { region: 'xinyi', jobs: 1.8, years: 10 } } },
-      { y: 1999, m: 7, tag: '史实', title: '板桥车站启用', desc: '铁路板桥站地下化并启用新站，周边的新板特区开始开发。', fx: { grow: { region: 'xinban', jobs: 1.6, years: 8 } } },
-      { y: 2004, m: 12, tag: '史实', title: '台北101 落成', desc: '高 508 米，当时世界最高的建筑。' },
+      { y: 1999, m: 7, tag: '史实', title: '板桥车站启用', desc: '铁路板桥站地下化并启用新站，周边的新板特区开始开发。', fx: { grow: { region: 'xinban', jobs: 1.6, years: 8 } }, task: { id: 'tp-e1', type: 'facShare', fac: 'tp_banqiao', target: 0.15, months: 48, rewardMonths: 1, title: '板桥车站转乘', desc: '铁路板桥站地下化，新站启用。让到发旅客坐捷运转乘的比例达到 15%。' } },
+      { y: 2004, m: 12, tag: '史实', title: '台北101 落成', desc: '高 508 米，当时世界最高的建筑。', task: { id: 'tp-e2', type: 'facShare', fac: 'tp_101', target: 0.15, months: 48, rewardMonths: 1, title: '台北101 的游客', desc: '台北101 落成，成为世界最高楼，观景台天天排长队。让到101 的游客里有 15% 坐捷运。' } },
       { y: 2007, m: 3, tag: '史实', title: '台湾高铁通车至台北', desc: '高速铁路经板桥进入台北车站，台北到高雄最快约 90 分钟。' },
       { y: 2008, m: 3, tag: '史实', title: '南港展览馆启用', desc: '台北的展览中心向东延伸到南港。', fx: { grow: { region: 'nangang', jobs: 1.3, years: 6 } } },
       { y: 2010, m: 11, tag: '史实', title: '台北国际花卉博览会', desc: '在圆山、新生、美术、大佳四个园区举行，展期约半年。', fx: { demand: { lz: 1.15, months: 6 }, sat: { v: 1, months: 6 } } },
@@ -247,7 +265,10 @@
       { id: 'tp6', appear: [1996, 1], deadline: [2008, 12], type: 'connect', reward: 180000, title: '中和与永和', desc: '跨过新店溪，连接中和、永和与古亭。', anchors: [anchor('中和', 24.9930, 121.5050, 3), anchor('永和', 25.0080, 121.5160, 3), anchor('古亭', 25.0263, 121.5228, 3)] },
       { id: 'tp7', appear: [2000, 1], deadline: [2010, 12], type: 'connect', reward: 200000, title: '内湖科技园区通勤', desc: '连接内湖科技园区、松山机场与南港（机场范围内只能地下设站或地下穿越）。', anchors: [anchor('内湖科技园区', 25.0790, 121.5750, 3), anchor('松山机场', 25.0629, 121.5517, 3), anchor('南港', 25.0520, 121.6070, 3)] },
       { id: 'tp8', appear: [2004, 1], deadline: [2008, 12], type: 'connect', reward: 250000, title: '高铁转乘', desc: '高铁通车前后，连接南港、台北车站与板桥三座高铁车站。', anchors: [anchor('南港', 25.0520, 121.6070, 3), anchor('台北车站', 25.0478, 121.5170, 3), anchor('板桥', 25.0140, 121.4637, 3)] },
-      { id: 'tp9', appear: [2005, 1], deadline: [2010, 10], type: 'coverage', target: 0.35, reward: 300000, title: '迎接花博', desc: '2010 年 11 月花博开幕前，步行 15 分钟可到达捷运站的人口不低于 35%。' },
+      { id: 'tp9', appear: [2005, 1], deadline: [2010, 10], type: 'coverage', target: 0.29, reward: 300000, title: '迎接花博', desc: '2010 年 11 月花博开幕前，步行 15 分钟可到达捷运站的人口不低于 29%。' },
+      // v2.9 扩图新增范围的史实任务
+      { id: 'tp10', appear: [2006, 1], deadline: [2017, 12], type: 'connect', reward: 250000, title: '通往桃园', desc: '桃园机场捷运 2017 年通车（史实）。连接台北车站、新庄与桃园。', anchors: [anchor('台北车站', 25.0478, 121.5170, 3), anchor('新庄', 25.0360, 121.4520, 3), anchor('桃园', 25.0130, 121.3080, 3)] },
+      { id: 'tp11', appear: [2012, 1], deadline: [2025, 12], type: 'connect', reward: 250000, title: '基隆通勤', desc: '每天有大量基隆居民到台北上班，基隆捷运仍在规划中。连接南港、汐止与基隆。', anchors: [anchor('南港', 25.0521, 121.6070, 3), anchor('汐止', 25.0680, 121.6580, 3), anchor('基隆', 25.1316, 121.7393, 3)] },
     ],
     // 本城动态经营任务：年份窗口内按城市状况各发布一次（奖励单位：万新台币，按物价调整）
     dynTasks: [
@@ -283,8 +304,9 @@
   (CM.MAP_LIST = CM.MAP_LIST || []).push({
     id: 'tp', name: '台北', title: '台北 · 1990', sub: '真实地理 · 1990 年起 · 新台币',
     desc: '从 1990 年尚无捷运的台北开始：淡水河、新店溪与基隆河把盆地分成数块，河西的三重、板桥、中和人口稠密，阳明山与盆地周边山地不能开发。路网完全由你规划。',
-    facts: [['范围', '34 km × 30 km'], ['起始', '1990 年'], ['人口', '约 533 万（盆地及周边）'], ['货币', '新台币（TWD）'], ['模式', '经营挑战 / 自由建造']],
-    modes: ['challenge', 'free'], kind: 'real', mapVersion: 2, extent: { from: 1, dx: 16, dy: 16, oldW: 104, oldH: 88, note: '地图四周各扩大约 4 km，覆盖盆地边缘的走廊（淡水、汐止、土城、新店方向）', oldRegionIds: ['yms', 'hills', 'airport', 'guandu', 'newland', 'xinyi', 'xinban', 'zhongzheng', 'oldtown', 'zhongshan', 'daan', 'songshan', 'xinyiq', 'wenshan', 'shilin', 'beitou', 'neihu', 'nangang', 'banqiao', 'sanchong', 'zhongyong', 'xinzhuang', 'xindian', 'tucheng', 'xizhi', 'outer'], oldLandmarkIds: ['tp_longshan', 'tp_office', 'tp_ntu', 'tp_stadium', 'tp_palace', 'tp_xingtian', 'tp_sysmh', 'tp_grand', 'tp_cks', 'tp_tfam', 'tp_twtc', 'tp_station', 'tp_skm', 'tp_cityhall', 'tp_banqiao', 'tp_101', 'tp_arena', 'tp_nangang'] },
+    facts: [['范围', '50 km × 43 km'], ['起始', '1990 年'], ['人口', '约 644 万（台北都会区、基隆与桃园）'], ['货币', '新台币（TWD）'], ['模式', '经营挑战 / 自由建造']],
+    modes: ['challenge', 'free'], kind: 'real', mapVersion: 3, extent: [{ from: 1, dx: 16, dy: 16, oldW: 104, oldH: 88, newW: 136, newH: 120, note: '地图四周各扩大约 4 km，覆盖盆地边缘的走廊（淡水、汐止、土城、新店方向）', oldRegionIds: ['yms', 'hills', 'airport', 'guandu', 'newland', 'xinyi', 'xinban', 'zhongzheng', 'oldtown', 'zhongshan', 'daan', 'songshan', 'xinyiq', 'wenshan', 'shilin', 'beitou', 'neihu', 'nangang', 'banqiao', 'sanchong', 'zhongyong', 'xinzhuang', 'xindian', 'tucheng', 'xizhi', 'outer'], oldLandmarkIds: ['tp_longshan', 'tp_office', 'tp_ntu', 'tp_stadium', 'tp_palace', 'tp_xingtian', 'tp_sysmh', 'tp_grand', 'tp_cks', 'tp_tfam', 'tp_twtc', 'tp_station', 'tp_skm', 'tp_cityhall', 'tp_banqiao', 'tp_101', 'tp_arena', 'tp_nangang'] },
+      { from: 2, dx: 24, dy: 12, oldW: 136, oldH: 120, newW: 200, newH: 172, note: '地图向东扩大到基隆，向南扩大到三峡南部，向西扩大到桃园市区，向北扩大到金山，桃园机场接驳点移到新的西缘，旧存档接到原接驳点的线路需要再向西延伸', oldRegionIds: ['yms', 'hills', 'airport', 'guandu', 'newland', 'xinyi', 'xinban', 'zhongzheng', 'oldtown', 'zhongshan', 'daan', 'songshan', 'xinyiq', 'wenshan', 'shilin', 'beitou', 'neihu', 'nangang', 'banqiao', 'sanchong', 'zhongyong', 'xinzhuang', 'xindian', 'tucheng', 'xizhi', 'keelung', 'shulin', 'tamsui', 'linkou', 'sanxia', 'outer'], oldLandmarkIds: ['tp_longshan', 'tp_office', 'tp_ntu', 'tp_stadium', 'tp_palace', 'tp_xingtian', 'tp_sysmh', 'tp_grand', 'tp_cks', 'tp_tfam', 'tp_twtc', 'tp_station', 'tp_skm', 'tp_cityhall', 'tp_banqiao', 'tp_101', 'tp_arena', 'tp_nangang'] }],
     scenario: 'tp-1990',
     region: '中国台湾', tagline: '盆地里的第一条捷运', difficulty: 3, tags: ['无捷运开局', '跨河', '高密度'],
     intro: '1990 年的台北还没有捷运，公车与机车塞满了盆地里的每一条干道。淡水河两岸都住满了人，河西的永和是全台最拥挤的城市之一。你要从零画出整张路网：先打通南北与东西两条主轴，再跨过河去连接三重、板桥与中和。',
@@ -293,10 +315,10 @@
     geo: G, data: data,
     econ: { devOffset: 20, money: 3.5 },   // 出行选择参数：台北 1990 年约对应广州样本 2010 年的发展阶段；时间价值等按新台币换算
     cfg: {
-      W: 136, H: 120, START: { y: 1990, m: 1, d: 1, minute: 360 },
+      W: 200, H: 172, START: { y: 1990, m: 1, d: 1, minute: 360 },
       // 工作周：1998 年起隔周休二日、2001 年起全面周休二日（史实）
       workWeek: { sat: [[1990, 1], [1998, 1], [1998.1, 0.5], [2000.9, 0.5], [2001, 0]], school: [[1990, 1], [1998, 1], [1998.1, 0.5], [2000.9, 0.5], [2001, 0]] },
-      growth: Object.assign({}, CM.CFG.growth, { popCurve: [[1990, 5.33e6], [1995, 5.7e6], [2000, 5.95e6], [2005, 6.1e6], [2010, 6.22e6], [2015, 6.35e6], [2020, 6.42e6], [2040, 6.47e6], [2300, 6.47e6]], histEnd: 2020, jobsRatio: [[1990, 0.5], [2000, 0.52], [2020, 0.55], [2040, 0.56]] }),
+      growth: Object.assign({}, CM.CFG.growth, { popCurve: [[1990, 6.44e6], [1995, 6.8e6], [2000, 7.04e6], [2005, 7.21e6], [2010, 7.35e6], [2015, 7.51e6], [2020, 7.6e6], [2040, 7.66e6], [2300, 7.66e6]], histEnd: 2020, jobsRatio: [[1990, 0.469], [1995, 0.48], [2000, 0.49], [2005, 0.496], [2010, 0.504], [2015, 0.512], [2020, 0.519], [2040, 0.529]] }),
       money: { code: 'TWD', unit: '新台币', wan: '万新台币', yi: '亿新台币', sym: 'NT$' },
       econBase: 1990,
       cost: Object.assign({}, CM.CFG.cost, {
@@ -315,8 +337,8 @@
       // 城市经济（macro.js）：1990 年地图范围 GDP 约 1.35 万亿新台币（估算，台北盆地约占全台人口四分之一、产出约三成）；
       // 电子与出口产业比重高，对全球科技需求变化敏感；亚洲金融危机期间受冲击较小
       macro: {
-        area: '地图范围（台北盆地：台北市与新北市沿河各区）', region: '中国台湾',
-        gdp0: 143900000, revRatio: [[1990, 0.2], [2000, 0.16], [2010, 0.14], [2020, 0.15], [2040, 0.15]], revElastic: 1.4,
+        area: '地图范围（台北都会区、基隆与桃园市区）', region: '中国台湾',
+        gdp0: 163000000, revRatio: [[1990, 0.2], [2000, 0.16], [2010, 0.14], [2020, 0.15], [2040, 0.15]], revElastic: 1.4,
         prod: [[1990, 0.055], [1997, 0.05], [2000, 0.04], [2010, 0.03], [2020, 0.025], [2030, 0.018], [2050, 0.012], [2080, 0.01]],
         infl: 'tw', longRun: { infl: 0.015 }, histEnd: 2020, ref: 'tw',
         struct: { trade: 0.75, fin: 0.45, ind: 0.65, tour: 0.35, prop: 0.55 },
@@ -331,6 +353,6 @@
         ],
       },
     },
-    cam: { cx: 66, cy: 66, zoom: 18 },
+    cam: { cx: 90, cy: 78, zoom: 18 },
   });
 })(window.CM);

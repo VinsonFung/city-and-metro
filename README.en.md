@@ -8,11 +8,15 @@ City & Metro is a single-player metro planning and city management game for your
 
 **[Play online](https://city-and-metro.pages.dev)** · [Source repository](https://github.com/VinsonFung/city-and-metro) · [License](./LICENSE.txt)
 
-The web edition **v2.7.2** brings London and 11 local train models, city-specific mechanics, Shenzhen, expanded Hong Kong and cross-border gates, the new network diagram and growth replay, city reviews, XL stations, and redesigned fare and batch station management. In-game release notes cover v2.6 and v2.7 separately. The world map, city transitions, city achievements, and three selectable line styles remain exclusive to the standalone edition.
+Web edition **v2.9** adds Sydney (2000) with three local train models and 13 historical tasks. Suburban rail and ferries follow their historical opening and closure dates. Build across Sydney Harbour, serve the Olympics, and reach development areas early. Kingsford Smith Airport is on the map, and Western Sydney International Airport opens its western gateway in December 2026.
+
+v2.8 added Singapore and New York and expanded ten existing maps. Loading a save from before an expansion creates a backup and migrates your progress. The world map, city transitions, city achievements, and three selectable line styles remain exclusive to the standalone edition.
 
 v2.7.2 improves rail and airport access, models transfers based on platform layout, and explains why some stations have no passengers.
 
 Version 2.7.1 is a maintenance release with improvements to fleet allocation, contract service checks, station revenue layers, network replay, and map loading.
+
+The Background Transit layer shows railways and ferries. The Metro Core lets you take over sections of Hong Kong's East Rail and Tokyo's Yamanote Line as they become available, and view line, station and commercial accounts. Use the drawing toolbar to place non-stop waypoints on a touchscreen.
 
 ## Maintenance and community editions
 
@@ -30,7 +34,7 @@ Community-edition links will be collected and integrated into the original game 
 
 ## What you can do
 
-- **Choose a city and era.** Eleven real cities and the separate Qingwan tutorial have distinct geography, development stages, and local goals. Free Build also lets you choose a starting year and unlock construction across the map.
+- **Choose a city and era.** Fourteen real cities and the separate Qingwan tutorial have distinct geography, development stages, and local goals. Free Build also lets you choose a starting year and unlock construction across the map.
 - **Design your network.** Build underground, surface, and elevated lines, curves, loops, branches, and multilevel interchanges. Adjust platform directions, split or merge lines, and preview or undo drafts before construction.
 - **Run a city's metro.** Choose unlimited funds or balance construction, operations, fares, grants, and debt in financial challenges. Use ridership, congestion, walking coverage, and construction impact reports to plan your next move.
 - **Grow with the city.** New districts, airports, campuses, and attractions open over time. Historical events affect travel and the economy; complete facility-access tasks and review stage summaries and the city chronicle. Airports outside the map show direction, distance, and demand beyond the boundary; connect a line to their boundary entrance to serve them.
@@ -38,9 +42,9 @@ Community-edition links will be collected and integrated into the original game 
 
 - **Let metro shape the city.** Residents gradually develop a metro habit after stations open, while new homes and jobs cluster around the network. Compare congestion over time and inspect the metro-led development layer.
 - **Develop and decorate stations.** Add advertising and convenience stores, shopping streets, or integrated station developments for non-fare revenue. Choose station styles, theme colours, public art, and signs.
-- **Hear from passengers.** The Metro Circle shows posts, replies, and satisfaction based on your current simulation. Follow residents across months, and choose from 22 local planning challenges across the eleven real cities.
+- **Hear from passengers.** The Metro Circle shows posts, replies, and satisfaction based on your current simulation. Follow residents across months, and choose from 22 local planning challenges across the fourteen real cities.
 
-- **Manage trains and services.** Buy, assign and sell 56 train models unlocked by city and era. Schedule morning peak, daytime, evening peak and night service, with separate directions on loops. Choose line speeds from 40–120 km/h and add express or short services.
+- **Manage trains and services.** Buy, assign and sell 58 train models unlocked by city and era. Schedule morning peak, daytime, evening peak and night service, with separate directions on loops. Choose line speeds from 40–120 km/h and add express or short services.
 - **Run the network in Metro Core.** Open the lower-right app for network, line, station, fleet and fare management, trends, maps and section load factors. Batch-change station sizes, commercial development and decoration. Trends follow line mergers and splits. Locate or automatically address persistent overload.
 - **Take on contracts and commercial risk.** Financial challenges unlock tenders for new-line PPP, rail-plus-property and capacity projects. Payments depend on construction and service checks. Station commerce now pays maintenance costs and follows the economic cycle; low-traffic sites can lose money.
 - **Meet compound objectives.** Tasks combine network, coverage, operations, financial or development conditions. Completing the core objective by expiry earns a partial reward. Late-opening facilities extend deadlines; closed facility subgoals are waived. Fare requirements explain what to restore. Existing tasks retain their progress.
@@ -98,7 +102,7 @@ Economic statistics show GDP, growth, local finances, and transport efficiency. 
 | London | 1860 | Historic districts, docklands, world wars and pre-decimal fares |
 | Shenzhen | 2000 | Reclamation, westward growth, Bao’an Airport, Universiade and border gates |
 
-All eleven real cities support financial challenges and Free Build, with currency, fares, and financial parameters appropriate to each city and era. Later real-world metro lines do not appear automatically; you design the network.
+All fourteen real cities support financial challenges and Free Build, with currency, fares, and financial parameters appropriate to each city and era. Later real-world metro lines do not appear automatically; you design the network.
 
 ## Running and saving
 

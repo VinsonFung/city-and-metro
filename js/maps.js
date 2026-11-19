@@ -6,6 +6,8 @@
   // 随地图切换的配置项：格网、起始日期、人口增长、货币与价格基年、建设与运营成本、票价、财政、城市经济、出行选择与道路参数
   const CFG_KEYS = ['W', 'H', 'ZONE', 'START', 'growth', 'money', 'econBase', 'cost', 'ops', 'fareDefault', 'fareRange', 'economy', 'macro', 'choice', 'road', 'workWeek'];
   const GZ_CFG = {}; for (const k of CFG_KEYS) GZ_CFG[k] = k === 'START' ? Object.assign({}, CFG.START) : CFG[k];
+  // 广州扩图后按原有范围的岗位份额校准岗位曲线，教程继续使用默认比例。
+  GZ_CFG.growth = Object.assign({}, GZ_CFG.growth, { jobsRatio: [[1990, 0.464], [2000, 0.502], [2010, 0.53], [2020, 0.532], [2030, 0.542]] });
   // 出行选择参数按「发展阶段对应年份」平移并按本城货币缩放：devOffset 为广州曲线年份减本城年份，money 为本城货币相对广州曲线的倍数
   const shift = function (curve, off, k) { return curve.map(function (p) { return [p[0] - off, p[1] * (k || 1)]; }); };
   CM.deriveChoice = function (off, money) {
@@ -20,20 +22,24 @@
     gz: {
       id: 'gz', name: '广州', title: '广州 · 1990', sub: '真实地理 · 1990 年起 · 人民币',
       desc: '从 1990 年尚无地铁的广州开始：珠江水系、道路与桥梁、街道边界和地标都来自真实地理，区域按历史年份逐步开放，并有参考广州地铁发展的历史任务。',
-      facts: [['范围', '30 km × 36 km'], ['起始', '1990 年'], ['人口', '约 328 万'], ['货币', '人民币（元）'], ['模式', '经营挑战 / 自由建造']],
-      // 第 2 版（v2.1）：向北扩大 16 格到同和、京溪，向南扩大 32 格到市桥与广州南站；旧存档载入时迁移（见 extentMigration）
-      modes: ['challenge', 'free'], kind: 'real', mapVersion: 2, scenario: 'gz-1990',
-      extent: { from: 1, dx: 0, dy: 16, oldW: 120, oldH: 96, note: '地图向北扩大到同和、京溪，向南扩大到市桥与广州南站',
+      facts: [['范围', '38 km × 57 km'], ['起始', '1990 年'], ['人口', '约 378 万'], ['货币', '人民币（元）'], ['模式', '经营挑战 / 自由建造']],
+      // 第 2 版（v2.1）：向北扩大 16 格到同和、京溪，向南扩大 32 格到市桥与广州南站；
+      // 第 3 版（v2.9）：向北扩大 80 格到新白云机场与花都城区，向东扩大 32 格到知识城、永和与新塘西缘，向南扩大 4 格。旧存档载入时依次迁移（见 extentMigration）
+      modes: ['challenge', 'free'], kind: 'real', mapVersion: 3, scenario: 'gz-1990',
+      extent: [{ from: 1, dx: 0, dy: 16, oldW: 120, oldH: 96, newW: 120, newH: 144, note: '地图向北扩大到同和、京溪，向南扩大到市桥与广州南站',
         oldRegionIds: ['bys', 'hls', 'airport', 'oldcity', 'cbd', 'tianhe_w', 'sanyuanli', 'fangcun', 'haizhu_n', 'huangpu', 'changzhou', 'kaifaqu', 'tianhe_e', 'haizhu_s', 'tianhe_n', 'baiyun_n', 'baiyun_w', 'tonghe', 'panyu_n', 'pazhou', 'guanzhou', 'longdong', 'tianhe_ne', 'unicity', 'luogang', 'foshan', 'panyu_e', 'outer'],
         oldLandmarkIds: ['zsjnt', 'zhl', 'cjc', 'gxs', 'lrs', 'hss', 'wxg', 'sssx', 'sm', 'nyw', 'njs', 'lsly', 'hhg', 'yxst', 'hpjx', 'sysu', 'scut', 'jnu', 'thty', 'gzzhan', 'gzdz', 'tcity', 'citic', 'xhyyt', 'gdmsg', 'pzhz', 'bycc', 'gzt', 'ifc', 'opera', 'gdmus', 'gzlib', 'ctf'] },
+      { from: 2, dx: 0, dy: 80, oldW: 120, oldH: 144, newW: 152, newH: 228, eventInsert: { index: 12, count: 5 }, note: '地图向北扩大到新白云机场与花都城区，向东扩大到知识城、永和与新塘西缘',
+        oldRegionIds: ['bys', 'hls', 'airport', 'oldcity', 'cbd', 'tianhe_w', 'sanyuanli', 'fangcun', 'haizhu_n', 'huangpu', 'changzhou', 'kaifaqu', 'tianhe_e', 'haizhu_s', 'tianhe_n', 'baiyun_n', 'baiyun_w', 'tonghe', 'panyu_n', 'pazhou', 'guanzhou', 'longdong', 'tianhe_ne', 'unicity', 'luogang', 'foshan', 'panyu_e', 'outer'],
+        oldLandmarkIds: ['zsjnt', 'zhl', 'cjc', 'gxs', 'lrs', 'hss', 'wxg', 'sssx', 'sm', 'nyw', 'njs', 'lsly', 'hhg', 'yxst', 'hpjx', 'sysu', 'scut', 'jnu', 'thty', 'gzzhan', 'gzdz', 'tcity', 'citic', 'xhyyt', 'gdmsg', 'pzhz', 'bycc', 'gzt', 'ifc', 'opera', 'gdmus', 'gzlib', 'ctf', 'gznz'] }],
       // 地图选择页：地区、一句话特色、介绍、特色卡、大事年表、难度（1–4）
       region: '中国内地', tagline: '珠江两岸，从第一条线开始', difficulty: 2, tags: ['无地铁开局', '越江', '新区开放'],
       intro: '1990 年的广州还没有一公里地铁。老城的街巷挤满公交与自行车，天河才刚刚起步，珠江新城仍是一片农田。你要在老城与天河之间画下第一条线，再跟着城市一路向东、向南跨过珠江。',
-      features: [['bridge', '珠江越江', '珠江把城市分成两岸，越江段可以建隧道或桥梁'], ['map', '27 个片区逐年开放', '珠江新城、番禺、大学城按真实年份开放'], ['building', '33 处真实地标', '中山纪念堂、广州塔、东塔按落成年份出现'], ['flag', '7 项历史任务', '参考广州地铁的发展需求，不要求复刻真实线路']],
+      features: [['bridge', '珠江越江', '珠江把城市分成两岸，越江段可以建隧道或桥梁'], ['map', '35 个片区逐年开放', '珠江新城、番禺、大学城、花都与知识城按真实年份开放，新白云机场在图内'], ['building', '33 处真实地标', '中山纪念堂、广州塔、东塔按落成年份出现'], ['flag', '7 项历史任务', '参考广州地铁的发展需求，不要求复刻真实线路']],
       highlights: [[1993, '珠江新城开始规划'], [1996, '广州东站建成'], [2000, '番禺撤市设区'], [2004, '新白云机场与大学城启用'], [2010, '亚运会，广州塔落成']],
       geo: CM.GEO, data: Object.assign({}, CM.DATA),
       cfg: GZ_CFG,
-      cam: { cx: 30, cy: 57, zoom: 18 },
+      cam: { cx: 30, cy: 137, zoom: 18 },   // v2.9 地图向北扩大 80 格，镜头仍对准老城
     },
   };
   // 其他地图（教程与新增城市）由各自的数据文件登记为 CM.MAP_LIST；未写的配置项沿用广州样本
@@ -125,9 +131,24 @@
       }
       const fill = new Uint8Array(W * H).fill(1);
       for (let j = 0; j < oH; j++) { if (prevFill && prevFill.length === oW * oH) fill.set(prevFill.subarray(j * oW, (j + 1) * oW), (j + dy) * W + dx); else fill.fill(0, (j + dy) * W + dx, (j + dy) * W + dx + oW); }
-      C.fillNew = U.packTyped(fill, 'u8'); if (!prevFill) C.fillYear = p.clock.y;
+      C.fillNew = U.packTyped(fill, 'u8');
+      if (!prevFill) {
+        C.fillYear = p.clock.y;
+        C.fillT = p.clock.y + ((p.clock.m || 1) - 1) / 12;
+      }
       if (!C.regionIds) C.regionIds = spec.oldRegionIds;
       if (!C.landmarkIds) C.landmarkIds = spec.oldLandmarkIds;
+      // 扩图新事件排在机制库生成的事件之前时，按旧序号迁移已结算事件和对应的纪事编号。
+      if (spec.eventInsert && (spec.eventInsert.beforeRules == null || (p.rulesRevision || 0) < spec.eventInsert.beforeRules)) {
+        const { index, count } = spec.eventInsert;
+        const shift = function (key) { return Number(key) >= index ? String(Number(key) + count) : key; };
+        const eventId = function (id) { return typeof id === 'string' ? id.replace(/^ev-(\d+)$/, function (_, key) { return 'ev-' + shift(key); }) : id; };
+        if (p.firedEvents) p.firedEvents = Object.fromEntries(Object.entries(p.firedEvents).map(function ([key, value]) { return [shift(key), value]; }));
+        if (p.milestones) {
+          if (p.milestones.done) p.milestones.done = Object.fromEntries(Object.entries(p.milestones.done).map(function ([key, value]) { return [eventId(key), value]; }));
+          for (const entry of p.milestones.list || []) entry.id = eventId(entry.id);
+        }
+      }
       // 坐标平移
       // 车站的上次付费选址（site）随坐标一起平移，否则迁移后的微调会被误算为搬迁
       const sh = function (o) { if (o && typeof o.x === 'number') { o.x += dx; o.y += dy; } if (o && Array.isArray(o.site)) o.site = [o.site[0] + dx, o.site[1] + dy]; };
@@ -136,12 +157,30 @@
         for (const id in net.stations) sh(net.stations[id]);
         for (const id in net.segments) { const s = net.segments[id]; if (s.pts) s.pts = s.pts.map(function (q) { return [q[0] + dx, q[1] + dy]; }); }
       }
+      const ir = p.impactReport;
+      if (ir) for (const k of ['stations', 'hot', 'roads', 'roadsWorse']) for (const o of ir[k] || []) if (o && typeof o.x === 'number' && typeof o.y === 'number') { o.x += dx; o.y += dy; }
+      delete p.congRef;
+      // 考古调查按格号去重，发现的位置也跟随格网移动。
+      if (p.digs) p.digs = Object.fromEntries(Object.entries(p.digs).map(function ([key, value]) {
+        const cell = Number(key);
+        return [((cell / oW | 0) + dy) * W + cell % oW + dx, value];
+      }));
+      for (const find of p.finds || []) { find.x += dx; find.yy += dy; }
       // 片区编号
       const oZW = oW / ZN, nZW = W / ZN, zmap = function (z) { return ((z / oZW) | 0) * nZW + (z % oZW) + dx / ZN + (dy / ZN) * nZW; };
-      const fixTask = function (t) { if (!t) return; if (t.anchors) t.anchors.forEach(sh); if (typeof t.zone === 'number') t.zone = zmap(t.zone); if (typeof t.coolKey === 'string') t.coolKey = t.coolKey.replace(/^(cong|cov):(\d+)$/, function (s0, a, z) { return a + ':' + zmap(+z); }); };
+      const fixTask = function (t) { if (!t) return; if (t.anchors) t.anchors.forEach(sh); if (typeof t.zone === 'number') t.zone = zmap(t.zone); if (typeof t.coolKey === 'string') t.coolKey = t.coolKey.replace(/^(cong|cov):(\d+)$/, function (s0, a, z) { return a + ':' + zmap(+z); }); for (const part of t.parts || []) fixTask(part); };
       const T = p.tasks;
-      for (const list of [T.active, T.done, T.failed]) (list || []).forEach(fixTask);
+      for (const list of [T.active, T.done, T.failed, T.offers]) (list || []).forEach(fixTask);
       if (T.cool) { const nc = {}; for (const k in T.cool) nc[k.replace(/^(cong|cov):(\d+)$/, function (s0, a, z) { return a + ':' + zmap(+z); })] = T.cool[k]; T.cool = nc; }
+      // 地铁公司的招标与合同（v2.5）：片区位置、锚点与片区编号；冷却记录 z:片区（v2.9 补）
+      const cp = p.corp;
+      if (cp) {
+        for (const t of [].concat(cp.tenders || [], cp.contracts || [], cp.closed || [])) { if (!t) continue; sh(t.area); if (t.anchors) t.anchors.forEach(sh); if (typeof t.zone === 'number') t.zone = zmap(t.zone); }
+        if (cp.cool) { const nc = {}; for (const k in cp.cool) nc[k.replace(/^z:(\d+)$/, function (s0, z) { return 'z:' + zmap(+z); })] = cp.cool[k]; cp.cool = nc; }
+      }
+      // 地铁圈关注的市民（v2.3）：存下的动态按片区编号定位（v2.9 补）
+      const vf = p.voices && p.voices.follow;
+      if (vf) for (const h in vf) for (const q of (vf[h] && vf[h].posts) || []) if (q && q.at && typeof q.at.zone === 'number') q.at.zone = zmap(q.at.zone);
       // 城市经济：载入后按新增范围调整统计口径（连续迁移时原范围随后续步骤平移）
       if (p.macro) { const ar = p.macro.areaRebase; if (ar && ar.oldBox && from > from0) { ar.oldBox[0] += dx; ar.oldBox[1] += dy; } else p.macro.areaRebase = { from: from, oldBox: [dx, dy, oW, oH] }; }
       const prevNote = p.mapUpgrade && from > from0 ? p.mapUpgrade.note : '';
@@ -155,7 +194,7 @@
   for (const id of ['hz','wh']) {
     const mp=MAPS[id],steps=mp.migrate;
     mp.migrate=function(payload,from){
-      if(from!==1&&from!==2&&from!==3)throw new Error('不支持的地图数据版本');
+      if(from<1||from>=mp.mapVersion)throw new Error('不支持的地图数据版本');
       return steps(payload,from===2?3:from);
     };
   }

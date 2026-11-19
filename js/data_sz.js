@@ -71,6 +71,7 @@
         { id: 'sz_gate_qh', n: '深圳湾接驳口', to: '香港 · 流浮山', at: ll(22.5048, 113.9458), dir: 'S', y: [2035, 1], pax: [[2035, 1], [2045, 1.5]], title: '模拟：港深西部铁路开通', desc: '规划中的港深西部铁路从前海湾经深圳湾口岸通往洪水桥，目标 2035 年，开通日期未定。这里按规划模拟，深圳湾接驳口开放。', tag: '模拟', note: '规划中的港深西部铁路（前海至洪水桥）在这里过境，目标 2035 年，开通日期未定。' },
       ], why: '罗湖口岸和福田口岸都有铁路与香港相接；规划中的港深西部铁路经深圳湾口岸通往香港，开通日期未定。两张图各算各的，时间也不同步。' },
     ],
+    railYears: { '广深港高速线': 2011, '京港高速线': 2011, '杭深': 2013, '阳深': 2013, '穗深城际线': 2019, '廣深港高速鐵路': 2018 },
     city: '深圳', riverName: '深圳河', seaName: '南海', hsrYear: 2011,
     stages: [[2005, '罗湖华强北时代'], [2011, '福田崛起期'], [2015, '南山科技时代']], stageLast: '前海时代',
     // 历史发展阶段（eras.js）：grow 只改变人口与岗位增长的去向（总量仍按人口曲线），relocate 为每月疏解比例，corridors 为片区间通勤与购物去向倍数
@@ -161,7 +162,7 @@
       { id: 'dapeng', name: '葵涌', streets: ['葵涌街道'], open: 2014, plan: 'res' },
       { id: 'hk', name: '香港（境外）', district: ['元朗區', '北區', '大埔區'], open: null, lockNote: '香港特别行政区，不属于深圳的建设范围' },
     ],
-    defaultRegion: { id: 'outer', name: '东莞·惠州（市外）', open: null, lockNote: '不属于深圳市的建设范围' },
+    defaultRegion: { id: 'outer', name: '东莞·惠州（市外）', open: null, passOnly: true, lockNote: '市外区域，可穿过，不能设站' },
     plans: CM.DATA.plans,
     // 2000 年人口与就业中心（估算，人/km²；r 约为影响半径 km）。2000 年全市约 700 万人，超过六成住在关外
     centers: [
@@ -215,7 +216,7 @@
     landmarks: [
       Object.assign(at(22.5445, 113.9156), { id: 'sz_nantou', name: '南头古城', w: 300, d: 300, year: 1900, kind: 'temple' }),
       Object.assign(at(22.5359, 113.9316), { id: 'sz_szu', name: '深圳大学', w: 1200, d: 1100, year: 1983, kind: 'campus' }),
-      Object.assign(at(22.5432, 114.1147), { id: 'sz_guomao', name: '国贸大厦', w: 50, d: 50, year: 1985, kind: 'skyscraper', h: 160 }),
+      Object.assign(at(22.5432, 114.1147), { id: 'sz_guomao', name: '国贸大厦', w: 158, d: 77, year: 1985, kind: 'skyscraper', h: 160 }),
       Object.assign(at(22.5611, 114.0877), { id: 'sz_stadium', name: '深圳体育中心', w: 300, d: 260, year: 1985, kind: 'stadium' }),
       Object.assign(at(22.5345, 114.1121), { id: 'sz_station', name: '深圳站', w: 300, d: 160, year: 1992, kind: 'rail' }),
       Object.assign(at(22.5375, 113.9680), { id: 'sz_wow', name: '世界之窗', w: 500, d: 500, year: 1994, kind: 'hall' }),
@@ -231,7 +232,7 @@
       Object.assign(at(22.6034, 113.9975), { id: 'sz_sustech', name: '南方科技大学', w: 1100, d: 1000, year: 2011, kind: 'campus' }),
       Object.assign(at(22.5308, 113.8855), { id: 'sz_qhstone', name: '前海石公园', w: 150, d: 150, year: 2013, kind: 'hall' }),
       Object.assign(at(22.5366, 114.0504), { id: 'sz_pingan', name: '平安金融中心', w: 70, d: 70, year: 2017, kind: 'skyscraper', h: 599 }),
-      Object.assign(at(22.5258, 113.9303), { id: 'sz_tencent', name: '腾讯滨海大厦', w: 90, d: 60, year: 2017, kind: 'skyscraper', h: 248 }),
+      Object.assign(at(22.5258, 113.9303), { id: 'sz_tencent', name: '腾讯滨海大厦', w: 142, d: 68, year: 2017, kind: 'skyscraper', h: 248 }),
       Object.assign(at(22.5178, 113.9416), { id: 'sz_crown', name: '中国华润大厦', w: 70, d: 70, year: 2018, kind: 'skyscraper', h: 393 }),
       Object.assign(at(22.7012, 113.7693), { id: 'sz_iec', name: '深圳国际会展中心', w: 1000, d: 450, year: 2019, kind: 'expo' }),
     ],
@@ -306,7 +307,7 @@
     events: [
       { y: 2000, m: 1, tag: '史实', title: '2000 年的深圳', desc: '全市常住人口约 700 万，超过六成住在特区外的工业镇；商业集中在罗湖和华强北，前海和后海大多还是海面；没有地铁。' },
       { y: 2003, m: 1, tag: '史实', title: '华为基地迁入坂田', desc: '2000 年代初华为把研发和生产基地集中到坂田，关外开始出现高科技就业中心。', fx: { grow: { region: 'bantian', jobs: 1.4, years: 6 } } },
-      { y: 2004, m: 11, tag: '史实', title: '深圳会展中心与市民中心启用', desc: '福田中心区开始承担全市的行政和会展功能，金融机构陆续迁入。', fx: { grow: { region: 'futian', jobs: 1.3, years: 6 } } },
+      { y: 2004, m: 11, tag: '史实', title: '深圳会展中心与市民中心启用', desc: '福田中心区开始承担全市的行政和会展功能，金融机构陆续迁入。', fx: { grow: { region: 'futian', jobs: 1.3, years: 6 } }, task: { id: 'sz-e1', type: 'facShare', fac: 'sz_fcbd', target: 0.15, months: 48, rewardMonths: 1, title: '福田中心区上班路', desc: '市民中心和会展中心启用，福田中心区成了新的市中心。让到这里上班的人里有 15% 坐地铁。' } },
       { y: 2004, m: 12, tag: '史实', title: '史实背景：地铁一期工程通车', desc: '12 月 28 日，罗湖至世界之窗、福民至少年宫的线路通车，全长约 22 公里。本局的地铁由你规划，真实线路不会自动出现。' },
       { y: 2005, m: 11, tag: '史实', title: '划定基本生态控制线', desc: '全市约一半的土地划入基本生态控制线，山地和水库一带不再开发。' },
       { y: 2007, m: 7, tag: '史实', title: '西部通道与深圳湾口岸开通', desc: '深圳湾公路大桥通车，后海一带从海边的新土地变成连接香港的新门户。', fx: { grow: { region: 'houhai', jobs: 1.2, years: 5 } } },
@@ -320,7 +321,7 @@
       { y: 2013, m: 11, tag: '史实', title: 'T3 航站楼启用', desc: '全部航班迁入第一、第二跑道之间的新航站楼。' },
       { y: 2015, m: 4, tag: '史实', title: '前海蛇口自贸片区挂牌', desc: '广东自贸试验区前海蛇口片区挂牌，前海开始成片盖楼。', fx: { grow: { region: 'qianhai', jobs: 1.3, years: 6 } } },
       { y: 2018, m: 1, tag: '史实', title: '撤销经济特区管理线', desc: '国务院同意撤销深圳经济特区管理线，二线关正式退出历史。' },
-      { y: 2019, m: 9, tag: '史实', title: '深圳国际会展中心启用', desc: '世界最大规模的会展中心之一在宝安海边的新土地上启用。', fx: { grow: { region: 'huizhan', jobs: 1.4, years: 6 } } },
+      { y: 2019, m: 9, tag: '史实', title: '深圳国际会展中心启用', desc: '世界最大规模的会展中心之一在宝安海边的新土地上启用。', fx: { grow: { region: 'huizhan', jobs: 1.4, years: 6 } }, task: { id: 'sz-e2', type: 'facShare', fac: 'sz_iec', target: 0.12, months: 48, rewardMonths: 1.2, title: '国际会展中心的展会客流', desc: '世界最大的会展中心在宝安启用，大展期间观众成千上万。让到会展中心的人里有 12% 坐地铁。' } },
       { y: 2021, m: 1, tag: '模拟', title: '进入模拟发展阶段', desc: '此后人口、道路和区域变化按模拟规则推演，不代表真实历史。' },
       { y: 2024, m: 6, tag: '史实', title: '深中通道通车', desc: '连接深圳和中山的跨海通道通车，从机场以南上岸。' },
       { y: 2025, m: 11, tag: '史实', title: '宝安机场第三跑道投运', desc: '第三跑道建在第二跑道以西的填海土地上。' },

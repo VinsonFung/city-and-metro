@@ -37,7 +37,7 @@
       { use: 'transition', level: 'mid', label: '首钢搬迁', region: 'shijingshan', close: { y: 2010, m: 12, title: '首钢石景山主流程停产', desc: '12 月，首钢石景山厂区的钢铁主流程全面停产，结束了在北京 91 年的钢铁生产，老厂区开始再开发。' }, replan: [{ year: 2011, region: 'shijingshan', plan: 'mix' }], why: '首钢石景山厂区 2010 年 12 月全面停产，8.56 平方公里的老厂区重新开发。' },
       { use: 'carLimit', level: 'mid', label: '小客车摇号', on: { y: 2011, m: 1, title: '小客车指标摇号', desc: '1 月 1 日起，北京新增小客车要摇号取得指标，当年指标 24 万个。' }, why: '北京自 2011 年 1 月 1 日起实行小客车指标摇号。' },
       { use: 'scenic', label: '故宫与皇家园林', why: '故宫、天坛、颐和园和圆明园都不能开发。' },
-      { use: 'portal', label: '大兴机场', why: '大兴国际机场 2019 年 9 月通航，在地图南缘以南约 35 km。' },
+      { use: 'portal', label: '大兴机场', why: '大兴国际机场 2019 年 9 月通航，在地图南缘以南约 31 km。' },
       { use: 'finance', flavor: 'cn' },
     ],
     city: '北京', terrainRevision: 1, riverName: '永定河', hsrYear: 2008,
@@ -115,21 +115,23 @@
       { id: 'shangdi', name: '上地·清河', streets: ['上地街道', '清河街道', '西三旗街道'], open: 1995, plan: 'ind', note: '1990 年代上地信息产业基地建设（史实）' },
       { id: 'aoyun', name: '奥林匹克公园', streets: ['奥运村街道'], open: 2002, plan: 'mix', note: '2002 年起建设奥林匹克公园（史实）' },
       { id: 'yayun', name: '亚运村', streets: ['亚运村街道', '大屯街道'], open: 1990, plan: 'res', note: '1990 年亚运会运动员村（史实）' },
-      { id: 'wangjing', name: '望京', streets: ['望京街道'], open: 1996, plan: 'res', pop: 7.4e6, note: '1990 年代后期望京建成大型居住区（史实）' },
+      { id: 'wangjing', name: '望京', streets: ['望京街道'], open: 1996, plan: 'res', pop: 7.77e6, note: '1990 年代后期望京建成大型居住区（史实）' },
       { id: 'jiucheng', name: '旧城（东城·西城）', district: ['东城区', '西城区'], open: 1990, plan: 'oldmix' },
       { id: 'haidian', name: '海淀', district: ['海淀区'], open: 1990, plan: 'mix' },
       { id: 'chaoyang', name: '朝阳', district: ['朝阳区'], open: 1990, plan: 'resind' },
       { id: 'fengtai', name: '丰台', district: ['丰台区'], open: 1990, plan: 'resind' },
       { id: 'shijingshan', name: '石景山', district: ['石景山区'], open: 1990, plan: 'ind' },
-      { id: 'changping', name: '回龙观·天通苑（昌平）', district: ['昌平区'], open: 1999, plan: 'res', pop: 8.4e6, note: '1999 年起回龙观、天通苑经济适用房社区建设（史实）' },
-      { id: 'tongzhou', name: '通州', district: ['通州区'], open: 1996, plan: 'res', pop: 7.5e6, note: '2015 年起建设城市副中心（史实）' },
-      { id: 'daxing', name: '亦庄·大兴', district: ['大兴区'], open: 2000, plan: 'resind', pop: 8.2e6, note: '北京经济技术开发区（亦庄）1992 年设立（史实）' },
-      { id: 'shunyi', name: '顺义（机场周边）', district: ['顺义区'], open: 2005, plan: 'res', pop: 1.05e7 },
-      { id: 'mentougou', name: '门头沟', district: ['门头沟区'], open: 2008, plan: 'res', pop: 1.2e7 },
+      { id: 'changping', name: '回龙观·天通苑（昌平）', district: ['昌平区'], open: 1999, plan: 'res', pop: 8.8e6, note: '1999 年起回龙观、天通苑经济适用房社区建设（史实）' },
+      { id: 'tongzhou', name: '通州', district: ['通州区'], open: 1996, plan: 'res', pop: 7.87e6, note: '2015 年起建设城市副中心（史实）' },
+      { id: 'daxing', name: '亦庄·大兴', district: ['大兴区'], open: 2000, plan: 'resind', pop: 8.59e6, note: '北京经济技术开发区（亦庄）1992 年设立（史实）' },
+      { id: 'shunyi', name: '顺义（机场周边）', district: ['顺义区'], open: 2005, plan: 'res', pop: 11.05e6 },
+      { id: 'mentougou', name: '门头沟', district: ['门头沟区'], open: 2008, plan: 'res', pop: 12.69e6 },
     ],
-    defaultRegion: { id: 'outer', name: '外围地区', open: 2010, plan: 'res', pop: 1.25e7 },
+    defaultRegion: { id: 'outer', name: '外围地区', open: 2010, plan: 'res', pop: 13.24e6 },
     plans: CM.DATA.plans,
     // 1990 年人口与就业中心（估算，人/km²；r 约为影响半径 km）
+    // 片区设施（商业中心、区域医院、文体公园）出现门槛的人口基准：保持扩图前 2020 年的全图人口，原有片区不因 v2.9 扩图推迟
+    facPopRef: 13.9e6,
     centers: [
       atW(39.9140, 116.4110, { pop: 30000, jobs: 60000, r: 1.2 }),   // 王府井、东单
       atW(39.9100, 116.3700, { pop: 30000, jobs: 50000, r: 1.2 }),   // 西单、复兴门内
@@ -149,9 +151,15 @@
       atW(39.9050, 116.6550, { pop: 8000, jobs: 6000, r: 1.5 }),     // 通州镇
       atW(39.9700, 116.4950, { pop: 9000, jobs: 15000, r: 1.3 }),    // 酒仙桥电子城
       atW(39.8650, 116.4300, { pop: 6000, jobs: 3000, r: 1.0 }),     // 方庄
+      // v2.9 扩大范围（起始年估算，OSM 坐标；pop、jobs 为中心密度，已按本图的总量归一化倍率换算，使归一化后接近当年规模）
+      atW(39.7265, 116.339, { pop: 5200, jobs: 3100, r: 1.6 }),   // 大兴黄村
+      atW(39.7395, 116.444, { pop: 2000, jobs: 800, r: 1 }),   // 瀛海
+      atW(39.725, 116.55, { pop: 2500, jobs: 1200, r: 1 }),   // 马驹桥南
     ],
     rural: { pop: 500, jobs: 120 },
     // 环路与快速路通车年份（名称前缀匹配；1990 年已有的道路按所在区域开放年份出现）。环路按全线贯通的年份（近似），部分快速路为近似年份
+    // 铁路通车年份（线路名或前缀 → 年份，或 [通车, 停运]）：开局后才通车或停运的线路，按公开通车时间整理
+    railYears: { '京津城际线': 2008, '京广高速线': 2012, '京港高速线': 2012, '京广高速京西联络线': 2012, '京沪高铁': 2011, '京哈高速线': 2021, '京包客专线': 2019, '京雄城际线': 2020, '京唐城际线': 2022, '北京直通线': 2015, '京南至动车段': 2008, '京西至动车段走行线': 2012, '北京朝阳动车走行': 2021, '京九线': 1996 },
     roadYears: {
       '北二环': 1992, '东二环': 1992, '南二环': 1992, '西二环': 1992,
       '北三环': 1994, '东三环': 1994, '南三环': 1994, '西三环': 1994,
@@ -195,10 +203,10 @@
       Object.assign(atW(39.8669, 116.4881), { id: 'bj_happy', name: '北京欢乐谷', w: 500, d: 400, year: 2006, kind: 'themepark' }),
     ],
     // 重要设施（见 facility.js）：位置与启用年份为史实参考（位置近似），规模为估算。
-    // 首都机场位于图内东北角（航站区设枢纽）；大兴国际机场 2019 年 9 月通航，在地图南缘以南约 35 km，设接驳口
+    // 首都机场位于图内东北角（航站区设枢纽）；大兴国际机场 2019 年 9 月通航，在地图南缘以南约 31 km，设接驳口
     facilities: [
       { id: 'bj_pek', n: '首都国际机场', t: 'air', at: llW(40.08023, 116.59389), pax: [[1990, 0.25], [2000, 0.8], [2008, 2.2], [2019, 4], [2030, 4.2]], note: '首都国际机场 1958 年建成，1980 年、1999 年、2008 年先后启用新航站楼。需求点设在航站区。' },
-      { id: 'bj_pkx', n: '大兴国际机场（南部接驳）', t: 'air', ext: ['S', 35], at: llW(39.7520, 116.4100), y0: [2019, 9], pax: [[2019.7, 0.5], [2022, 1.5], [2030, 3]], note: '大兴国际机场 2019 年 9 月通航，在地图南缘以南约 35 km。此处为大兴机场高速与机场线方向出图的接驳点。' },
+      { id: 'bj_pkx', n: '大兴国际机场（南部接驳）', t: 'air', ext: ['S', 31], at: llW(39.7165, 116.4100), y0: [2019, 9], pax: [[2019.7, 0.5], [2022, 1.5], [2030, 3]], note: '大兴国际机场 2019 年 9 月通航，在地图南缘以南约 31 km。此处为大兴机场高速与机场线方向出图的接驳点。' },
       { id: 'bj_bjz', n: '北京站', t: 'rail', lm: 'bj_bjz', pax: [[1990, 8], [2000, 9], [2010, 8], [2019, 7]] },
       { id: 'bj_west', n: '北京西站', t: 'rail', lm: 'bj_west', y0: [1996, 1], pax: [[1996, 4], [2005, 9], [2019, 11], [2030, 11]] },
       { id: 'bj_south', n: '北京南站', t: 'rail', lm: 'bj_south', y0: [2008, 8], pax: [[2008.6, 3], [2012, 8], [2019, 10], [2030, 10]], note: '2008 年 8 月京津城际铁路开通，北京南站启用。' },
@@ -267,14 +275,14 @@
       { y: 1992, m: 9, tag: '史实', title: '二环路全线建成快速路', desc: '北京第一条城市快速环路，沿旧城城墙旧址环绕。' },
       { y: 1994, m: 1, tag: '史实', title: '三环路全线贯通', desc: '三环成为中心城区与近郊之间的主要交通环线。' },
       { y: 1996, m: 1, tag: '史实', title: '北京西站启用', desc: '亚洲规模最大的铁路客运站之一，承担京广、京九方向的客流。', fx: { grow: { region: 'fengtai', jobs: 1.2, years: 4 } } },
-      { y: 1999, m: 6, tag: '史实', title: '中关村科技园区设立', desc: '中关村成为国家高新技术产业园区，海淀、上地一带的岗位快速增长。', fx: { grow: { region: 'zgc', jobs: 1.5, years: 6 } } },
+      { y: 1999, m: 6, tag: '史实', title: '中关村科技园区设立', desc: '中关村成为国家高新技术产业园区，海淀、上地一带的岗位快速增长。', fx: { grow: { region: 'zgc', jobs: 1.5, years: 6 } }, task: { id: 'bj-e1', type: 'facShare', fac: 'bj_zgc', target: 0.12, months: 60, rewardMonths: 1, title: '中关村上班路', desc: '中关村科技园区设立，海淀的高新技术企业越来越多。让到中关村上班的人里有 12% 坐地铁。' } },
       { y: 1999, m: 9, tag: '史实', title: '史实背景：复八线通车', desc: '1 号线向东延伸贯通长安街。本局的地铁由你规划，真实线路不会自动出现。' },
       { y: 2001, m: 7, tag: '史实', title: '北京申办 2008 年奥运会成功', desc: '奥运场馆与城市交通建设随之加速。', fx: { grow: { region: 'aoyun', jobs: 1.5, years: 7 } } },
       { y: 2003, m: 4, tag: '史实', title: '非典疫情', desc: '春季非典疫情使出行骤减，学校停课、商场冷清，约三个月后恢复。', fx: { demand: { hw: 0.6, sc: 0.3, sh: 0.5, md: 0.8, lz: 0.3, hub: 0.3, months: 3, fade: 1 }, sat: { v: -1.5, months: 4 } } },
       { y: 2008, m: 7, tag: '史实', title: '史实背景：奥运交通线路通车', desc: '10 号线一期、8 号线奥运支线与机场线通车。本局的地铁由你规划。' },
       { y: 2008, m: 8, tag: '史实', title: '第二十九届奥运会', desc: '奥运会在北京举行，期间实行单双号限行。', fx: { demand: { lz: 1.25, hub: 1.15, hw: 0.95, months: 1 }, sat: { v: 2, months: 6 } } },
       { y: 2015, m: 7, tag: '史实', title: '规划建设北京城市副中心', desc: '通州成为城市副中心，市级机关陆续迁入。', fx: { grow: { region: 'tongzhou', jobs: 1.6, years: 8 } } },
-      { y: 2019, m: 9, tag: '史实', title: '大兴国际机场通航', desc: '新机场位于地图以南约 35 km，承担北京的第二个国际航空枢纽。' },
+      { y: 2019, m: 9, tag: '史实', title: '大兴国际机场通航', desc: '新机场位于地图以南约 35 km，承担北京的第二个国际航空枢纽。', task: { id: 'bj-e2', type: 'facShare', fac: 'bj_pkx', target: 0.06, months: 48, rewardMonths: 1.2, title: '大兴机场接驳', desc: '大兴国际机场在南郊通航。让往返新机场的旅客里有 6% 坐地铁。' } },
       { y: 2020, m: 1, tag: '史实', title: '新冠肺炎疫情', desc: '春节后出行大幅减少，之后反复，2023 年起逐步恢复。', fx: { demand: { hw: 0.6, sc: 0.3, sh: 0.55, md: 0.8, lz: 0.35, hub: 0.25, months: 4, fade: 1 }, sat: { v: -1.5, months: 6 } } },
       { y: 2021, m: 1, tag: '模拟', title: '进入模拟发展阶段', desc: '此后人口、道路和区域变化按模拟规则推演，不代表真实历史。' },
       { y: 2022, m: 2, tag: '史实', title: '北京冬奥会', desc: '北京成为第一座同时举办过夏季与冬季奥运会的城市。', fx: { demand: { lz: 1.1, months: 1 }, sat: { v: 1, months: 4 } } },
@@ -288,8 +296,10 @@
       { id: 'bj5', appear: [2004, 1], deadline: [2008, 7], type: 'connect', reward: 55000, title: '奥运场馆', desc: '奥运会开幕前，连接奥林匹克公园、北土城与鼓楼大街。', anchors: [anchor('奥林匹克公园', 39.9990, 116.3920, 3), anchor('北土城', 39.9770, 116.3940, 3), anchor('鼓楼大街', 39.9494, 116.3939, 3)] },
       { id: 'bj6', appear: [2004, 1], deadline: [2008, 7], type: 'connect', reward: 55000, title: '机场轨道交通', desc: '奥运会开幕前，连接东直门、三元桥与首都机场航站区。', anchors: [anchor('东直门', 39.9410, 116.4338, 3), anchor('三元桥', 39.9610, 116.4560, 3), anchor('首都机场', 40.0790, 116.6030, 4)] },
       { id: 'bj7', appear: [2006, 1], deadline: [2012, 12], type: 'connect', reward: 50000, title: '北京南站接驳', desc: '京津城际铁路开通后，北京南站的旅客需要进城。连接北京南站、宣武门与西单。', anchors: [anchor('北京南站', 39.8652, 116.3786, 3), anchor('宣武门', 39.8993, 116.3747, 3), anchor('西单', 39.9070, 116.3740, 3)] },
-      { id: 'bj8', appear: [2008, 1], deadline: [2013, 12], type: 'coverage', target: 0.35, reward: 70000, title: '地铁覆盖三成五人口', desc: '2013 年底前，步行 15 分钟可到达地铁站的人口不低于全市人口的 35%。' },
-      { id: 'bj9', appear: [2014, 1], deadline: [2020, 12], type: 'coverage', target: 0.55, reward: 80000, title: '地铁覆盖过半人口', desc: '2020 年底前，步行 15 分钟可到达地铁站的人口不低于全市人口的 55%。' },
+      { id: 'bj8', appear: [2008, 1], deadline: [2013, 12], type: 'coverage', target: 0.33, reward: 70000, title: '地铁覆盖三成三人口', desc: '2013 年底前，步行 15 分钟可到达地铁站的人口不低于全市人口的 33%。' },
+      { id: 'bj9', appear: [2014, 1], deadline: [2020, 12], type: 'coverage', target: 0.52, reward: 80000, title: '地铁覆盖五成二人口', desc: '2020 年底前，步行 15 分钟可到达地铁站的人口不低于全市人口的 52%。' },
+      // v2.9 扩图新增范围的史实任务
+      { id: 'bj10', appear: [2005, 1], deadline: [2011, 12], type: 'connect', reward: 70000, title: '地铁到大兴新城', desc: '大兴黄村是南部的新城，4 号线大兴段 2010 年通车（史实）。连接北京南站、旧宫一带与黄村。', anchors: [anchor('北京南站', 39.8650, 116.3790, 3), anchor('旧宫', 39.8070, 116.4510, 3), anchor('黄村', 39.7265, 116.3390, 3)] },
     ],
     dynTasks: [
       { id: 'bjd1', from: [2003, 1], to: [2015, 12], type: 'connect', months: 36, reward: 40000, title: '天通苑的早高峰', desc: '天通苑是亚洲最大的居住区之一，早高峰进城极其拥挤。连接天通苑与立水桥、惠新西街南口。', anchors: [anchor('天通苑', 40.0750, 116.4130, 3), anchor('立水桥', 40.0520, 116.4110, 3), anchor('惠新西街南口', 39.9760, 116.4170, 3)] },
@@ -327,8 +337,8 @@
   (CM.MAP_LIST = CM.MAP_LIST || []).push({
     id: 'bj', name: '北京', title: '北京 · 1990', sub: '真实地理 · 1990 年起 · 人民币 · 已有 1 号线与环线',
     desc: '从 1990 年只有两条地铁的北京开始：你接管 1 号线与环线，城市即将沿着一圈圈环路向外扩张。中关村、CBD、奥运会与城市副中心将陆续到来。',
-    facts: [['范围', '51 km × 39 km'], ['起始', '1990 年'], ['人口', '约 630 万'], ['货币', '人民币（元）'], ['既有地铁', '1 号线与环线 29 站'], ['模式', '经营挑战 / 自由建造']],
-    modes: ['challenge', 'free'], kind: 'real', mapVersion: 1, scenario: 'bj-1990',
+    facts: [['范围', '51 km × 43 km'], ['起始', '1990 年'], ['人口', '约 666 万'], ['货币', '人民币（元）'], ['既有地铁', '1 号线与环线 29 站'], ['模式', '经营挑战 / 自由建造']],
+    modes: ['challenge', 'free'], kind: 'real', mapVersion: 2, extent: [{ from: 1, dx: 0, dy: 0, oldW: 204, oldH: 156, newW: 204, newH: 172, note: '地图向南扩大到大兴黄村与亦庄南部，大兴机场接驳点移到新的南缘，旧存档接到原接驳点的线路需要再向南延伸', oldRegionIds: ['gugong', 'yiheyuan', 'yuanmingyuan', 'tiantan', 'shoudu', 'cbd', 'zgc', 'shangdi', 'aoyun', 'yayun', 'wangjing', 'jiucheng', 'haidian', 'chaoyang', 'fengtai', 'shijingshan', 'changping', 'tongzhou', 'daxing', 'shunyi', 'mentougou', 'outer'], oldLandmarkIds: ['bj_tam', 'bj_gugong', 'bj_qnd', 'bj_yonghe', 'bj_gulou', 'bj_baita', 'bj_fxg', 'bj_museum', 'bj_bjz', 'bj_west', 'bj_south', 'bj_north', 'bj_pku', 'bj_thu', 'bj_tvtower', 'bj_jg', 'bj_wtc3', 'bj_cctv', 'bj_citic', 'bj_nest', 'bj_cube', 'bj_ncpa', 'bj_gti', 'bj_cnc', 'bj_expo', 'bj_csmt', 'bj_wjsoho', 'bj_universal', 'bj_happy'] }], scenario: 'bj-1990',
     region: '中国内地', tagline: '一环套一环，接管两条线的首都', difficulty: 3, tags: ['已有地铁', '环路', '奥运'],
     intro: '1990 年的北京，地铁只有两条：1 号线从苹果园开到复兴门，环线沿着旧城墙的位置绕城一圈。亚运会就要开幕，自行车流填满长安街。接下来是二环到五环一圈圈向外，中关村、CBD、北部大社区与城市副中心一个接一个出现。你要在一座摊大饼的城市里织出一张网。',
     features: [['train', '开局接管 1 号线与环线', '29 站、约 39 km，复兴门换乘，票款与运营费照常结算']],
@@ -336,8 +346,8 @@
     geo: G, data: data,
     econ: { devOffset: 1, money: 1 },   // 出行选择参数：北京 1990 年约对应广州样本 1991 年的发展阶段
     cfg: {
-      W: 204, H: 156, START: { y: 1990, m: 1, d: 1, minute: 360 },
-      growth: Object.assign({}, CM.CFG.growth, { popCurve: [[1990, 6.3e6], [1995, 7.0e6], [2000, 8.6e6], [2005, 10.6e6], [2010, 13.2e6], [2015, 14.0e6], [2020, 13.9e6], [2030, 14.3e6], [2050, 14.6e6], [2300, 14.8e6]], histEnd: 2020, jobsRatio: [[1990, 0.58], [2000, 0.58], [2010, 0.62], [2020, 0.64]] }),
+      W: 204, H: 172, START: { y: 1990, m: 1, d: 1, minute: 360 },
+      growth: Object.assign({}, CM.CFG.growth, { popCurve: [[1990, 6.66e6], [1995, 7.36e6], [2000, 9.0e6], [2005, 11.15e6], [2010, 14.01e6], [2015, 14.91e6], [2020, 14.81e6], [2030, 15.24e6], [2050, 15.56e6], [2300, 15.77e6]], histEnd: 2020, jobsRatio: [[1990, 0.562], [1995, 0.564], [2000, 0.565], [2005, 0.584], [2010, 0.602], [2015, 0.612], [2020, 0.622]] }),
       money: { code: 'CNY', unit: '元', wan: '万元', yi: '亿元', sym: '¥' },
       econBase: 1990,
       // 造价（万元，1990 年价格；估算，参考复八线约 13.5 km、总投资约 56 亿元的量级）：旧城地下管线与文物多，地下造价较高
@@ -351,8 +361,8 @@
       // 城市经济（macro.js）：1990 年地图范围 GDP 约 430 亿元（估算：北京全市约 500 亿元，地图覆盖中心城区与近郊主要开发区）；
       // 首都功能与科技、金融服务业比重高，2008 年奥运建设与 2015 年后的疏解体现在生产率趋势与事件中
       macro: {
-        area: '地图范围（中心城区、近郊与亦庄、通州）', region: '中国内地',
-        gdp0: 4300000, revRatio: [[1990, 0.2], [1994, 0.13], [2003, 0.16], [2010, 0.18], [2020, 0.18], [2040, 0.17]], revElastic: 1.5,
+        area: '地图范围（中心城区、近郊与亦庄、通州、大兴）', region: '中国内地',
+        gdp0: 4410000, revRatio: [[1990, 0.2], [1994, 0.13], [2003, 0.16], [2010, 0.18], [2020, 0.18], [2040, 0.17]], revElastic: 1.5,
         prod: [[1990, 0.04], [1992, 0.09], [1995, 0.09], [2000, 0.09], [2005, 0.09], [2008, 0.07], [2011, 0.065], [2015, 0.055], [2019, 0.045], [2025, 0.032], [2035, 0.02], [2050, 0.014], [2080, 0.012]],
         infl: 'cn', longRun: { infl: 0.02 }, histEnd: 2020, ref: 'cn',
         struct: { trade: 0.55, fin: 0.7, ind: 0.45, tour: 0.6, prop: 0.65 },

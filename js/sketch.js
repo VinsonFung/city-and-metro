@@ -46,9 +46,14 @@
         return out;
       },
       text: function (x, y, t, cls, anchor) { return '<text class="' + (cls || 'sk-t') + '" x="' + f(x) + '" y="' + f(y) + '" text-anchor="' + (anchor || 'middle') + '">' + U.esc(t) + '</text>'; },
+      // 用图中的预留区域换行，切换语言后同一标签仍留在画框内。
+      caption: function (x, y, w, hh, text, cls) {
+        const value = U.esc(text);
+        return '<foreignObject x="' + x + '" y="' + y + '" width="' + w + '" height="' + hh + '"><div xmlns="http://www.w3.org/1999/xhtml" class="sk-caption' + (cls ? ' ' + cls : '') + '" title="' + value + '">' + value + '</div></foreignObject>';
+      },
       house: function (x, y, s) { s = s || 1; return P.poly([[x, y], [x + 8 * s, y - 8 * s], [x + 16 * s, y], [x + 16 * s, y + 12 * s], [x, y + 12 * s]], 'sk-ink', 'sk-home', true); },
       tower: function (x, y, w, hh) { let out = P.rect(x, y - hh, w, hh, 'sk-ink', 'sk-work'); for (let yy = y - hh + 6; yy < y - 4; yy += 8) out += P.line(x + 3, yy, x + w - 3, yy, 'sk-thin', 0.6); return out; },
-      coin: function (x, y, r) { return P.circle(x, y, r || 8, 'sk-ink', 'sk-gold') + P.text(x, y + 4, '¥', 'sk-t sk-small'); },
+      coin: function (x, y, r) { return P.circle(x, y, r || 8, 'sk-ink', 'sk-gold') + P.text(x, y + 4, '¤', 'sk-t sk-small'); },
       arrow: function (x1, y1, x2, y2, cls) {
         const a = Math.atan2(y2 - y1, x2 - x1), l = 8;
         return P.line(x1, y1, x2, y2, cls || 'sk-ink') + P.line(x2, y2, x2 - Math.cos(a - 0.5) * l, y2 - Math.sin(a - 0.5) * l, cls || 'sk-ink', 0.6) + P.line(x2, y2, x2 - Math.cos(a + 0.5) * l, y2 - Math.sin(a + 0.5) * l, cls || 'sk-ink', 0.6);
@@ -57,7 +62,7 @@
     };
     return P;
   }
-  const wrap = function (name, body, vb) { return '<svg class="sk" viewBox="0 0 ' + (vb || '320 180') + '" role="img" aria-label="' + U.esc(name) + '">' + body + '</svg>'; };
+  const wrap = function (name, body) { return '<svg class="sk sk-illustration" viewBox="0 0 320 180"' + (name ? ' role="img" aria-label="' + U.esc(name) + '"' : ' aria-hidden="true"') + '>' + body + '</svg>'; };
 
   // ---------------- 简图 ----------------
   const D = {
@@ -69,7 +74,7 @@
       s += P.text(70, 20, '老城 · 就业中心', 'sk-t sk-b');
       for (let i = 0; i < 4; i++) s += P.house(190 + i * 26, 128 + (i % 2) * 8, 1);
       s += P.text(240, 172, '南岸 · 居住区', 'sk-t sk-b');
-      s += P.rect(232, 74, 14, 36, 'sk-ink', 'sk-road') + P.text(252, 92, '大桥', 'sk-t sk-small', 'start');
+      s += P.rect(232, 74, 14, 36, 'sk-ink', 'sk-road') + P.text(252, 92, '跨河大桥', 'sk-t sk-small', 'start');
       for (let i = 0; i < 3; i++) s += P.rect(235, 80 + i * 9, 8, 5, 'sk-thin', 'sk-car');
       s += '<path class="sk-metro" d="M206 126 C 190 104, 150 96, 112 60"/>';
       s += P.circle(206, 126, 6, 'sk-ink', 'sk-st') + P.circle(160, 92, 6, 'sk-ink', 'sk-st') + P.circle(112, 60, 6, 'sk-ink', 'sk-st');
@@ -79,24 +84,24 @@
     },
     moneyIn: function () {
       const P = pen('in');
-      let s = P.rect(130, 66, 60, 56, 'sk-ink', 'sk-paper') + P.text(160, 100, '地铁资金', 'sk-t sk-b');
+      let s = P.rect(130, 66, 60, 56, 'sk-ink', 'sk-paper') + P.caption(132, 68, 56, 52, '地铁资金', 'sk-b');
       s += P.rect(20, 18, 54, 36, 'sk-ink', 'sk-work') + P.poly([[14, 18], [47, 4], [80, 18]], 'sk-ink') + P.text(47, 70, '政府拨款', 'sk-t sk-small') + P.text(47, 82, '每月一次', 'sk-t sk-small sk-muted');
       s += P.rect(20, 118, 12, 30, 'sk-ink', 'sk-paper') + P.rect(40, 118, 12, 30, 'sk-ink', 'sk-paper') + P.line(32, 132, 40, 128, 'sk-ink') + P.text(47, 168, '票款 · 每天', 'sk-t sk-small');
       s += P.poly([[262, 22], [286, 22], [282, 42], [266, 42]], 'sk-ink', 'sk-gold', true) + P.line(274, 42, 274, 54, 'sk-ink') + P.line(264, 56, 284, 56, 'sk-ink') + P.text(274, 78, '任务奖励', 'sk-t sk-small');
       s += P.arrow(80, 44, 128, 76) + P.arrow(58, 134, 128, 108) + P.arrow(264, 64, 194, 82);
       s += P.coin(104, 54, 7) + P.coin(96, 122, 7) + P.coin(230, 66, 7);
       // 车站商业与政府合同
-      s += P.rect(250, 122, 24, 30, 'sk-ink', 'sk-work') + P.rect(280, 132, 20, 20, 'sk-ink', 'sk-paper') + P.line(284, 138, 296, 138, 'sk-thin') + P.line(284, 144, 296, 144, 'sk-thin') + P.text(274, 168, '商业 · 合同', 'sk-t sk-small');
+      s += P.rect(250, 122, 24, 30, 'sk-ink', 'sk-work') + P.rect(280, 132, 20, 20, 'sk-ink', 'sk-paper') + P.line(284, 138, 296, 138, 'sk-thin') + P.line(284, 144, 296, 144, 'sk-thin') + P.caption(228, 154, 90, 24, '商业 · 合同');
       s += P.arrow(246, 128, 194, 108);
       return wrap('钱从哪里来', s);
     },
     fleetCost: function () {
       const P = pen('fleetCost');
-      let s = P.train(26, 46, 96) + P.line(16, 70, 136, 70, 'sk-ink') + P.text(76, 34, '整列购买', 'sk-t sk-b') + P.text(76, 90, '计入建设支出', 'sk-t sk-small sk-muted');
+      let s = P.train(26, 46, 96) + P.line(16, 70, 136, 70, 'sk-ink') + P.text(76, 34, '整列购买', 'sk-t sk-b') + P.caption(9, 76, 134, 24, '计入建设支出', 'sk-muted');
       s += P.arrow(138, 58, 176, 58) + P.coin(158, 44, 7);
       s += P.rect(182, 30, 118, 62, 'sk-ink', 'sk-paper') + P.text(241, 52, '运营费', 'sk-t sk-b') + P.text(241, 70, '车厢公里 × 车型系数', 'sk-t sk-small') + P.text(241, 84, '超龄 ×1.25', 'sk-t sk-small sk-muted');
-      s += P.rect(38, 112, 76, 40, 'sk-ink', 'sk-gold') + P.text(76, 136, '残值出售', 'sk-t sk-b');
-      s += P.rect(182, 112, 118, 40, 'sk-ink', 'sk-work') + P.text(241, 136, '调往其他线路', 'sk-t sk-b');
+      s += P.rect(38, 112, 76, 40, 'sk-ink', 'sk-gold') + P.caption(40, 113, 72, 38, '残值出售', 'sk-b');
+      s += P.rect(182, 112, 118, 40, 'sk-ink', 'sk-work') + P.caption(184, 113, 114, 38, '调往其他线路', 'sk-b');
       s += P.text(160, 172, '车多发车密，但钱也花得多', 'sk-t sk-small sk-accent');
       return wrap('列车也是一笔账', s);
     },
@@ -112,20 +117,20 @@
     },
     contract: function () {
       const P = pen('contract');
-      const step = function (x, y, t, sub, cls) { return P.rect(x, y, 84, 44, 'sk-ink', cls || 'sk-paper') + P.text(x + 42, y + 20, t, 'sk-t sk-b') + P.text(x + 42, y + 35, sub, 'sk-t sk-small sk-muted'); };
+      const step = function (x, y, t, sub, cls) { return P.rect(x, y, 84, 44, 'sk-ink', cls || 'sk-paper') + P.caption(x + 3, y + 1, 78, 22, t, 'sk-b') + P.caption(x + 3, y + 22, 78, 22, sub, 'sk-muted'); };
       let s = step(10, 20, '投标', '三档报价') + P.arrow(96, 42, 116, 42) + step(118, 20, '中标建设', '自己出资', 'sk-work') + P.arrow(204, 42, 224, 42) + step(226, 20, '按期开通', '补助＋退保证金', 'sk-gold');
       s += P.arrow(268, 66, 268, 90) + step(226, 92, '运营考核', '可用性付费', 'sk-home') + P.arrow(224, 114, 204, 114) + step(118, 92, '期满移交', '信誉上升');
-      s += P.circle(52, 114, 22, 'sk-ink', 'sk-bad') + P.text(52, 119, '违约', 'sk-t sk-b sk-white') + P.line(118, 114, 78, 114, 'sk-thin');
+      s += P.circle(52, 114, 22, 'sk-ink', 'sk-bad') + P.text(52, 118, '违约', 'sk-t sk-b sk-small sk-white') + P.line(118, 114, 78, 114, 'sk-thin');
       s += P.text(160, 164, '违约：扣保证金、拨款打折、信誉下降', 'sk-t sk-small');
       return wrap('政府合同', s);
     },
     grant: function () {
       const P = pen('grant');
-      const box = function (x, label, sub, cls) { return P.rect(x, 58, 62, 46, 'sk-ink', cls || 'sk-paper') + P.text(x + 31, 80, label, 'sk-t sk-b') + P.text(x + 31, 96, sub, 'sk-t sk-small sk-muted'); };
+      const box = function (x, label, sub, cls) { return P.rect(x, 58, 62, 46, 'sk-ink', cls || 'sk-paper') + P.caption(x + 2, 59, 58, 22, label, 'sk-b sk-compact') + P.caption(x + 2, 81, 58, 22, sub, 'sk-muted'); };
       let s = box(6, '基础额度', '城市与年代') + P.text(74, 86, '×', 'sk-t sk-b') + box(82, '财力', '城市经济') + P.text(150, 86, '×', 'sk-t sk-b') + box(158, '满意度', '乘客评价', 'sk-home') + P.text(226, 86, '×', 'sk-t sk-b') + box(234, '任务', '完成或未完成');
       s += P.text(160, 30, '每月拨款 =', 'sk-t sk-b sk-accent');
       s += P.circle(189, 140, 14, 'sk-ink', 'sk-gold') + P.line(182, 137, 184, 137, 'sk-ink', 0.3) + P.line(194, 137, 196, 137, 'sk-ink', 0.3) + '<path class="sk-ink" d="M182 144 Q189 150 196 144"/>';
-      s += P.text(210, 145, '满意度越高拨款越多', 'sk-t sk-small', 'start');
+      s += P.caption(207, 125, 108, 34, '满意度越高拨款越多');
       return wrap('拨款怎么算', s);
     },
     moneyOut: function () {
@@ -158,9 +163,9 @@
     },
     bonds: function () {
       const P = pen('bonds');
-      let s = P.rect(16, 50, 70, 56, 'sk-ink', 'sk-paper') + P.poly([[10, 50], [51, 28], [92, 50]], 'sk-ink') + P.text(51, 84, '发行债券', 'sk-t sk-b');
+      let s = P.rect(16, 50, 70, 56, 'sk-ink', 'sk-paper') + P.poly([[10, 50], [51, 28], [92, 50]], 'sk-ink') + P.caption(18, 52, 66, 52, '发行债券', 'sk-b');
       s += P.arrow(92, 78, 140, 78) + P.coin(116, 66, 7);
-      s += P.rect(146, 50, 74, 56, 'sk-ink', 'sk-gold') + P.text(183, 74, '建设专项', 'sk-t sk-b') + P.text(183, 92, '只能修地铁', 'sk-t sk-small');
+      s += P.rect(146, 50, 74, 56, 'sk-ink', 'sk-gold') + P.caption(149, 54, 68, 22, '建设专项', 'sk-b sk-compact') + P.caption(149, 76, 68, 24, '只能修地铁');
       s += P.rect(176, 104, 14, 12, 'sk-ink', 'sk-paper') + '<path class="sk-ink" d="M179 104 v-5 a4 4 0 0 1 8 0 v5"/>';
       for (let i = 0; i < 4; i++) s += P.rect(236 + (i % 2) * 34, 40 + Math.floor(i / 2) * 40, 28, 30, 'sk-thin', 'sk-paper') + P.text(250 + (i % 2) * 34, 60 + Math.floor(i / 2) * 40, '%', 'sk-t sk-small');
       s += P.text(268, 134, '每年付息', 'sk-t sk-small') + P.text(160, 160, '3 或 6 年到期还本，利率发行时锁定', 'sk-t sk-small sk-muted');
@@ -169,11 +174,11 @@
     overdue: function () {
       const P = pen('overdue');
       let s = P.poly([[60, 30], [100, 100], [20, 100]], 'sk-ink', 'sk-gold', true) + P.text(60, 88, '!', 'sk-t sk-big');
-      s += P.text(60, 124, '还不上 → 逾期', 'sk-t sk-small') + P.text(60, 140, '每月加收费用', 'sk-t sk-small sk-muted');
+      s += P.caption(7, 108, 106, 22, '还不上 → 逾期') + P.caption(7, 131, 106, 22, '每月加收费用', 'sk-muted');
       s += P.arrow(110, 70, 150, 70);
       s += P.circle(190, 70, 26, 'sk-ink', 'sk-bad') + P.text(190, 75, '✕', 'sk-t sk-b sk-white');
-      s += P.text(190, 124, '先停城投债', 'sk-t sk-small') + P.text(190, 140, '满 6 个月停全部', 'sk-t sk-small sk-muted');
-      s += P.arrow(226, 70, 254, 70) + P.coin(282, 70, 12) + P.text(282, 124, '有钱自动还清', 'sk-t sk-small');
+      s += P.caption(117, 108, 113, 22, '先停城投债') + P.caption(117, 131, 113, 22, '满 6 个月停全部', 'sk-muted');
+      s += P.arrow(226, 70, 254, 70) + P.coin(282, 70, 12) + P.caption(234, 108, 84, 22, '有钱自动还清');
       return wrap('还不上会怎样', s);
     },
     howto: function () {
@@ -205,13 +210,13 @@
       let s = P.rect(30, 34, 260, 92, 'sk-ink', 'sk-paper') + P.rect(30, 110, 260, 8, 'sk-thin', 'sk-metro-f') + P.circle(70, 132, 6, 'sk-ink') + P.circle(250, 132, 6, 'sk-ink');
       for (let i = 0; i < 20; i++) { const x = 48 + (i % 10) * 25 + (i >= 10 ? 12 : 0), y = i < 10 ? 66 : 90; s += P.circle(x, y, 9, 'sk-ink', 'sk-home') + P.line(x - 10, y + 16, x + 10, y + 16, 'sk-thin', 0.5); }
       s += P.text(272, 26, '!!', 'sk-t sk-b sk-bad-t') + '<path class="sk-thin" d="M286 50 q3 5 0 8 q-3 -3 0 -8"/>';
-      return s + P.text(160, 162, (o.s ? o.s + ' · ' : '') + '早高峰 8:15', 'sk-t sk-small');
+      return s + P.caption(8, 148, 304, 28, (o.s ? o.s + ' · ' : '') + '早高峰 8:15');
     },
     xfer: function (P, o) {
       let s = P.circle(48, 70, 20, 'sk-ink', 'sk-metro-f') + P.text(48, 75, 'M', 'sk-t sk-b sk-white') + P.circle(272, 70, 20, 'sk-ink', 'sk-metro-f') + P.text(272, 75, 'M', 'sk-t sk-b sk-white');
       s += '<path class="sk-ink" stroke-dasharray="3 6" d="M68 80 C 110 150, 140 10, 178 92 S 236 132, 252 82"/>';
       s += man(P, 160, 152, 'sad', true) + P.text(160, 34, (o.m || '400') + ' m', 'sk-t sk-b sk-accent');
-      return s + P.text(48, 106, o.s || '', 'sk-t sk-small') + P.text(272, 106, o.t || '', 'sk-t sk-small');
+      return s + P.caption(6, 98, 108, 34, o.s || '') + P.caption(206, 98, 108, 34, o.t || '');
     },
     level: function (P) {
       let s = '', x = 70, y = 40; const pts = [[40, 40]];
@@ -230,13 +235,13 @@
     newst: function (P, o) {
       let s = P.rect(96, 70, 110, 64, 'sk-ink', 'sk-paper') + P.poly([[88, 70], [151, 46], [214, 70]], 'sk-ink', 'sk-metro-f', true) + P.rect(134, 96, 34, 38, 'sk-thin', 'sk-work') + P.text(151, 64, 'M', 'sk-t sk-b sk-white');
       s += sparkle(P, 70, 50, 7) + sparkle(P, 236, 40, 9) + sparkle(P, 226, 92, 5) + sparkle(P, 60, 110, 5);
-      return s + man(P, 252, 150, 'happy') + P.text(150, 166, (o.s ? o.s + '站 · ' : '') + '开通啦', 'sk-t sk-b sk-accent');
+      return s + man(P, 252, 150, 'happy') + P.caption(8, 152, 304, 26, (o.s ? o.s + '站 · ' : '') + '开通啦', 'sk-b sk-accent');
     },
     road: function (P, o) {
       let s = P.rect(0, 112, 320, 34, 'sk-thin', 'sk-road');
       for (let i = 0; i < 7; i++) s += car(P, 6 + i * 44, 120, 34);
       s += P.text(60, 92, '#!@', 'sk-t sk-b sk-bad-t') + P.circle(250, 54, 34, 'sk-thin', 'sk-paper') + P.circle(210, 98, 5, 'sk-thin', 'sk-paper') + P.circle(200, 108, 3, 'sk-thin') + P.train(222, 46, 56);
-      return s + P.text(110, 30, o.r || '', 'sk-t sk-small');
+      return s + P.caption(8, 16, 204, 26, o.r || '');
     },
     roadok: function (P) {
       let s = P.rect(0, 128, 320, 30, 'sk-thin', 'sk-road') + car(P, 60, 136, 34) + car(P, 210, 136, 34);
@@ -247,19 +252,19 @@
       let s = P.rect(30, 52, 92, 92, 'sk-ink', 'sk-work') + P.rect(64, 110, 24, 34, 'sk-thin', 'sk-paper');
       s += P.rect(66, 62, 20, 20, 'sk-thin', 'sk-paper') + P.text(76, 77, '?', 'sk-t sk-b');
       s += '<path class="sk-thin" stroke-dasharray="2 7" d="M128 140 Q 200 110, 262 140"/>' + sign(P, 272, 140) + P.text(196, 80, '???', 'sk-t sk-b sk-muted');
-      return s + P.text(76, 166, o.x || '', 'sk-t sk-small');
+      return s + P.caption(8, 149, 304, 28, o.x || '');
     },
     fare: function (P, o) {
       let s = '';
       for (let i = 0; i < 5; i++) s += P.coin(80 + (i % 2) * 3, 140 - i * 16, 13);
-      s += P.rect(150, 70, 90, 50, 'sk-ink', 'sk-paper') + P.line(170, 70, 170, 120, 'sk-thin') + P.text(205, 100, '¥ ' + (o.f || ''), 'sk-t sk-b');
+      s += P.rect(150, 70, 90, 50, 'sk-ink', 'sk-paper') + P.line(170, 70, 170, 120, 'sk-thin') + P.caption(172, 73, 66, 44, o.f || '', 'sk-b');
       return s + man(P, 274, 150, 'sad');
     },
     line: function (P, o) {
       let s = P.line(10, 120, 310, 120, 'sk-ink') + P.train(110, 96, 110);
       for (let i = 0; i < 3; i++) s += P.line(40 + i * 8, 100 + i * 7, 96, 100 + i * 7, 'sk-thin', 0.4);
       s += '<path class="sk-ink sk-heart" d="M160 64 c -16 -14 -30 -2 -22 10 l 22 18 l 22 -18 c 8 -12 -6 -24 -22 -10z"/>';
-      return s + man(P, 270, 150, 'happy') + P.text(160, 160, o.l || '', 'sk-t sk-small sk-accent');
+      return s + man(P, 270, 150, 'happy') + P.caption(8, 151, 304, 26, o.l || '', 'sk-accent');
     },
   };
   DOODLE.linecrowd = DOODLE.crowd; DOODLE.impact = DOODLE.roadok;
@@ -300,6 +305,11 @@
     newDistrict: function (P) { return towerB(P, 56, 124, 28, 34) + towerB(P, 96, 124, 30, 56) + towerB(P, 136, 124, 34, 82) + towerB(P, 180, 124, 30, 58, 'sk-home') + craneB(P, 228, 124, 90) + G('tr-a-pulse', P.arrow(36, 108, 36, 50, 'sk-accent-s')) + ground(P, 124); },
     relocate: function (P) { let o = ''; for (let i = 0; i < 5; i++) o += P.house(22 + i * 19, 112 - (i % 2) * 15, 1); for (let i = 0; i < 4; i++) o += P.house(30 + i * 20, 86 - (i % 2) * 8, 0.9); return o + G('tr-a-pulse', P.arrow(138, 90, 196, 90, 'sk-accent-s') + P.arrow(138, 112, 196, 112, 'sk-accent-s')) + towerB(P, 214, 124, 26, 70) + towerB(P, 246, 124, 26, 46, 'sk-home') + towerB(P, 278, 124, 24, 58) + ground(P, 124); },
     transition: function (P) { return factoryB(P, 26, 120) + G('tr-a-pulse', P.arrow(120, 90, 182, 90, 'sk-accent-s')) + towerB(P, 200, 120, 26, 74) + towerB(P, 232, 120, 28, 50, 'sk-home') + tree(P, 276, 120, 10) + tree(P, 298, 120, 8) + ground(P, 120); },
+    finance: function (P) {
+      const office = P.rect(38, 68, 76, 54, 'sk-ink', 'sk-paper') + P.poly([[30, 68], [76, 42], [122, 68]], 'sk-ink', 'sk-stone', true)
+        + P.line(58, 78, 58, 113, 'sk-ink') + P.line(76, 78, 76, 113, 'sk-ink') + P.line(94, 78, 94, 113, 'sk-ink');
+      return office + P.arrow(124, 96, 188, 96, 'sk-accent-s') + P.coin(156, 71, 11) + P.train(200, 100, 82) + ground(P, 122, 24, 296);
+    },
     investWindow: function (P) { return coinFall(P, [84, 122, 160, 198, 236], 56) + P.rect(44, 96, 232, 18, 'sk-ink', 'sk-road') + G('tr-a-run', P.train(70, 98, 60)) + P.line(36, 120, 284, 120, 'sk-ink', 0.5) + P.line(36, 128, 284, 128, 'sk-ink', 0.5) + P.arrow(292, 130, 292, 62, 'sk-accent-s'); },
     austerity: function (P) { let o = ''; for (let i = 0; i < 6; i++) o += P.coin(70, 122 - i * 12, 12); for (let i = 0; i < 3; i++) o += P.coin(160, 122 - i * 12, 12); o += P.coin(250, 122, 12); return o + G('tr-a-pulse', P.arrow(104, 58, 226, 110, 'sk-bad-s')) + ground(P, 136); },
     currency: function (P) { return P.circle(92, 84, 40, 'sk-ink', 'sk-gold') + P.text(92, 96, '₣', 'sk-t sk-big', 'middle') + G('tr-a-pulse', P.arrow(144, 84, 180, 84, 'sk-accent-s')) + P.circle(228, 84, 40, 'sk-ink', 'sk-work') + P.text(228, 96, '€', 'sk-t sk-big', 'middle'); },
@@ -307,8 +317,15 @@
     disaster: function (P) { let rain = ''; for (let i = 0; i < 16; i++) rain += P.line(62 + i * 14, 48 + (i % 3) * 5, 56 + i * 14, 64 + (i % 3) * 5, 'sk-rain', 0.3); return cloudB(P, 74, 34) + cloudB(P, 178, 30) + G('tr-a-fall', rain) + towerB(P, 56, 120, 40, 34, 'sk-stone') + sign(P, 228, 120) + '<path class="sk-water" d="M0 102h320v60h-320z"/><path class="sk-wave" d="M30 112q8 -5 16 0t16 0M120 120q8 -5 16 0t16 0M250 112q8 -5 16 0t16 0"/>' + P.line(0, 102, 320, 102, 'sk-thin', 0.6); },
     accident: function (P) { return '<path class="sk-road sk-ink" d="M40 136v-46a120 60 0 0 1 240 0v46z"/>' + P.train(112, 108, 96) + '<path class="sk-bad-s" d="M192 44l-14 18 12 6 -16 22"/>' + G('tr-a-pulse', P.poly([[250, 22], [282, 74], [218, 74]], 'sk-ink', 'sk-gold', true) + P.text(250, 66, '!', 'sk-t sk-big', 'middle')) + ground(P, 136); },
     rival: function (P) { return P.line(16, 48, 304, 48, 'sk-thin', 0.4) + G('tr-a-run', P.train(40, 58, 92)) + P.line(14, 78, 306, 78, 'sk-ink', 0.5) + P.rect(186, 96, 58, 24, 'sk-ink', 'sk-gold') + P.line(214, 96, 214, 84, 'sk-thin', 0.3) + P.circle(198, 123, 3, 'sk-ink') + P.circle(232, 123, 3, 'sk-ink') + P.line(14, 126, 306, 126, 'sk-ink', 0.5) + man(P, 92, 126, 'happy') + man(P, 118, 126); },
+    // 铁路与渡轮走廊（v2.9）：地面上的铁路连着几座车站，水面上有渡轮；地铁画在地下，走铁路照顾不到的地方
+    railTakeover: function (P) { return P.line(14, 92, 160, 92, 'sk-ink', 0.5) + dash(160, 92, 306, 92, 'sk-dash-bad') + P.circle(60, 92, 5, 'sk-ink') + P.circle(160, 92, 6, 'sk-ink') + P.circle(260, 92, 5, 'sk-ink') + G('tr-a-run', P.train(46, 82, 84)) + P.rect(140, 34, 40, 28, 'sk-ink', 'sk-gold') + P.line(160, 62, 160, 84, 'sk-ink', 0.5) + man(P, 210, 92, 'happy'); },
+    corridors: function (P) { return '<path class="sk-water" d="M14 100h292v34h-292z"/><path class="sk-wave" d="M40 114q7 -5 14 0t14 0M230 120q7 -5 14 0t14 0"/>' + P.rect(130, 104, 46, 10, 'sk-ink', 'sk-gold') + P.rect(140, 96, 24, 8, 'sk-thin', 'sk-home') + P.line(14, 62, 306, 62, 'sk-ink', 0.5) + P.circle(60, 62, 5, 'sk-ink') + P.circle(160, 62, 5, 'sk-ink') + P.circle(260, 62, 5, 'sk-ink') + G('tr-a-run', P.train(88, 52, 84)) + dash(20, 30, 300, 30, 'sk-dash-bad') + man(P, 200, 62, 'happy'); },
     modeChart: function (P) { const c = [[30, 42, 24], [24, 34, 36], [16, 30, 48], [12, 22, 62]]; let o = ''; c.forEach(function (v, i) { const x = 62 + i * 54; let y = 128; [['sk-work', v[0]], ['sk-gold', v[1]], ['sk-metro-f', v[2]]].forEach(function (b) { o += P.rect(x, y - b[1], 34, b[1], 'sk-thin', b[0]); y -= b[1]; }); }); return o + ground(P, 128, 40, 284); },
     roadRefill: function (P) { let o = P.rect(20, 96, 280, 34, 'sk-thin', 'sk-road') + G('tr-a-run', P.train(90, 54, 110)) + P.line(40, 74, 280, 74, 'sk-ink', 0.5); for (let i = 0; i < 7; i++) o += carB(P, 28 + i * 40, 118, i % 2 ? 'sk-car' : 'sk-gold'); return o; },
+    // v3.0：考古发现（地下工点挖出陶罐与石块）、旅游客流（金字塔与游客）、路面公交竞争（公交小巴与汽车同堵，地铁在下面）
+    archaeo: function (P) { return '<rect class="sk-zone" x="14" y="30" width="292" height="70" rx="10"/>' + domeB(P, 52, 100, 44, 32) + gable(P, 112, 100, 24, 28) + gable(P, 236, 100, 26, 24) + ground(P, 100) + P.poly([[118, 100], [128, 140], [206, 140], [216, 100]], 'sk-ink', 'sk-road', true) + P.poly([[146, 140], [150, 124], [158, 120], [166, 124], [170, 140]], 'sk-ink', 'sk-gold', true) + P.rect(180, 128, 20, 12, 'sk-ink', 'sk-stone') + G('tr-a-pulse', P.circle(158, 112, 4, 'sk-accent-s')) + P.line(214, 86, 236, 64, 'sk-ink', 0.5) + tube(P, 152, 30, 290); },
+    tourism: function (P) { return P.poly([[30, 118], [92, 40], [154, 118]], 'sk-ink', 'sk-gold', true) + P.poly([[126, 118], [172, 60], [218, 118]], 'sk-ink', 'sk-gold', true) + P.line(92, 40, 112, 118, 'sk-thin', 0.4) + ground(P, 118) + man(P, 240, 118, 'happy') + man(P, 262, 118, 'happy') + P.rect(276, 96, 18, 12, 'sk-ink', 'sk-stone') + P.circle(285, 102, 3, 'sk-ink') + tube(P, 140, 30, 290) + G('tr-a-run', P.train(50, 130, 60)); },
+    roadTransit: function (P) { return P.rect(14, 74, 292, 34, 'sk-ink', 'sk-road') + dash(14, 91, 306, 91) + P.rect(30, 58, 70, 30, 'sk-ink', 'sk-gold') + P.rect(36, 64, 12, 9, 'sk-thin', 'sk-paper') + P.rect(54, 64, 12, 9, 'sk-thin', 'sk-paper') + P.rect(72, 64, 12, 9, 'sk-thin', 'sk-paper') + P.rect(118, 66, 40, 22, 'sk-ink', 'sk-home') + carB(P, 176, 72) + carB(P, 230, 72) + G('tr-a-sway', man(P, 104, 74)) + tube(P, 138, 30, 290) + G('tr-a-run', P.train(60, 128, 70)); },
     carLimit: function (P) { return carB(P, 54, 92) + P.rect(62, 94, 20, 9, 'sk-thin', 'sk-paper') + G('tr-a-pulse', P.coin(114, 54, 13) + P.coin(138, 40, 11) + P.arrow(112, 86, 146, 58, 'sk-bad-s')) + '<path class="sk-dash-bad" d="M28 34L100 110"/>' + P.line(150, 104, 306, 104, 'sk-ink', 0.5) + G('tr-a-run', P.train(170, 80, 92)) + man(P, 280, 104, 'happy'); },
     hubMove: function (P) { return G('tr-a-rise', planeB(P, 214, 52)) + P.line(14, 124, 186, 124, 'sk-ink', 0.5) + dash(30, 112, 170, 112) + craneB(P, 40, 124, 58) + towerB(P, 92, 124, 24, 40) + towerB(P, 124, 124, 26, 58, 'sk-home') + P.line(198, 124, 306, 124, 'sk-ink', 0.5) + P.rect(226, 96, 62, 28, 'sk-ink', 'sk-stone'); },
     portal: function (P) { return dash(232, 18, 232, 152, 'sk-dash-bad') + P.line(14, 112, 306, 112, 'sk-ink', 0.5) + G('tr-a-run', P.train(44, 90, 84)) + sign(P, 196, 112) + planeB(P, 246, 66) + P.rect(252, 90, 54, 22, 'sk-ink', 'sk-stone'); },

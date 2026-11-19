@@ -15,9 +15,11 @@ for(const [,src]of(await readFile(path.join(root,'index.html'),'utf8')).matchAll
   if(src==='js/save.js')break;
 }
 const C=context.CM;
-const sizes={tutorial:[48,40],gz:[120,144],hz:[188,136],wh:[152,156],hk:[176,144],tp:[136,120],pa:[152,148],sh:[152,152],bj:[204,156],tk:[140,132]};
-for(const [id,[width,height]]of Object.entries(sizes)){
-  const m=C.MAPS[id];assert.equal(m.cfg.W,width);assert.equal(m.cfg.H,height);assert.equal(m.mapVersion,id==='tutorial'||id==='bj'?1:['hz','wh','hk'].includes(id)?4:['tk','pa'].includes(id)?3:2);
+const sizes = { tutorial:[48,40,1], gz:[152,228,3], hz:[228,152,5], wh:[184,188,5],
+  hk:[184,164,5], tp:[200,172,3], pa:[228,152,4], sh:[224,152,3], bj:[204,172,2],
+  tk:[208,168,4], ld:[212,164,2], sz:[244,144,1], sg:[220,124,1], ny:[188,184,2], sy:[180,164,2] };
+for (const [id,[width,height,mapVersion]] of Object.entries(sizes)) {
+  const m=C.MAPS[id];assert.equal(m.cfg.W,width);assert.equal(m.cfg.H,height);assert.equal(m.mapVersion,mapVersion);
   assert.ok(m.data.eras.length>=3);
   const regions=new Set([...m.data.regions.map(r=>r.id),m.data.defaultRegion?.id].filter(Boolean));
   for(const e of m.data.eras){

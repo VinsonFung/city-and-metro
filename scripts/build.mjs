@@ -1,7 +1,7 @@
 import { cp, lstat, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { gameEntries, writeManifest, verifyGame } from './verify-game.mjs';
+import { gameEntries, isDocumentationAsset, writeManifest, verifyGame } from './verify-game.mjs';
 import { checkRoadKernel } from './build-road-kernel.mjs';
 import { simulationStamp } from './sim-stamp.mjs';
 import { geoIndex } from './geo-index.mjs';
@@ -32,7 +32,10 @@ catch (e) { if (e.code !== 'ENOENT') throw e; }
 await rm(output, { recursive: true, force: true });
 await mkdir(output);
 for (const entry of entries) {
-  await cp(path.join(root, entry), path.join(output, entry), { recursive: true });
+  await cp(path.join(root, entry), path.join(output, entry), {
+    recursive: true,
+    filter: source => !isDocumentationAsset(root, source),
+  });
 }
 await cp(path.join(root, 'game-manifest.json'), path.join(output, 'game-manifest.json'));
 

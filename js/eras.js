@@ -160,7 +160,7 @@
       if (U.ymIndex(y, m) - U.ymIndex(f.ym[0], f.ym[1]) > 1) { done[f.id] = { hit: false, st: null, y: y, m: m, late: true }; g.city.foresight = done; continue; }
       const before = U.ymIndex(f.before, 1); let hit = null;
       for (const id in net.stations) {
-        const s = net.stations[id]; if (U.dist(s.x, s.y, f.x, f.y) > f.r || !s.built || U.ymIndex(s.built[0], s.built[1] || 1) >= before) continue;
+        const s = net.stations[id]; if (s.v || U.dist(s.x, s.y, f.x, f.y) > f.r || !s.built || U.ymIndex(s.built[0], s.built[1] || 1) >= before) continue;
         if (M.stationLines(net, id).length) { hit = s; break; }
       }
       done[f.id] = { hit: !!hit, st: hit ? hit.name : null, y: y, m: m };
@@ -177,6 +177,7 @@
   Eras.fxNote = function (e, only) {   // only：只描述这些效果（日期页列出仍在生效的部分）
     const f = e.fx; if (!f) return '';
     const parts = [];
+    if (f.damage && (!only || only.has('damage'))) parts.push('范围内高架与地面的轨道、车站要付维修费（约为重建造价的 ' + Math.round(f.damage.share * 100) + '%）');
     const rn = function (id) { const r = (D.regions || []).concat(D.defaultRegion ? [D.defaultRegion] : []).find(function (x) { return x.id === id; }); return r ? String(r.name).replace(/（.*）/, '') : id; };
     if (f.grow && (!only || only.has('grow'))) {
       const g = f.grow, up = (g.pop || 1) >= 1 && (g.jobs || 1) >= 1;
@@ -237,12 +238,13 @@
   Eras.macroFx = function (id) { const e = macroEvents().find(function (x) { return x.id === id; }); return e ? e.fx : null; };
   Eras.macroNote = function (id) { const e = macroEvents().find(function (x) { return x.id === id; }); return e ? Eras.fxNote(e) : ''; };
 
-  // 背景交通（不由玩家经营、不占用道路的公共交通与步行：电车、公共马车、普通铁路、渡轮）：
+  // 背景交通（不由玩家经营的公共交通与步行：电车、公共马车、普通铁路、渡轮，不占用道路；写了 road 的为走道路的公交与小巴，v3.0）：
   // share 非地铁出行中背景交通的比例，speed 平均速度（km/h，含步行接驳），wait 候车与换乘（分钟），fare 单程票价（内部货币）
   Eras.bg = function (t) {
     const B = D.bg; if (!B) return null;
     const share = U.interp(B.share, t); if (!(share > 0)) return null;
-    return { share: U.clamp(share, 0, 0.95), speed: U.interp(B.speed, t), wait: U.interp(B.wait, t), fare: B.fare ? U.interp(B.fare, t) : 0, name: B.name || '背景交通', keep: B.roadKeep ? U.interp(B.roadKeep, t) : 0 };
+    return { share: U.clamp(share, 0, 0.95), speed: U.interp(B.speed, t), wait: U.interp(B.wait, t), fare: B.fare ? U.interp(B.fare, t) : 0, name: B.name || '背景交通', keep: B.roadKeep ? U.interp(B.roadKeep, t) : 0,
+      road: B.road ? U.interp(B.road, t) : null, slow: B.slow ? U.interp(B.slow, t) : 1 };   // 路面公交（v3.0）：road 每位乘客占用的路面（相对小汽车乘客），slow 相对汽车的行程时间倍数
   };
 
   // 阶段目标：转为本城专属动态任务（economy.js），只在该阶段的时间窗口内发布

@@ -10,6 +10,7 @@
   const TYPES = {
     rail: { name: '铁路客运站', icon: 'train', p: { hb: 1 }, hub: true, we: 1, L: 0, r: 0.6, group: '交通枢纽' },
     air: { name: '机场', icon: 'plane', p: { hb: 1 }, hub: true, we: 1, L: 0, r: 1.2, group: '交通枢纽' },
+    port: { name: '客运码头', icon: 'ferry', p: { hb: 1 }, hub: true, we: 1, L: 0, r: 0.8, group: '交通枢纽' },   // 邮轮与客运码头（v3.1）
     uni: { name: '大学', icon: 'school', p: { sc: 1 }, we: 3, L: 1.8, r: 1.0, group: '教育' },
     hosp: { name: '医院', icon: 'hospital', p: { md: 1 }, we: 1, L: 1.8, r: 0.5, group: '医疗' },
     shop: { name: '商圈', icon: 'bag', p: { sh: 0.8, lz: 0.2 }, we: 1.1, L: 1.5, r: 1.0, group: '商业' },
@@ -118,7 +119,7 @@
       const T = TYPES[s.t]; if (!T) return;
       const f = { k: out.length, id: s.id || ('f' + i), name: s.n, label: s.label || s.n, t: s.t, T: T, x: 0, y: 0, r: s.r != null ? s.r : T.r, lmK: -1,
         open: null, close: yrOf(s.y1), w: s.w != null ? curve(s.w) : null, pax: s.pax || null, p: s.p || T.p, we: s.we || null, note: s.note || '', src: s.src || null,
-        ext: s.ext ? { dir: s.ext[0], km: s.ext[1], v: EXT_DIR[s.ext[0]] || [0, 0], gate: !!s.gate, to: s.to || null } : null, rw: s.rw || null, noModel: !!s.noModel };   // rw：机场自己的跑道（格坐标，v2.2，用于模型选址）
+        ext: s.ext ? { dir: s.ext[0], km: s.ext[1], v: EXT_DIR[s.ext[0]] || [0, 0], gate: !!s.gate, hideBeforeOpen: !!s.hideBeforeOpen, to: s.to || null } : null, rw: s.rw || null, noModel: !!s.noModel, tour: !!s.tour };   // rw：机场自己的跑道（格坐标，v2.2，用于模型选址）；tour：旅游景点（v3.0）
       if (s.lm) {
         const k = lms.findIndex(function (l) { return l.id === s.lm; });
         if (k < 0) return;
@@ -182,7 +183,8 @@
   function genDistrict(out, city) {
     const CFG = CM.CFG, regs = city.regions || [];
     if (D.fictional || !city.region) return;
-    const km = CFG.CELL_M / 1000, popRef = U.interp(CFG.growth.popCurve, CFG.growth.histEnd);
+    // 出现门槛的人口基准：默认取史料末年的全图人口；扩图的地图写 D.facPopRef（扩图前的值），原有片区设施出现的时机不随地图扩大而推迟（v2.9）
+    const km = CFG.CELL_M / 1000, popRef = D.facPopRef || U.interp(CFG.growth.popCurve, CFG.growth.histEnd);
     regs.forEach(function (rg, k) {
       if (rg.scenic || rg.hub || rg.noGen || rg.open == null || !rg.cells || rg.cx == null || rg === D.defaultRegion) return;   // 不含风景区、机场等枢纽、纯工业区（noGen，v2.8）、永久不开放的片区与「外围地区」
       let ctAt = null, best = -1;
@@ -220,12 +222,16 @@
     if (f.lmK >= 0) return !!(city.landmarkOn && city.landmarkOn[f.lmK]);
     if (f.gen && (!city.regionOpen[f.gen.k] || Fac.regionPop(city, f.gen.k) < f.gen.min)) return false;
     const c = city.cellAt(f.x, f.y);
+    // 城市连接的接驳口（口岸）：到了启用年份、所在片区也开放了才启用；没开放前不显示、不能接通、没有需求。永不开放的境外片区不算未开放（v2.9）
+    if (f.ext && f.ext.gate) { if (c < 0) return true; const k = city.lockRegion(c); return !!city.regionOpen[k] || city.regions[k].open == null; }
     return c >= 0 && city.landFrac[c] >= 0.3;
   };
   // 枢纽：接驳出行（汽车 + 地铁，到达与离开合计，人次/日，工作日）；其他：占全市该目的出行吸引的比例（周期规模，估算）
   Fac.pax = function (f, yr) { return f.pax ? U.interp(f.pax, yr) * 1e4 : 0; };
   // 吸引比例按 trips.facBoost 放大（v2.1 第二轮：设施出行需求整体偏少）；sim.js 中各目的的设施合计另有上限
-  Fac.share = function (f, yr) { return f.w ? U.interp(f.w, yr) * (CM.CFG.trips.facBoost || 1) : 0; };
+  Fac.share = function (f, yr) { return f.w ? U.interp(f.w, yr) * (CM.CFG.trips.facBoost || 1) * (f.tour ? Fac.tourK(f, yr) : 1) : 0; };
+  // 旅游景点（v3.0，设施 tour: true）：游客量随 DATA.tourism 的年份曲线起落，考古发现的展示另有限时倍数（traits.js Arch.facK）
+  Fac.tourK = function (f, yr) { return (D.tourism ? U.interp(D.tourism, yr) : 1) * (CM.Traits && CM.Traits.Arch ? CM.Traits.Arch.facK(f.id, yr) : 1); };
   // 场地格：地标场地或以设施为中心、半径 r 的格（只取陆地）
   Fac.siteCells = function (f, city) {
     const out = [];

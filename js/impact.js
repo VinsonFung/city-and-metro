@@ -116,7 +116,7 @@
     if (congFlat) {
       if (farHot.length) {
         reasons.push(['bad', 'road', '最拥堵的「' + farHot[0].name + '」（拥堵指数 ' + farHot[0].vc0.toFixed(2) + '）离新线最近的车站约 ' + U.fmtNum(farHot[0].km, 1) + ' km，新线分流不到这条路上的车流']);
-        tips.push(['lyFlow', '打开「出行方向」图层，看「' + farHot[0].name + '」上的车从哪里来、往哪里去，沿这个方向修线']);
+        tips.push(['lyFlow', '打开「出行与通勤」图层，看「' + farHot[0].name + '」上的车从哪里来、往哪里去，沿这个方向修线']);
       }
       if (k.carAll > 0 && -k.car / k.carAll < 0.01) reasons.push(['warn', 'car', '改乘地铁的出行只占全市非地铁出行的 ' + U.fmtPct(Math.max(0, -k.car) / k.carAll, 1) + '，对整体道路拥堵影响有限']);
       if (k.metro > 1 && fromCar < 0.4) reasons.push(['warn', 'people','新增乘客多数原本步行或乘坐其他公共交通，开车的人改乘不多']);

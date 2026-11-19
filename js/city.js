@@ -90,6 +90,9 @@
       if (this.regions[this.region[c]].empty) continue;   // empty（v2.8）：境外土地和不开放的管制用地，没有人口和岗位，也不吸引出行
       const i = c % W, j = (c / W) | 0, cx = i + 0.5, cy = j + 0.5;
       let p = D.rural.pop, jb = D.rural.jobs;
+      // 扩图的新增范围可以单独压低乡村底数（v2.9，rural.out = { box: [x, y, 宽, 高]（原范围）, k: 倍率 }）：原范围的底数按市区校准，放到新增的远郊会偏高
+      const rOut = D.rural.out;
+      if (rOut && (i < rOut.box[0] || j < rOut.box[1] || i >= rOut.box[0] + rOut.box[2] || j >= rOut.box[1] + rOut.box[3])) { p *= rOut.k; jb *= rOut.k; }
       for (const ct of D.centers) {
         const d = U.dist(cx, cy, ct.x, ct.y) / (ct.r * 4);
         const w = Math.exp(-d * d);
@@ -173,7 +176,17 @@
       if (inside) for (const q of comp) a[q] = 1;
     }
     this.heritageGuards = [];
+    const a2 = function (q) { a[q] = 2; };
     for (const g of H.guards || []) {
+      if (g.wall) {   // 城墙：线位两侧 r 格内（陆地）
+        const w = (D.walls || []).find(function (x) { return x.id === g.wall; }); if (!w) continue;
+        this.heritageGuards.push({ lines: w.lines, r: g.r, name: g.name || w.name });
+        for (const L of w.lines) for (let k = 0; k + 1 < L.length; k++) {
+          const a = L[k], b = L[k + 1], i0 = Math.floor(Math.min(a[0], b[0]) - g.r - 1), i1 = Math.ceil(Math.max(a[0], b[0]) + g.r + 1), j0 = Math.floor(Math.min(a[1], b[1]) - g.r - 1), j1 = Math.ceil(Math.max(a[1], b[1]) + g.r + 1);
+          for (let j = Math.max(0, j0); j <= Math.min(HH - 1, j1); j++) for (let i = Math.max(0, i0); i <= Math.min(W - 1, i1); i++) if (U.distToSeg(i + 0.5, j + 0.5, a[0], a[1], b[0], b[1]) <= g.r && this.landMax[j * W + i] >= 0.5) a2(j * W + i);
+        }
+        continue;
+      }
       const lm = D.landmarks.find(function (l) { return l.id === g.lm; }); if (!lm) continue;
       this.heritageGuards.push({ x: lm.x, y: lm.y, r: g.r, name: g.name || lm.name });
       const r = Math.ceil(g.r + 1), i0 = Math.floor(lm.x), j0 = Math.floor(lm.y);
@@ -182,7 +195,8 @@
     this.heritage = a;
   };
   City.prototype.heritageName = function (c) {
-    const g = (this.heritageGuards || []).find(function (q) { return U.dist(c % this.W + 0.5, ((c / this.W) | 0) + 0.5, q.x, q.y) <= q.r; }, this);
+    const x = c % this.W + 0.5, y = ((c / this.W) | 0) + 0.5;
+    const g = (this.heritageGuards || []).find(function (q) { return q.lines ? q.lines.some(function (L) { for (let k = 0; k + 1 < L.length; k++) if (U.distToSeg(x, y, L[k][0], L[k][1], L[k + 1][0], L[k + 1][1]) <= q.r) return true; return false; }) : U.dist(x, y, q.x, q.y) <= q.r; });
     return g && this.heritage[c] === 2 ? g.name : String(this.regions[this.region[c]].name).replace(/（.*）/, '');
   };
   // 片区规划随年代改变（v2.6，码头关闭后改作商务区，D.replan）：之后这里长出的是办公楼。keepLu 为读档时（用地已从存档恢复）只改规划名称
@@ -580,6 +594,25 @@
     });
     for (const f of Geo.admin) if (f.level === 8 && streetOf.has(f.name)) fillCells([f], streetOf.get(f.name));
     for (const f of Geo.admin) if ((f.level === 6 || f.level === 7) && distOf.has(f.name)) fillCells([f], distOf.get(f.name));   // 区（东京特别区为 7 级）
+    // 种子划片（v3.0）：数据没有区一级边界的城市（开罗只有省界），其余未划定的格归最近的种子片区（seed 格坐标，seedW 放大或缩小范围）；
+    // 写了 seedIn 的种子只认这几个一级行政区里的格，尼罗河两岸分属两省时不会越河划片
+    const seeds = [];
+    regions.forEach(function (rg, k) { if (rg.seed) seeds.push({ k: k, x: rg.seed[0], y: rg.seed[1], w: rg.seedW || 1, inn: rg.seedIn || null }); });
+    if (seeds.length) {
+      const adm = new Int16Array(N).fill(-1), anames = [];
+      Geo.admin.filter(function (f) { return f.level === 6 || f.level === 7; }).forEach(function (f) {
+        let a = anames.indexOf(f.name); if (a < 0) { a = anames.length; anames.push(f.name); }
+        const tmp = new Uint8Array(N); Geo.fill(tmp, W, H, 1, [f]);
+        for (let c = 0; c < N; c++) if (tmp[c] && adm[c] < 0) adm[c] = a;
+      });
+      for (const s of seeds) s.ai = s.inn ? s.inn.map(function (n) { return anames.indexOf(n); }) : null;
+      for (let c = 0; c < N; c++) {
+        if (rr[c] !== NONE) continue;
+        const x = c % W + 0.5, y = ((c / W) | 0) + 0.5; let best = Infinity, bk = -1;
+        for (const s of seeds) { if (s.ai && s.ai.indexOf(adm[c]) < 0) continue; const d = ((x - s.x) * (x - s.x) + (y - s.y) * (y - s.y)) / (s.w * s.w); if (d < best) { best = d; bk = s.k; } }
+        if (bk >= 0) rr[c] = bk;
+      }
+    }
     const def = regions.length - 1;
     this.region = new Uint8Array(N);
     for (let c = 0; c < N; c++) this.region[c] = rr[c] === NONE ? def : rr[c];
@@ -655,6 +688,11 @@
     for (let k = 0; k <= n; k++) { const t = k / n; if (this.waterAt(ax + (bx - ax) * t, ay + (by - ay) * t)) return true; }
     return false;
   };
+  // seaZones（v2.8）：同一片海面在不同水域有不同的名字
+  function seaZone(x, y) {
+    for (const z of D.seaZones || []) { let ins = false; for (let i = 0, j = z.poly.length - 1; i < z.poly.length; j = i++) { const a = z.poly[i], b = z.poly[j]; if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) ins = !ins; } if (ins) return z.name; }
+    return null;
+  }
   // 某处水体的名称：没有名字的水面算作本城主要河流；没有名字的小河道（只画成线）先找附近有名字的水体，找不到就叫「河道」
   //（v2.7 玩家反馈：北京什刹海旁的无名小河被说成「永定河」）
   City.prototype.riverNameAt = function (x, y) {
@@ -666,14 +704,133 @@
         if (!id) continue;
         if (id > 60000) { const rc = (D.reclaim || [])[id - 60001]; return (rc && rc.sea) || D.seaName || D.riverName || '海'; }
         const f = id > 30000 ? Geo.waterLines[id - 30001] : Geo.water[id - 1];
-        // seaZones（v2.8）：同一片海面在不同水域有不同的名字
-        if (f && f.name && f.name === D.seaName) for (const z of D.seaZones || []) { let ins = false; for (let i = 0, j = z.poly.length - 1; i < z.poly.length; j = i++) { const a = z.poly[i], b = z.poly[j]; if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) ins = !ins; } if (ins) return z.name; }
+        if (f && f.name && f.name === D.seaName) { const z = seaZone(x, y); if (z) return z; }
         if (f && f.name) return f.name;
         if (f && id > 30000) { line = true; continue; }
         if (f) return D.riverName || '珠江';
       }
     }
     return line ? '河道' : (D.riverName || '珠江');
+  };
+  // 水体序号（水域栅格的值）本身的名称，没有名字时为空串；尚未填海的海域取填海项的海名或本城海名
+  City.prototype.waterName = function (id, x, y) {
+    if (id > 60000) { const rc = (D.reclaim || [])[id - 60001]; return (rc && rc.sea) || D.seaName || D.riverName || '海'; }
+    const f = id > 30000 ? CM.Geo.waterLines[id - 30001] : CM.Geo.water[id - 1];
+    if (!f || !f.name) return '';
+    return (f.name === D.seaName && seaZone(x, y)) || f.name;
+  };
+  // 无名水面里最长的有名河道中心线（OSM 常把河名只标在河道中心线上，河面本身没有名字，如广州前航道、武汉长江）；按水体缓存
+  const CENTER_NAME = new WeakMap();
+  City.prototype.waterCenterName = function (id) {
+    const Geo = CM.Geo, f = Geo.water[id - 1];
+    if (!f || !f.bbox) return '';
+    if (CENTER_NAME.has(f)) return CENTER_NAME.get(f);
+    const bb = f.bbox, len = new Map();
+    const inside = function (x, y) {
+      let ins = false;
+      for (const r of f.rings) { const p = r.p; for (let i = 0, j = p.length - 2; i < p.length; j = i, i += 2) if ((p[i + 1] > y) !== (p[j + 1] > y) && x < (p[j] - p[i]) * (y - p[i + 1]) / (p[j + 1] - p[i + 1]) + p[i]) ins = !ins; }
+      return ins;
+    };
+    for (const l of Geo.waterLines) {
+      if (!l.name || l.bbox[2] < bb[0] || l.bbox[0] > bb[2] || l.bbox[3] < bb[1] || l.bbox[1] > bb[3]) continue;
+      const p = l.p;
+      for (let q = 0; q + 3 < p.length; q += 2) {
+        const mx = (p[q] + p[q + 2]) / 2, my = (p[q + 1] + p[q + 3]) / 2;
+        if (mx < bb[0] || mx > bb[2] || my < bb[1] || my > bb[3] || !inside(mx, my)) continue;
+        len.set(l.name, (len.get(l.name) || 0) + Math.hypot(p[q + 2] - p[q], p[q + 3] - p[q + 1]));
+      }
+    }
+    let best = '', bv = 0;
+    len.forEach(function (v, nm) { if (v > bv) { bv = v; best = nm; } });
+    CENTER_NAME.set(f, best);
+    return best;
+  };
+  // 一段线位跨过的水体（v3.1）：沿线位约每 12 m 取一次水域栅格，连续的水面算一处跨越，返回 [{ name, m }]（m 为跨水长度，米）。
+  // 名称只取这处实际经过的有名水体，按经过的长度取最多的一个：有名字的水面、海面与河道照名字计；无名水面被一条有名河道的中心线
+  // 从中间穿过时算作该河道，否则算作这片水面里最长的有名河道中心线；都没有（鱼塘、明渠、无名河段）时名称为空，不当成本城主要水体
+  //（v3.1：香港接管东铁红磡—罗湖后曾报「地铁首次跨越维多利亚港」，实际跨的是吐露港沿岸的无名水面和大埔河）
+  City.prototype.waterCrossings = function (pts) {
+    const Geo = CM.Geo, self = this, out = [], STEP = 0.05;
+    let run = null;
+    const close = function () {
+      if (!run) return;
+      const cnt = run.names;
+      if (run.unnamed.size) {
+        // 这处跨越穿过的有名河道中心线（几何相交；中心线在栅格里只有零星几格），多条时取栅格上经过最多的
+        const P = run.p, bb = [1e9, 1e9, -1e9, -1e9];
+        for (let q = 0; q < P.length; q += 2) { bb[0] = Math.min(bb[0], P[q]); bb[1] = Math.min(bb[1], P[q + 1]); bb[2] = Math.max(bb[2], P[q]); bb[3] = Math.max(bb[3], P[q + 1]); }
+        let cl = '', cv = -1;
+        for (const l of Geo.waterLines) {
+          if (!l.name || l.bbox[2] < bb[0] || l.bbox[0] > bb[2] || l.bbox[3] < bb[1] || l.bbox[1] > bb[3] || (cnt.get(l.name) || 0) <= cv) continue;
+          const p = l.p;
+          let hit = false;
+          for (let q = 0; q + 3 < p.length && !hit; q += 2) for (let r = 0; r + 3 < P.length; r += 2) if (segT(p[q], p[q + 1], p[q + 2], p[q + 3], P[r], P[r + 1], P[r + 2], P[r + 3]) >= 0) { hit = true; break; }
+          if (hit) { cl = l.name; cv = cnt.get(l.name) || 0; }
+        }
+        run.unnamed.forEach(function (length, id) {
+          const name = cl || self.waterCenterName(id);
+          if (name) cnt.set(name, (cnt.get(name) || 0) + length);
+        });
+      }
+      let best = '', bv = 0;
+      cnt.forEach(function (v, nm) { if (!best || v > bv + 1e-9 || (Math.abs(v - bv) <= 1e-9 && nm < best)) { bv = v; best = nm; } });
+      out.push({ name: best, m: run.len * CFG.CELL_M });
+      run = null;
+    };
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const ax = pts[i][0], ay = pts[i][1], dx = pts[i + 1][0] - ax, dy = pts[i + 1][1] - ay, L = Math.hypot(dx, dy), n = Math.max(1, Math.ceil(L / STEP));
+      if (!L) continue;
+      const length = L / n;
+      for (let k = 0; k < n; k++) {
+        const x = ax + dx * (k + 0.5) / n, y = ay + dy * (k + 0.5) / n, id = this.waterAt(x, y);
+        if (!id) { close(); continue; }
+        if (!run) run = { len: 0, names: new Map(), unnamed: new Map(), p: [] };
+        run.len += length; run.p.push(x, y);
+        const name = this.waterName(id, x, y);
+        if (name) run.names.set(name, (run.names.get(name) || 0) + length);
+        else if (id <= 30000) run.unnamed.set(id, (run.unnamed.get(id) || 0) + length);
+      }
+    }
+    close();
+    return out;
+  };
+
+  // 车站详情指向步行图里的最近路段。只有该路段有已记录的道路名时才显示名称。
+  City.prototype.nearestWalk = function (x, y, maxCells) {
+    const walk = this.walk; if (!walk) return null;
+    const VW = this.VW, x0 = Math.max(0, Math.floor(x - maxCells)), x1 = Math.min(this.W, Math.ceil(x + maxCells));
+    const y0 = Math.max(0, Math.floor(y - maxCells)), y1 = Math.min(this.H, Math.ceil(y + maxCells));
+    let best = null, bd = maxCells;
+    for (let j = y0; j <= y1; j++) {
+      for (let i = x0; i <= x1; i++) {
+        const v = j * VW + i;
+        for (let k = walk.start[v]; k < walk.start[v + 1]; k++) {
+          const w = walk.to[k]; if (w <= v) continue;
+          const px = this.vx[w], py = this.vy[w];
+          const d = U.distToSeg(x, y, this.vx[v], this.vy[v], px, py);
+          if (d > bd) continue;
+          const edge = this.edgeBetween(i, j, w % VW, Math.floor(w / VW));
+          const name = this.roadNames[this.eName[edge]] || null;
+          if (d === bd && best && (best.name || !name)) continue;
+          const t = U._t;
+          bd = d;
+          best = { x: this.vx[v] + (px - this.vx[v]) * t, y: this.vy[v] + (py - this.vy[v]) * t, m: d * CFG.CELL_M, name: name };
+        }
+      }
+    }
+    return best;
+  };
+  // r 格内离某点最近的道路（ok 筛选道路组），返回贴到线形上的点、路名与等级
+  City.prototype.roadNear = function (x, y, r, ok) {
+    let best = null, bd = r;
+    for (const gr of this.roadGroups || []) {
+      const b = gr.bbox; if (!b || x < b[0] - r || x > b[2] + r || y < b[1] - r || y > b[3] + r || (ok && !ok(gr))) continue;
+      for (const p of gr.ways) for (let k = 0; k + 3 < p.length; k += 2) {
+        const d = U.distToSeg(x, y, p[k], p[k + 1], p[k + 2], p[k + 3]);
+        if (d < bd) { const t = U._t; bd = d; best = { x: p[k] + (p[k + 2] - p[k]) * t, y: p[k + 1] + (p[k + 3] - p[k + 1]) * t, name: gr.name || null, cls: gr.cls, d: d }; }
+      }
+    }
+    return best;
   };
 
   // 地标场地：旋转矩形（米）内的格
@@ -711,7 +868,7 @@
     for (let c = 0; c < N; c++) {
       if (LF[c] < 0.5) continue;
       const k0 = reg[c], k = R[k0].scenic && host && host[c] !== 255 ? host[c] : k0, rg = R[k];
-      if (rg.scenic || rg.empty || R[k0].empty) continue;
+      if (rg.scenic) continue;
       const hub = rg.hub || (air && rg.id === 'airport');
       if (open[k] || hub) el[c] = 1;
       if (!R[k0].scenic && !hub && rg.open != null && rg.open <= y0) seed[c] = 1;
@@ -751,6 +908,12 @@
       }
       if (comp[c] >= 0) keep.add(comp[c]);
     }
+    // island（v2.9）：离城区较远的离岛片区，开放后自成一片可以建设（要修过海隧道才能接上线网）
+    for (let c = 0; c < N; c++) {
+      if (!el[c] || !R[reg[c]].island) continue;
+      if (comp[c] < 0) { const q = [c]; vis[c] = 1; wr.fill(0); bfs(q, function (v) { return el[v]; }, vis, wr); for (const v of q) if (LF[v] >= 0.5) comp[v] = id; id++; }
+      keep.add(comp[c]);
+    }
     const inM = function (c) { return keep.has(comp[c]); };
     // 从地图边缘出发、不经过可建设范围能到达的未开放格属于外围的一整块；到达不了的是被包围的小块（可以建设）
     const out = new Uint8Array(N), q = [], H = this.H;
@@ -761,8 +924,8 @@
     }
     bfs(q, function (v) { return !inM(v); }, out, wr);
     const mask = new Uint8Array(N);
-    // lockEnclaves（v2.8）：岛屿地图四面环海，地图边缘到不了的未开放片区不算「被包围的小块」；empty 片区任何时候都不能建设
-    for (let c = 0; c < N; c++) if (LF[c] >= 0.5 && (R[reg[c]].empty || (!inM(c) && (out[c] || D.lockEnclaves)))) mask[c] = 1;
+    // 岛屿地图不豁免被包围的未开放片区。empty 表示开局空置：尚未开放的空置地也不享受豁免，按期开放或作为枢纽连通后可建设。
+    for (let c = 0; c < N; c++) if (LF[c] >= 0.5 && !inM(c) && (out[c] || D.lockEnclaves || R[reg[c]].empty)) mask[c] = 1;
     return mask;
   };
   City.prototype.lockState = function () {
@@ -814,7 +977,7 @@
       if (!self.regionOpen[k] && rg.open != null && !rg.scenic && !rg.lockNote) { self.regionOpen[k] = 1; self.regionOpenDate[k] = [y, m]; opened.push(k); }
       return c;
     };
-    for (const id in net.stations) { const s = net.stations[id], c = openAt(s.x, s.y); if (c >= 0) seeds.push(c); }
+    for (const id in net.stations) { const s = net.stations[id]; if (s.v) continue; const c = openAt(s.x, s.y); if (c >= 0) seeds.push(c); }
     for (const t of (tasks && tasks.active) || []) for (const a of t.anchors || []) {
       if (!a.legacy && !this.lockRuleOld) continue;
       const c = openAt(a.x, a.y); if (c >= 0) { a.legacy = 1; seeds.push(c); }
@@ -986,7 +1149,8 @@
       const p = g.ways[0], m = (p.length / 4 | 0) * 2;
       const c = self.cellAt(p[m], p[m + 1]);
       const rg = c >= 0 ? self.regions[self.region[c]] : D.defaultRegion;
-      g.year = rg.scenic || rg.open == null ? CFG.START.y : Math.max(CFG.START.y, rg.open);
+      // roadsAtStart（v2.9）：开局时已经建成的城市，既有道路一开始就在，片区开放只决定能不能建设
+      g.year = rg.scenic || rg.open == null || D.roadsAtStart ? CFG.START.y : Math.max(CFG.START.y, rg.open);
     }
     // linkRoadYears（v2.8）：没有名称的快速路匝道跟随相连的晚通车道路，快速路还没修时匝道不先出现（连续匝道逐轮传递）
     if (D.linkRoadYears) {
@@ -1063,7 +1227,7 @@
   // 普通铁路不参与乘客出行模拟，但地面铁路（非高架、非隧道）是城市空间的阻隔：在没有道口、地道或天桥的地方阻断步行与支路、次干道。
   // 合法通道 = 真实道路（已通车）或街道（所在街区已开发）跨越铁路的位置；格网边在通道附近（RAIL_R 以内）越过铁路时绕行到通道通过，
   // 否则阻断。主干道与快速路按真实道路处理（立交或道口），不受影响。高架铁路下方可以通行，隧道不构成阻隔。
-  // 几何按地图缓存（与年份无关）；铁路是否运营按开通年份（高铁按本地图的高铁年份）每月判断。
+  // 几何按地图缓存（与年份无关）；铁路是否运营按开通年份（未标年份的高铁按地图的高铁年份）每月判断。
   const RAIL_CACHE = new WeakMap(), RAIL_R = 0.7;
   function segT(ax, ay, bx, by, cx, cy, dx, dy) {
     const rx = bx - ax, ry = by - ay, sx = dx - cx, sy = dy - cy, den = rx * sy - ry * sx;
@@ -1123,10 +1287,16 @@
     RAIL_CACHE.set(Geo.rail, R);
     return R;
   };
-  City.railActiveAt = function (r, year) { return !((r.year && year < r.year) || ((r.flags & 16) && year < (D.hsrYear || 2009))); };
+  City.railActiveAt = function (r, year) { return year >= CM.Geo.railOpenYear(r) && !(r.close && year >= r.close); };
   // 按年份更新运营中的铁路；返回是否有变化（新线开通时需要重建步行与道路网络）
   City.prototype.updateRail = function (year) {
     const rail = CM.Geo.rail || [];
+    // 没有名称和年份的铁路（开局很早、大量线路当时还没修的地图，D.railByRegion）：随所在片区开放出现
+    if (D.railByRegion && !rail._byRegion) {
+      rail._byRegion = true;
+      for (const r of rail) { if (r.name || r.year) continue; const m = (r.p.length >> 2) * 2, k = this.cellAt(r.p[m], r.p[m + 1]); if (k < 0) continue; const o = this.regions[this.region[k]].open; if (o != null && o > CFG.START.y) r.year = o; }
+      CM.Geo.resetRailJoins();
+    }
     const on = new Uint8Array(rail.length);
     let changed = !this.railOn || this.railOn.length !== on.length;
     for (let k = 0; k < rail.length; k++) { on[k] = City.railActiveAt(rail[k], year) ? 1 : 0; if (!changed && on[k] !== this.railOn[k]) changed = true; }
@@ -1542,6 +1712,10 @@
     // 地铁带动发展（v2.3）：线网越成熟，增长越多地跟着车站与枢纽走（吸引权重 pw），历史阶段预设的片区权重越弱（flat）；
     // 车站周边可容纳的人口与岗位随之提高。只改变增长落在哪里，全城总量仍按人口曲线
     const PL = ctx.pull || null, GL = CFG.metroLed, pw = PL ? PL.w : 0, flat = PL ? 1 - GL.flatten * PL.M : 1;
+    // 增长倍率（v2.9，地图数据）：growOut = { box: [x, y, 宽, 高]（扩图前的原范围）, pop, jobs }（数或 [[年, 倍率]…]）作用在原范围以外，
+    // 让扩图新增的郊区按史实长起来；片区的 growK = [人口, 岗位] 是该片区固定的增长倍率。只改变增长落在哪里，全城总量仍按人口曲线
+    const GO = D.growOut, gb = GO && GO.box, curveAt = function (v) { return v == null ? 1 : (typeof v === 'number' ? v : U.interp(v, year)); };
+    const goP = GO ? curveAt(GO.pop) : 1, goJ = GO ? (GO.jobs == null ? goP : curveAt(GO.jobs)) : 1;
     const wR = new Float32Array(N), wJ = new Float32Array(N), capR = new Float32Array(N), capJ = new Float32Array(N);
     let sR = 0, sJ = 0;
     const mi = ctx.monthIndex;
@@ -1573,7 +1747,10 @@
       }
       const rnd = 0.6 + 0.8 * U.hash2(c, mi, this.seed + 31);
       const remR = cr - this.pop[c], remJ = cj - this.jobs[c];
-      const kR = EF ? Math.pow(EF.pop[this.region[c]], flat) : 1, kJ = EF ? Math.pow(EF.jobs[this.region[c]], flat) : 1;
+      let kR = EF ? Math.pow(EF.pop[this.region[c]], flat) : 1, kJ = EF ? Math.pow(EF.jobs[this.region[c]], flat) : 1;
+      const rgk = this.regions[this.region[c]].growK;
+      if (rgk) { kR *= rgk[0]; kJ *= rgk[1] != null ? rgk[1] : rgk[0]; }
+      if (gb && (i < gb[0] || j < gb[1] || i >= gb[0] + gb[2] || j >= gb[1] + gb[3])) { kR *= goP; kJ *= goJ; }
       if (remR > 0) { wR[c] = remR * (0.25 + acc) * (1 + 1.6 * st) * (0.3 + nb) * rnd * seed * kR * (1 + GL.res * pw * pf); sR += wR[c]; }
       if (remJ > 0) {
         const comBoost = (P === LU.COM || P === LU.MIX) ? 2.0 * ecom : 1;
@@ -1671,9 +1848,9 @@
   City.byIds = byIds;
   // 地图扩展：mask 为 1 的格（新增范围）取「按 year 年生成的城市」的状态；人口按该年人口曲线在全图分配后的份额，
   // 城市化判断按人口增长放大密度。只在迁移后的首次载入执行一次，之后随存档保存
-  City.prototype.fillNewCells = function (mask, year) {
-    const T = new City();
-    const p0 = U.interp(CFG.growth.popCurve, CFG.START.y), p1 = U.interp(CFG.growth.popCurve, year);
+  City.prototype.fillNewCells = function (mask, year, t) {
+    const T = new City(), at = t ?? year;
+    const p0 = U.interp(CFG.growth.popCurve, CFG.START.y), p1 = U.interp(CFG.growth.popCurve, at);
     T.generate(this.seed, year, { densityScale: Math.max(1, p1 / Math.max(1, p0)) });
     const keys = ['pop', 'jobs', 'bh', 'taken', 'lu', 'street', 'urbanYear'];
     let n = 0, oldP = 0, oldJ = 0, newP = 0, newJ = 0;
@@ -1683,8 +1860,8 @@
       newP += this.pop[c]; newJ += this.jobs[c];
       n++;
     }
-    const tJ = p1 * U.interp(CFG.growth.jobsRatio, year);
-    const fP = newP > 0 ? U.clamp((p1 - oldP) / newP, 0.5, 3) : 1, fJ = newJ > 0 ? U.clamp((tJ - oldJ) / newJ, 0.5, 3) : 1;
+    const tJ = p1 * U.interp(CFG.growth.jobsRatio, at);
+    const fP = newP > 0 ? U.clamp((p1 - oldP) / newP, 0.9, 3) : 1, fJ = newJ > 0 ? U.clamp((tJ - oldJ) / newJ, 1, 3) : 1;
     for (let c = 0; c < this.N; c++) if (mask[c]) { this.pop[c] *= fP; this.jobs[c] *= fJ; }
     this.filled = { year: year, cells: n, fP: +fP.toFixed(3), fJ: +fJ.toFixed(3) };
     return n;
@@ -1699,7 +1876,7 @@
     this.urbanYear = chk(U.unpackTyped(s.urbanYear), N);
     // 地图扩展迁移：新增范围的格按存档年份重新生成（见 maps.js CM.extentMigration），原有范围保持存档状态
     const fill = s.fillNew ? chk(U.unpackTyped(s.fillNew), N) : null;
-    if (fill) this.fillNewCells(fill, s.fillYear || year);
+    if (fill) this.fillNewCells(fill, s.fillYear || year, s.fillT);
     // 区域开放状态按 id 恢复；本版本新增、存档中没有的区域按存档年份判断是否已开放
     const rIds = this.regions.map(function (r) { return r.id; });
     const ro = byIds(s.regionIds, rIds, s.regionOpen || []), rd = byIds(s.regionIds, rIds, s.regionOpenDate || []);

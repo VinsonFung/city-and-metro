@@ -90,6 +90,21 @@
     ui.openScreen(card, back, 'rv-screen');
   }
   // ---------- 海报 ----------
+  const commentLines = function (ctx, comment, width) {
+    const tokens = comment.match(/[\u3400-\u9fff][，。！？：；、]?|[^\s\u3400-\u9fff]+|\s+/gu) || [];
+    const lines = [];
+    let line = '';
+    for (const token of tokens) {
+      if (!token.trim()) { if (line) line += ' '; continue; }
+      const next = line + token;
+      if (line && ctx.measureText(next).width > width) {
+        lines.push(line.trimEnd());
+        line = token;
+      } else line = next;
+    }
+    if (line) lines.push(line.trimEnd());
+    return lines;
+  };
   function poster(rec, thumb, btn) {
     const ui = CM.ui, label = btn && btn.querySelector('.rv-export-t'), busy = function (on) { if (!btn) return; btn.disabled = on; if (label) label.textContent = on ? '正在导出…' : '导出海报'; };
     busy(true);
@@ -99,9 +114,11 @@
         const G = GRADE[rec.grade] || GRADE.B, W = 1600, M0 = 80, font = getComputedStyle(document.body).fontFamily || 'sans-serif';
         // 线网图完整放进画面：高度超过上限时按比例缩小，左右留白
         const iw = W - 2 * M0, fit = img ? Math.min(iw / img.width, 1240 / img.height) : 0, dw = img ? img.width * fit : 0, ih = img ? img.height * fit : 0, dimRows = rec.dims.length, statRows = Math.ceil(rec.stats.length / 2);
-        const top = 300, midY = top + (img ? ih + 60 : 20), lower = Math.max(dimRows * 92, statRows * 112), HH = midY + lower + 170;
-        const cv = document.createElement('canvas'); cv.width = W; cv.height = Math.round(HH);
-        const c = cv.getContext('2d');
+        const top = 300, midY = top + (img ? ih + 60 : 20), lower = Math.max(dimRows * 92, statRows * 112);
+        const cv = document.createElement('canvas'), c = cv.getContext('2d'), commentFont = '500 26px ' + font;
+        c.font = commentFont;
+        const lines = commentLines(c, T(rec.comment), iw), HH = midY + lower + 170 + 36 * Math.max(0, lines.length - 1);
+        cv.width = W; cv.height = Math.round(HH);
         c.fillStyle = '#f6f8fb'; c.fillRect(0, 0, W, HH);
         c.fillStyle = '#16233a'; c.fillRect(0, 0, W, 260);
         c.textBaseline = 'alphabetic'; c.textAlign = 'left';
@@ -132,11 +149,8 @@
           c.fillStyle = '#1f2a3a'; c.font = '800 32px ' + font; c.fillText(statText(s), x + 18, yy + 76);
         });
         // 评语与落款
-        const fy = HH - 96;
-        c.fillStyle = '#1f2a3a'; c.font = '500 26px ' + font;
-        const words = Array.from(T(rec.comment)); let row = '', ry = fy - 10, rows = 0;
-        for (const ch of words) { if (c.measureText(row + ch).width > W - 2 * M0) { c.fillText(row, M0, ry); ry += 36; row = ''; rows++; if (rows >= 1) break; } row += ch; }
-        if (row) c.fillText(row, M0, ry);
+        c.fillStyle = '#1f2a3a'; c.font = commentFont;
+        lines.forEach(function (line, i) { c.fillText(line, M0, midY + lower + 64 + 36 * i, iw); });
         c.fillStyle = '#9aa5b5'; c.font = '400 22px ' + font; c.fillText(T('《城市与地铁》') + (rec.game ? ' · ' + rec.game : ''), M0, HH - 28);
         cv.toBlob(function (blob) {
           if (!blob) { done('无法生成图片'); return; }

@@ -19,13 +19,13 @@ if(errors.length)throw Error('Browser errors:\n'+[...new Set(errors)].join('\n')
 async function runMobileChecks({evaluate:E,send,screenshot,delay,task,fs,path,until}){
  const inputOnly=!!(process.env.CM_MOBILE_INPUT_ONLY||process.env.CM_MOBILE_PATCH_ONLY),report={scope:process.env.CM_MOBILE_PATCH_ONLY?'patch and input':inputOnly?'input':process.env.CM_MOBILE_FAST?'panels and input':'all',groups:[],states:0,hits:0};
  await E('(()=>{const s=document.createElement("style");s.id="mobile-test-motion";s.textContent="*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}";document.head.appendChild(s);return true})()');
- await E(`window.mobileAudit=function(selector,required){const ui=CM.ui,v=ui.viewport(),out={hits:0,bad:[]},rname=e=>e.getAttribute('data-act')||e.getAttribute('aria-label')||e.getAttribute('data-tip')||e.textContent.trim().slice(0,30);for(const e of document.querySelectorAll(selector)){if(e.disabled)continue;let visible=true;for(let p=e;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0){visible=false;break;}}const r=e.getBoundingClientRect(),must=e.matches(required||':not(*)');if(!visible||!r.width||!r.height){if(must)out.bad.push({name:rname(e),reason:'hidden'});continue;}let a={left:Math.max(r.left,v.left),top:Math.max(r.top,v.top),right:Math.min(r.right,v.right),bottom:Math.min(r.bottom,v.bottom)};for(let p=e.parentElement;p;p=p.parentElement){const s=getComputedStyle(p),b=p.getBoundingClientRect();if(/auto|scroll|hidden|clip/.test(s.overflowX)){a.left=Math.max(a.left,b.left);a.right=Math.min(a.right,b.right);}if(/auto|scroll|hidden|clip/.test(s.overflowY)){a.top=Math.max(a.top,b.top);a.bottom=Math.min(a.bottom,b.bottom);}}if(a.right-a.left<8||a.bottom-a.top<8){if(must)out.bad.push({name:rname(e),reason:'outside',r:[r.x,r.y,r.width,r.height]});continue;}if(must&&(a.right-a.left<r.width-1||a.bottom-a.top<r.height-1))out.bad.push({name:rname(e),reason:'clipped',r:[r.x,r.y,r.width,r.height],a});const n=document.elementFromPoint((a.left+a.right)/2,(a.top+a.bottom)/2);out.hits++;if(n!==e&&!e.contains(n))out.bad.push({name:rname(e),reason:'covered',point:[(a.left+a.right)/2,(a.top+a.bottom)/2],a,by:n?.closest('button,aside,nav,.ops-pop,#layerPanel')?.outerHTML.slice(0,150)||n?.tagName,r:[r.x,r.y,r.width,r.height]});}if(selector.includes('#coach')){const c=document.getElementById('coach'),t=document.getElementById('coachTip');if(c&&t&&getComputedStyle(t).visibility!=='hidden'&&getComputedStyle(t).display!=='none'){const a=c.getBoundingClientRect(),b=t.getBoundingClientRect();if(a.width&&b.width&&a.left<b.right&&a.right>b.left&&a.top<b.bottom&&a.bottom>b.top)out.bad.push({name:'tutorial hint',reason:'covers tutorial card'});}}if(selector.includes('#hudTop')){const x=ui.pills.money.v,r=x.getBoundingClientRect(),m=ui.top.querySelector('.metrics').getBoundingClientRect();if(r.width&&(x.scrollWidth>x.clientWidth+1||r.right>m.right+1||r.left<m.left-1))out.bad.push({name:'funds text',reason:'clipped',width:x.clientWidth,needed:x.scrollWidth});}if(selector.includes('#hudTop')){const sb=ui.scaleBar;if(sb&&sb.offsetWidth&&getComputedStyle(sb).opacity!=='0'&&getComputedStyle(sb).visibility!=='hidden'){const a=sb.getBoundingClientRect();for(const b of document.querySelectorAll('#toolbar,.br-dock,#hudTop,#rightPanel,#coach,#legendCard,#dock')){const st=getComputedStyle(b);if(st.display==='none'||st.visibility==='hidden'||st.opacity==='0')continue;const r=b.getBoundingClientRect();if(r.width&&r.height&&a.left<r.right-1&&a.right>r.left+1&&a.top<r.bottom-1&&a.bottom>r.top+1)out.bad.push({name:'scale bar',reason:'overlaps '+b.id});}}}return out};true`);
+ await E(`window.mobileAudit=function(selector,required){const ui=CM.ui,v=ui.viewport(),out={hits:0,bad:[]},rname=e=>e.getAttribute('data-act')||e.getAttribute('aria-label')||e.getAttribute('data-tip')||e.textContent.trim().slice(0,30);for(const e of document.querySelectorAll(selector)){if(e.disabled)continue;let visible=true;for(let p=e;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0){visible=false;break;}}const r=e.getBoundingClientRect(),must=e.matches(required||':not(*)');if(!visible||!r.width||!r.height){if(must)out.bad.push({name:rname(e),reason:'hidden'});continue;}let a={left:Math.max(r.left,v.left),top:Math.max(r.top,v.top),right:Math.min(r.right,v.right),bottom:Math.min(r.bottom,v.bottom)};const modal=e.closest('dialog:modal');for(let p=e.parentElement;p&&p!==modal?.parentElement;p=p.parentElement){const s=getComputedStyle(p),b=p.getBoundingClientRect();if(/auto|scroll|hidden|clip/.test(s.overflowX)){a.left=Math.max(a.left,b.left);a.right=Math.min(a.right,b.right);}if(/auto|scroll|hidden|clip/.test(s.overflowY)){a.top=Math.max(a.top,b.top);a.bottom=Math.min(a.bottom,b.bottom);}}if(a.right-a.left<8||a.bottom-a.top<8){if(must)out.bad.push({name:rname(e),reason:'outside',r:[r.x,r.y,r.width,r.height]});continue;}if(must&&(a.right-a.left<r.width-1||a.bottom-a.top<r.height-1))out.bad.push({name:rname(e),reason:'clipped',r:[r.x,r.y,r.width,r.height],a});const n=document.elementFromPoint((a.left+a.right)/2,(a.top+a.bottom)/2);out.hits++;if(n!==e&&!e.contains(n))out.bad.push({name:rname(e),reason:'covered',point:[(a.left+a.right)/2,(a.top+a.bottom)/2],a,by:n?.closest('button,aside,nav,.ops-pop,#layerPanel')?.outerHTML.slice(0,150)||n?.tagName,r:[r.x,r.y,r.width,r.height]});}if(selector.includes('#coach')){const c=document.getElementById('coach'),t=document.getElementById('coachTip');if(c&&t&&getComputedStyle(t).visibility!=='hidden'&&getComputedStyle(t).display!=='none'){const a=c.getBoundingClientRect(),b=t.getBoundingClientRect();if(a.width&&b.width&&a.left<b.right&&a.right>b.left&&a.top<b.bottom&&a.bottom>b.top)out.bad.push({name:'tutorial hint',reason:'covers tutorial card'});}}if(selector.includes('#hudTop')){const x=ui.pills.money.v,r=x.getBoundingClientRect(),m=ui.top.querySelector('.metrics').getBoundingClientRect();if(r.width&&(x.scrollWidth>x.clientWidth+1||r.right>m.right+1||r.left<m.left-1))out.bad.push({name:'funds text',reason:'clipped',width:x.clientWidth,needed:x.scrollWidth});}if(selector.includes('#hudTop')){const sb=ui.scaleBar;if(sb&&sb.offsetWidth&&getComputedStyle(sb).opacity!=='0'&&getComputedStyle(sb).visibility!=='hidden'){const a=sb.getBoundingClientRect();for(const b of document.querySelectorAll('#toolbar,.br-dock,#hudTop,#rightPanel,#coach,#legendCard,#dock')){const st=getComputedStyle(b);if(st.display==='none'||st.visibility==='hidden'||st.opacity==='0')continue;const r=b.getBoundingClientRect();if(r.width&&r.height&&a.left<r.right-1&&a.right>r.left+1&&a.top<r.bottom-1&&a.bottom>r.top+1)out.bad.push({name:'scale bar',reason:'overlaps '+b.id});}}}return out};true`);
  const audit=async(label,sel='#hudTop button,#toolbar button,.br-dock button,#dock button',must='#toolbar button,.br-dock button')=>{let r=await E('mobileAudit('+JSON.stringify(sel)+','+JSON.stringify(must)+')');if(r.bad.length){await delay(350);r=await E('mobileAudit('+JSON.stringify(sel)+','+JSON.stringify(must)+')');}report.states++;report.hits+=r.hits;if(r.bad.length){await screenshot('failure');throw Error(label+' '+JSON.stringify(r.bad));}};
  const tap=async(exp)=>{const p=await E('(()=>{const r=('+exp+').getBoundingClientRect();const p={x:r.x+r.width/2,y:r.y+r.height/2},n=document.elementFromPoint(p.x,p.y);if(!r.width||!r.height||!(n===('+exp+')||('+exp+').contains(n)))throw Error("Touch target covered: "+('+JSON.stringify(exp)+')+" by "+n?.outerHTML.slice(0,160));return p})()');await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[p]});await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await delay(80);};
  const wait=async()=>{await send('Page.bringToFront');await E('CM.ui.layoutHud();CM.ui.measureLayout();true');await delay(180);await E('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(r))))');};
  const sizes=[[320,568],[360,740],[375,667],[390,844],[430,932],[568,320],[667,375],[844,390]],langs=['zh-CN','zh-TW','en'];
- if(process.env.CM_MOBILE_GESTURES_ONLY){await runGestureChecks({E,send,tap,wait,audit,delay});await fs.writeFile(path.join(task,'report.json'),JSON.stringify(report));return;}
- await runGestureChecks({E,send,tap,wait,audit,delay});
+ if(process.env.CM_MOBILE_GESTURES_ONLY){await runGestureChecks({E,send,tap,wait,audit,delay,until});await fs.writeFile(path.join(task,'report.json'),JSON.stringify(report));return;}
+ await runGestureChecks({E,send,tap,wait,audit,delay,until});
  await runNewsChecks({E,send,tap,wait,audit,screenshot,langs});
  if(!process.env.CM_MOBILE_FAST&&!inputOnly)for(const lang of langs)for(const scale of [.9,1,1.15]){
   for(const[w,h]of sizes){await send('Emulation.setDeviceMetricsOverride',{width:w,height:h,deviceScaleFactor:1,mobile:true});await E('CM.Settings.set("language",'+JSON.stringify(lang)+');CM.Settings.set("uiScale",'+scale+');CM.ui.closePanel(true);CM.ui.tools.setTool("select");CM.ui.toasts.replaceChildren();true');await wait();await audit([lang,scale,w,h,'base'].join('/'));report.groups.push({lang,scale,w,h});if(lang==='zh-CN'&&scale===1&&w===390)await screenshot('after-390');}
@@ -172,17 +172,18 @@ async function runPatchChecks({E,send,tap,wait,audit,until,delay,screenshot,repo
   }
   await E('CM.Settings.set("grid",false);CM.Settings.set("gridUnit","km");CM.Settings.set("uiScale",1);true');
   for(const view of [false,true]) {
-    await E('CM.ui.setView('+view+');(()=>{const a=CM.R.hubModels(CM.game.city,CM.game.year()).find(x=>x.id==="hbj_pek");if(!a)throw Error("Beijing airport terminal missing");CM.R.flyTo(a.x,a.y,64);return true})()');
+    await E('CM.ui.setView('+view+');(()=>{const a=CM.R.hubModels(CM.game.city,CM.game.year()).find(x=>x.lm.kind==="terminal"&&x.id.startsWith("hbj_pek_"));if(!a)throw Error("Beijing airport terminal missing");CM.R.flyTo(a.x,a.y,64);return true})()');
     await until('!CM.R.cam.fly&&Math.abs(CM.R.cam.t-'+(view?1:0)+')<.002');await delay(1000);
     await screenshot('patch-airport-'+(view?'25d':'2d'));
   }
   report.patchScale=true;console.log('PASS physical scale in both views/grid units and Beijing terminal previews');
 }
 
-async function runGestureChecks({E,send,tap,wait,audit,delay}) {
+async function runGestureChecks({E,send,tap,wait,audit,delay,until}) {
  const touch=(type,touchPoints)=>send('Input.dispatchTouchEvent',{type,touchPoints});
  await E('CM.ui.closePanel(true);CM.Settings.set("language","en");CM.Settings.set("uiScale",1.15);true');
  await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});await wait();
+ await runSharedInteractionChecks({E,send,tap,wait,audit,delay});
  // A second pointer cancelled over an interface control must not cancel the map's own drag.
  await E('window.mapCancel=CM.ui.tools.cancelDrag;window.cancellations=0;CM.ui.tools.cancelDrag=function(){cancellations++;return mapCancel.call(this)};true');
  await touch('touchStart',[{x:170,y:420,id:11}]);
@@ -235,16 +236,38 @@ async function runGestureChecks({E,send,tap,wait,audit,delay}) {
  const nextScroll=await E('(()=>{const c=document.querySelector(".mc-content"),p=document.querySelector(".mc-plot");return {before:chartScroll,after:c.scrollTop,max:c.scrollHeight-c.clientHeight,onPlot:p.contains(document.elementFromPoint('+plot.x+','+plot.y+')),action:getComputedStyle(p).touchAction};})()');
  if(nextScroll.after>=nextScroll.before-25)throw Error('Dragging over a chart blocked vertical scrolling '+JSON.stringify(nextScroll));
  await send('Emulation.setDeviceMetricsOverride',{width:568,height:240,deviceScaleFactor:1,mobile:true});await wait();
+ await runFinanceChecks({E,send,tap,wait,audit,until,delay});
+ await send('Emulation.setDeviceMetricsOverride',{width:568,height:240,deviceScaleFactor:1,mobile:true});await wait();
  await audit('Metro Core exit in short landscape','.mc-exit','.mc-exit');
  await tap('document.querySelector(".mc-exit")');
+ await E('(()=>{const t=CM.ui.tools,g=CM.game;t.setTool("line");t.chain=Object.keys(g.net.stations)[0];const lines=Object.keys(g.net.lines);t.lineChoice=lines[1];CM.ui.renderToolOpts();CM.ui.showLinePicker(t.chain,lines);return true})()');await wait();
+ const lineChoice='.line-picker .lp-sub + .lp-opt';
+ await audit('first extension choice visible in short landscape',lineChoice,lineChoice);
+ await tap('document.querySelector('+JSON.stringify(lineChoice)+')');
+ if(!await E('CM.ui.tools.lineChoice===Object.keys(CM.game.net.lines)[0]&&CM.ui.tools.lineLock&&!CM.ui.linePicker')) throw Error('Touch could not select a line to extend');
+ await E('CM.ui.tools.endChain(true);CM.ui.tools.setTool("select");true');
  await E('CM.ui.showMapSelect("bj");true');await wait();
  const picker='.ms2-actbar .free-toggle';
  await E('document.querySelector(".ms2-actbar .free-toggle").scrollIntoView({block:"nearest"});true');
  await audit('map actions in short landscape',picker,picker);
  await tap('document.querySelector(".ms2-actbar .free-toggle")');
- await E('document.querySelector(".ms2-actbar .fo-go").scrollIntoView({block:"nearest"});true');
- await audit('free build in short landscape','.ms2-actbar .fo-go','.ms2-actbar .fo-go');
+ const options = '.map-free[open] button,.map-free[open] input';
+ await audit('free build in short landscape',options,options);
+ await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+ await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+ if (await E('!!document.querySelector(".map-free[open]")')) throw Error('Free-build modal did not close on Escape');
+ await tap('document.querySelector(".ms2-actbar .free-toggle")');
+ await E('document.documentElement.style.setProperty("--safe-left","20px");document.documentElement.style.setProperty("--safe-bottom","10px");true');
+ await send('Emulation.setPageScaleFactor',{pageScaleFactor:1.5});await wait();
+ if(!await E('(()=>{const r=document.querySelector(".map-free").getBoundingClientRect(),v=CM.ui.viewport();return r.left>=v.left-1&&r.right<=v.right+1&&r.top>=v.top-1&&r.bottom<=v.bottom+1})()')) throw Error('Free-build dialog extends outside the zoomed safe viewport');
+ await E('const d=document.querySelector(".map-free");d.scrollTop=d.scrollHeight;true');
+ await audit('free build action after zoom and scroll','.map-free .fo-go','.map-free .fo-go');
+ await E('CM.ui.closeScreen();true');
+ if(await E('!!document.querySelector("dialog:modal")')) throw Error('Hiding the screen left the free-build dialog blocking touch');
+ await send('Emulation.setPageScaleFactor',{pageScaleFactor:1});
+ await E('document.documentElement.style.removeProperty("--safe-left");document.documentElement.style.removeProperty("--safe-bottom");CM.ui.showMapSelect("bj");true');await wait();
  await send('Emulation.setDeviceMetricsOverride',{width:320,height:568,deviceScaleFactor:1,mobile:true});await wait();
+ if(!await E('Array.from(document.querySelectorAll(".ms2-frow:last-child .fchip:not([data-v=all])")).every(b=>b.textContent.trim()===b.dataset.v+"s")')) throw Error('Map era filters were not translated');
  await E('document.querySelector(".ms2-frow:last-child .fchips").scrollLeft=0;true');
  const chips=await E('(()=>{const e=document.querySelector(".ms2-frow:last-child .fchips"),r=e.getBoundingClientRect();return{x:r.right-24,y:r.y+r.height/2}})()');
  await touch('touchStart',[{...chips,id:11}]);
@@ -253,4 +276,96 @@ async function runGestureChecks({E,send,tap,wait,audit,delay}) {
  if(!await E('document.querySelector(".ms2-frow:last-child .fchips").scrollLeft>30&&CM.ui._mapFilter.era==="all"'))throw Error('Swiping the year filters did not reveal options or filtered the list accidentally');
  await E('CM.ui.closeScreen();CM.ui.closePanel(true);CM.ui.toasts.replaceChildren();true');
  console.log('PASS native map and diagram gestures, Metro Core search, short landscape actions and filter swipe');
+}
+
+async function runFinanceChecks({E,send,tap,wait,audit,until,delay}) {
+ const X='document.querySelector(".mc-fin-table")';
+ await send('Emulation.setDeviceMetricsOverride',{width:320,height:568,deviceScaleFactor:1,mobile:true});await wait();
+ await until('CM.Finance.compute(CM.game).lines.length>0');
+ await E('CM.ui.opsApp.go("finance");true');await wait();
+ if(await E('Array.from(document.querySelectorAll(".mc-kpi b,.mc-kpi span")).some(e=>e.scrollWidth>e.clientWidth+1)')) throw Error('Finance cards crop their values or descriptions on a narrow screen');
+ await E(X+'.scrollIntoView({block:"start"});true');
+ const point=await E('(()=>{const r='+X+'.getBoundingClientRect();return{x:r.right-24,y:r.top+70,id:11}})()');
+ await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[point]});
+ for(let i=1;i<=6;i++) await send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{...point,x:point.x-i*32}]});
+ await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await delay(250);
+ if(await E(X+'.scrollLeft')<30) throw Error('Finance table did not scroll horizontally by touch');
+ for(const tab of ['lines','stations']) {
+  if(tab==='stations') {
+   const target='document.querySelector(".mc-tools [role=tab]:last-child")';
+   await E(target+'.scrollIntoView({block:"center",inline:"end"});true');await wait();await tap(target);
+  }
+  const head=X+'.querySelector("th.on")';
+  await E(head+'.scrollIntoView({block:"center",inline:"center"});true');await wait();
+  const left=await E(X+'.scrollLeft');
+  if(left<30) throw Error('Finance test did not reach the right-hand table columns');
+  await tap(head);
+  if(await E(head+'.getAttribute("aria-sort")')!=='descending') throw Error('Finance table did not reverse '+tab+' sort');
+  if(Math.abs(await E(X+'.scrollLeft')-left)>2) throw Error('Finance sort lost the horizontal scroll position');
+  await E('CM.ui.opsApp.refresh();true');
+  if(Math.abs(await E(X+'.scrollLeft')-left)>2) throw Error('Finance refresh lost the horizontal scroll position');
+ }
+ const tod=X+'.querySelector("[data-fin-tod]")';
+ await E(tod+'.scrollIntoView({block:"center",inline:"end"});true');await wait();
+ await tap(tod);
+ const close='#mc-fin-tod .mc-card-h button';
+ await wait();await audit('commercial editor appears after opening',close,close);
+ if(await E('(()=>{const e=document.querySelector("#mc-fin-tod");return e.scrollWidth>e.clientWidth+1})()')) throw Error('Commercial development editor crops its content');
+ const develop='#mc-fin-tod .tod-lv .primary';
+ await E('document.querySelector('+JSON.stringify(develop)+').scrollIntoView({block:"center"});true');await wait();
+ await audit('commercial development action',develop,develop);
+ await E('document.querySelector('+JSON.stringify(close)+').scrollIntoView({block:"center"});true');await wait();
+ await tap('document.querySelector('+JSON.stringify(close)+')');
+ if(await E('!!document.querySelector("#mc-fin-tod") || document.activeElement!=='+tod)) throw Error('Closing commercial details did not return to the station');
+ console.log('PASS finance sort, horizontal swipe, complete amounts and mobile commercial development');
+}
+
+async function runSharedInteractionChecks({E,send,tap,wait,audit,delay}) {
+ const press=async(key,code,vk)=>{
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key,code,windowsVirtualKeyCode:vk});
+  await send('Input.dispatchKeyEvent',{type:'keyUp',key,code,windowsVirtualKeyCode:vk});
+ };
+ await E('CM.ui.closePanel(true);CM.ui.setLayer("none");CM.ui.select(null);CM.game.setSpeed(1);true');
+ await press('b','KeyB',66);
+ if(!await E('CM.ui.tools.tool==="line"')) throw Error('New default drawing shortcut did not select the tool');
+ await E('(()=>{const tools=CM.ui.tools;tools.chain=Object.keys(CM.game.net.stations)[0];tools.bends=[];CM.ui.renderToolOpts();return true})()');
+ await press('Escape','Escape',27);
+ if(!await E('CM.ui.tools.tool==="line"&&!CM.ui.tools.chain&&CM.game.speed===1&&!CM.ui.dropdown')) throw Error('First Escape should end the chain and leave simulation running');
+ await press('Escape','Escape',27);
+ if(!await E('CM.ui.tools.tool==="select"&&CM.game.speed===1&&!CM.ui.dropdown')) throw Error('Second Escape should leave the tool without opening the menu');
+ await press('Escape','Escape',27);
+ if(!await E('!!CM.ui.dropdown&&CM.game.speed===0')) throw Error('The menu should pause only after the tools have closed');
+ await E('CM.ui.closeMenu();true');
+
+ // Use two temporary draft stations to exercise the normal touch drag and merge confirmation.
+ await E('(()=>{const g=CM.game,R=CM.R,M=CM.Metro,T=CM.ui.tools,center=R.unproject(190,390,0);window.mergeFixture=g.edit(n=>({a:M.addStation(n,center.x-2,center.y,{size:"M",type:"underground"},g.city),b:M.addStation(n,center.x+2,center.y,{size:"L",type:"underground"},g.city)}));T.setTool("edit");CM.ui.select({kind:"station",id:mergeFixture.a},true);R.flyTo(center.x,center.y,24);return true})()');
+ await delay(950);await wait();
+ const points=await E('(()=>{const n=CM.game.draft.net.stations,R=CM.R;const points=[mergeFixture.a,mergeFixture.b].map(id=>R.P(n[id].x,n[id].y,R.trackH(n[id].type)));if(!CM.ui.tools.pickHandle(points[0].x,points[0].y)||document.elementFromPoint(points[0].x,points[0].y)!==R.cv)throw Error("Draft station handle is covered: "+JSON.stringify({p:points[0],hit:document.elementFromPoint(points[0].x,points[0].y)?.id,tools:CM.ui.tools.handles().length}));return points})()');
+ const [from,to]=points;
+ await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:from.x,y:from.y,id:37}]});
+ for(let i=1;i<=5;i++) await send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:from.x+(to.x-from.x)*i/5,y:to.y,id:37}]});
+ await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await wait();
+ const mergeButton='#screen:not(.hidden) .modal-actions .primary';
+ if(!await E('document.querySelector("#screen:not(.hidden) .card-head")?.textContent.toLowerCase().includes("interchange")')) throw Error('Moving into another station did not offer a merge');
+ await E('document.querySelector('+JSON.stringify(mergeButton)+').scrollIntoView({block:"center"});true');
+ await audit('touch merge confirmation',mergeButton,mergeButton);
+ await tap('document.querySelector('+JSON.stringify(mergeButton)+')');
+ if(!await E('!CM.game.draft.net.stations[mergeFixture.a]&&CM.game.draft.net.stations[mergeFixture.b].size==="L"&&!CM.game.net.stations[mergeFixture.b]')) throw Error('Merge was not confined to the draft');
+ await E('CM.game.cancelDraft();CM.ui.closePanel(true);CM.ui.tools.setTool("select");CM.ui.toasts.replaceChildren();true');
+
+ // The line strip uses the same pointer handling as the map filters.
+ await send('Emulation.setTouchEmulationEnabled',{enabled:false});
+ await E('CM.ui.openNetMap();true');await wait();
+ await E('(()=>{const strip=document.querySelector(".nm-chips");window.stripClicks=0;for(let i=0;i<12;i++){const b=document.createElement("button");b.className="nm-chip";b.textContent="Test line "+i;b.addEventListener("click",()=>stripClicks++);strip.append(b)}return true})()');
+ const start=await E('(()=>{const s=document.querySelector(".nm-chips"),r=s.getBoundingClientRect(),x=r.left+Math.min(170,r.width-20),y=r.top+14;window.stripEvents=[];for(const type of ["pointerdown","pointermove","pointerup"])s.addEventListener(type,e=>stripEvents.push([e.type,e.pointerType,e.buttons,e.clientX]));if(s.scrollWidth<=s.clientWidth||!s.contains(document.elementFromPoint(x,y)))throw Error("Line strip fixture not reachable: "+JSON.stringify([s.clientWidth,s.scrollWidth,x,y,document.elementFromPoint(x,y)?.className]));return {x,y}})()');
+ await send('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...start});
+ await send('Input.dispatchMouseEvent',{type:'mouseMoved',button:'none',buttons:1,x:start.x-90,y:start.y});
+ await send('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,x:start.x-90,y:start.y});
+ const stripResult=await E('({left:document.querySelector(".nm-chips").scrollLeft,clicks:stripClicks,events:stripEvents})');
+ if(stripResult.left<=30||stripResult.clicks) throw Error('Dragging the line strip did not scroll cleanly '+JSON.stringify(stripResult));
+ await E('CM.NetMap.close();true');
+ await send('Emulation.setTouchEmulationEnabled',{enabled:true});
+ await wait();
+
+ console.log('PASS Escape layers, touch station merge and draggable line strip');
 }

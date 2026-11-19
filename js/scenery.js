@@ -89,6 +89,18 @@
         } else out.push({ id: 'h' + f.id, x: f.x, y: f.y, lm: { id: 'st_' + f.id, kind: 'station2', x: f.x, y: f.y, w: 140, d: 60, rot: 0, h: 16, side: 1, tracks: false, name: f.name } });
         continue;
       }
+      // 真实航站楼（v3.1，terminals.js）：已启用的航站楼按真实布局手工建模（位置为经纬度，按本图投影换算），取代程序生成的航站楼；
+      // 一座都还没启用（早年的机场）或没有数据时，仍按下面的规则生成
+      const TL = CM.TERMINALS && CM.TERMINALS[CM.mapId] && CM.TERMINALS[CM.mapId][f.id], PJ = CM.GEOS && CM.GEOS[CM.mapId] && CM.GEOS[CM.mapId].proj;
+      if (TL && PJ) {
+        const on = TL.filter(function (t) { return CM.TerminalActive(t, yr); }).filter(function (t) {
+          return city.cellAt((t.lon - PJ.lon0) * PJ.kx, (PJ.lat0 - t.lat) * PJ.ky) >= 0;
+        });
+        if (on.length) {
+          for (const t of on) { const bx = CM.TerminalBox(t), tx = (t.lon - PJ.lon0) * PJ.kx, ty = (PJ.lat0 - t.lat) * PJ.ky; out.push({ id: 'h' + f.id + '_' + t.id, fac: t === on[0] ? f.id : null, x: tx, y: ty, lm: { id: 'trm_' + f.id + '_' + t.id, kind: 'terminal', x: tx, y: ty, w: bx.w, d: bx.d, rot: t.rot || 0, parts: t.parts, h: 20, name: f.name } }); }
+          continue;
+        }
+      }
       // 机场（v2.2 按实际体量）：航站楼长约跑道的 1/6（320–560 m），前方约 280 m 深的停机坪与滑行道，停机坪外缘距跑道中线约 110 m
       // 跑道：设施自带的（香港国际机场）→ 本图跑道表里离设施最近、已启用的（v2.6.1 玩家反馈：首都机场、希思罗没写 rw，跑道画了却没有航站楼）→ 旧机场的主跑道；
       // 都没有时（早年的草地机场）以设施为中心取一条约 1.5 km 的东西向跑道
@@ -209,7 +221,7 @@
     const st = this._facm;
     if (st && st.key === key && st.city === city) return st;
     const list = this.facModels(city, yr), byId = new Map(), cells = new Set();
-    const hubs = this.hubModels(city, yr), airs = hubs.filter(function (h) { return h.lm.kind === 'airport'; }), airKey = airs.map(function (h) { return h.id + '@' + h.x.toFixed(2) + ',' + h.y.toFixed(2); }).join('|');
+    const hubs = this.hubModels(city, yr), airs = hubs.filter(function (h) { return h.lm.kind === 'airport' || h.lm.kind === 'terminal'; }), airKey = airs.map(function (h) { return h.id + '@' + h.x.toFixed(2) + ',' + h.y.toFixed(2); }).join('|');
     if (st && st.city === city && st.airKey !== airKey) for (const h of airs.concat(st.airs)) { const s = Math.max(h.lm.w, h.lm.d); for (const c of this._facFoot(h.x, h.y, s, s)) city.dirty.add(c); }   // 机场平面画在地面块里
     for (const it of list) {
       byId.set(it.fac, it);

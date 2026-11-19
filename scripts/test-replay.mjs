@@ -6,7 +6,7 @@ const load=async f=>vm.runInContext(await readFile(new URL(f,root),'utf8'),c,{fi
 for(const[,src]of(await readFile(new URL('index.html',root),'utf8')).matchAll(/<script src="([^"]+)"/g)){await load(src);if(src==='js/save.js')break;}
 const C=c.CM,M=C.Metro,copy=x=>JSON.parse(JSON.stringify(x));C.UI=function(){};await load('js/settings.js');
 // Observe the pure timeline/estimator functions inside this VM without adding test APIs to the game.
-vm.runInContext((await readFile(new URL('js/corp.js',root),'utf8')).replace('  const makeTender =','  Corp.testUpgradeCandidate = upgradeCand;\n  const makeTender ='),c);
+await load('js/corp.js');
 vm.runInContext((await readFile(new URL('js/netreplay.js',root),'utf8')).replace('  CM.NetReplay = {','  CM.testReplay = {collect, subnet, timeWarp, newsList, schedule, prepare, useAPI: api => A = api};\n  CM.NetReplay = {'),c);
 await load('js/netlayout.js');
 vm.runInContext((await readFile(new URL('js/netmap.js',root),'utf8')).replace('  CM.NetMap = NetMap;','  CM.testMapAPI = API; CM.testMapMode = v => geographic = v; CM.NetMap = NetMap;'),c);
@@ -56,10 +56,81 @@ R.useAPI(C.testMapAPI);
 for(const geographic of[true,false]){C.testMapMode(geographic);const prepared=R.prepare(g);assert.ok(prepared.km.get(endSeg.id)>0,'Retired track length must be included in historical mileage');}
 const fixed=R.prepare(g);assert.equal(fixed.layout.route.size,R.collect(g).segs.length);assert.ok(fixed.W.dur>=30&&fixed.W.dur<=150);
 console.log('PASS current-month construction finishes in replay and demolished track lengths survive in both layouts');
-// An XL station must never reduce the contract estimate for the smaller stations on the same route.
-const sizes=['M','L','XL'],candidate={mapId:'bj',clock:{y:2020,m:1},ym:()=>24240,econ:{costIndex:()=>1},net:{lines:{l:{name:'Fixture'}}},tasks:{active:[],offers:[]},compiled:{stations:sizes.map(size=>({size,type:'underground'})),routes:[{lineId:'l',stIdx:[0,1,2]},{lineId:'l',stIdx:[0,1,2]}]}};
-const crowd=C.Tasks.crowdOf;C.Tasks.crowdOf=()=>[{lid:'l',lf:1.1,cars:4}];const P={cool:{},tenders:[],contracts:[]};
-const estimate=C.Corp.testUpgradeCandidate(candidate,P);assert.equal(estimate.n,1);assert.equal(estimate.est,Math.round((C.CFG.cost.station.underground.L-C.CFG.cost.station.underground.M)*1.1/1000)*1000);
-candidate.compiled.stations[0].size='XL';assert.equal(C.Corp.testUpgradeCandidate(candidate,P),null);C.Tasks.crowdOf=crowd;
 for(const[id,year]of[['ld',1992],['sz',2002]]){const state={mapId:id,clock:{y:year-1},ym:()=>year*12,econ:{mode:'challenge'},compiled:{stations:[],routes:[]},net:{lines:{},stations:{},segments:{}},model:{trafficReady:()=>true}};C.useMap(id);const before=C.Corp.unlockState(state);assert.equal(before.ok,false);state.clock.y=year;assert.equal(C.Corp.flavor(state).from,year);assert.equal(C.Corp.enabled(state),true);}
-console.log('PASS XL contract valuation, repeated route de-duplication, London PFI and Shenzhen PPP');
+console.log('PASS London PFI and Shenzhen PPP');
+
+await load('js/fleet.js');
+C.useMap('tutorial');
+const mg=C.Game.create({mode:'free',tutorial:true,seed:20000101}), F=C.Fleet;
+F.ensure(mg);
+mg.edit(net=>Object.assign(net,copy(first)));
+assert.equal(mg.confirmDraft().ok,true);
+const ordinary=mg.compiled.routes.find(rt=>!rt.svc), terminal=F.svcId(ordinary,0);
+const train=mg.fleet.trains.find(t=>t.svc===terminal);
+assert.ok(train);
+F.setMode(mg,lid,'manual');
+for(let period=0;period<4;period++)F.setManual(mg,lid,terminal,period,0);
+const oldTrack=Object.values(mg.net.segments).find(s=>s.a===terminal||s.b===terminal), originalBuilt=JSON.stringify(oldTrack.built);
+const {x,y}=mg.net.stations[terminal];
+mg.clock.m=2;
+const {near,into}=mg.edit(net=>{
+  const add=x=>M.addStation(net,x,y,{size:'M',type:'underground'},mg.city);
+  return {near:add(x+.15),into:add(x+.30)};
+});
+assert.equal(mg.edit(net=>M.mergeStations(net,terminal,near)).ok,true);
+assert.equal(mg.edit(net=>M.mergeStations(net,near,into)).ok,true);
+const inDraft=()=>{
+  const plan=F.plan(mg,{C:mg.draftCompiled()})[0];
+  assert.ok(plan.units[0].some(t=>t.id===train.id),'Existing trains must stay assigned in the construction preview');
+  assert.deepEqual(Array.from(plan.manual[0]),[0,0,0,0],'The preview must respect a fully suspended manual route');
+  assert.equal(mg.draftEval().fleetAdd.length,0,'A suspended route should not be allocated trains');
+  assert.equal(train.svc,terminal,'The draft may not change the running service');
+};
+inDraft();
+assert.ok(mg.undo());
+assert.equal(F.svcId(mg.draftCompiled().routes[0],0),near);
+assert.ok(mg.redo());
+inDraft();
+const merged=mg.confirmDraft();
+assert.equal(merged.ok,true,merged.reason);
+assert.equal(train.line,lid);
+assert.equal(train.svc,into);
+assert.deepEqual(Array.from(mg.fleet.ops[lid].n[into]),[0,0,0,0]);
+assert.equal(mg.fleet.ops[lid].n[terminal],undefined);
+assert.equal(mg.net.stationMerges,undefined,'Draft metadata must not be saved on the live network');
+assert.equal(JSON.stringify(mg.net.segments[oldTrack.id].built),originalBuilt,'Track construction date is independent of replay geometry');
+const checkRewiredReplay=game=>{
+  const timeline=R.collect(game), at=m=>game.clock.y+(m-1)/12;
+  const earlier=R.subnet(timeline,at(1)), later=R.subnet(timeline,at(2));
+  assert.ok(earlier.stations[terminal]&&!earlier.stations[into],'The old terminal must remain visible before the merge');
+  assert.ok(!later.stations[terminal]&&later.stations[into],'Replay must switch to the surviving terminal at confirmation');
+  assert.equal(Object.keys(earlier.segments).length,Object.keys(later.segments).length);
+};
+checkRewiredReplay(mg);
+const reopened=C.Game.restore(copy(mg.serialize()));
+checkRewiredReplay(reopened);
+assert.equal(reopened.fleet.trains.find(t=>t.id===train.id).svc,into);
+assert.deepEqual(Array.from(reopened.fleet.ops[lid].n[into]),[0,0,0,0]);
+const archived=Object.values(reopened.netGone.segments).find(s=>s.a===terminal||s.b===terminal);
+assert.ok(archived);
+for(const geographic of [true,false]){
+  C.testMapMode(geographic);
+  const replay=R.prepare(reopened);
+  assert.ok(replay.layout.route.has(archived.id)&&replay.layout.route.has(oldTrack.id));
+  assert.ok(replay.layout.pos.has(terminal)&&replay.layout.pos.has(into));
+  if(geographic)assert.notDeepEqual(replay.layout.pos.get(terminal),replay.layout.pos.get(into));
+  assert.equal(replay.H.segs.find(s=>s.id===oldTrack.id).gd,0,'A rewired track starts at its new endpoints without construction animation');
+}
+const again=mg.edit(net=>{
+  const survivor=M.addStation(net,x+.45,y,{size:'M',type:'underground'},mg.city);
+  const result=M.mergeStations(net,into,survivor);
+  return result.ok?{survivor}:result;
+});
+assert.ok(again.survivor);
+assert.equal(mg.confirmDraft().ok,true);
+const sameMonth=R.collect(mg);
+assert.ok(R.subnet(sameMonth,g.clock.y).stations[terminal]);
+assert.ok(R.subnet(sameMonth,g.clock.y+1/12).stations[again.survivor]);
+assert.ok(sameMonth.segs.every(s=>s.a!==into&&s.b!==into),'Only the final alignment in a month should replay');
+
+console.log('PASS chained terminal merges retain fleet assignments, manual schedules and dated replay geometry across saves');

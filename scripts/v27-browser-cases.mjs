@@ -5,6 +5,68 @@ export async function runV27Checks({evaluate:E,send,until,screenshot,delay,task,
  const tap=async sel=>{const p=await E(`(()=>{const e=document.querySelector(${JSON.stringify(sel)});if(!e)throw Error('Missing ${sel}');const r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,n=document.elementFromPoint(x,y);if(!r.width||!e.contains(n))throw Error('Covered ${sel}: '+n?.outerHTML.slice(0,180));return {x,y};})()`);await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[p]});await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await delay(80);};
  const audit=async(label,selector)=>{const r=await E(`(()=>{const out={bad:[],hits:0};for(const e of document.querySelectorAll(${JSON.stringify(selector)})){const s=getComputedStyle(e),r=e.getBoundingClientRect();if(!r.width||!r.height||s.visibility==='hidden'||e.disabled)continue;let a={l:Math.max(0,r.left),t:Math.max(0,r.top),r:Math.min(innerWidth,r.right),b:Math.min(innerHeight,r.bottom)};for(let p=e.parentElement;p;p=p.parentElement){const t=getComputedStyle(p),b=p.getBoundingClientRect();if(/auto|scroll|hidden|clip/.test(t.overflowX)){a.l=Math.max(a.l,b.left);a.r=Math.min(a.r,b.right);}if(/auto|scroll|hidden|clip/.test(t.overflowY)){a.t=Math.max(a.t,b.top);a.b=Math.min(a.b,b.bottom);}}if(a.r-a.l<5||a.b-a.t<5)continue;const n=document.elementFromPoint((a.l+a.r)/2,(a.t+a.b)/2);out.hits++;if(!e.contains(n))out.bad.push({text:e.innerText,by:n?.outerHTML.slice(0,120)});}return out})()`);report.states++;report.hits+=r.hits;if(r.bad.length)throw Error(label+' '+JSON.stringify(r.bad));};
  const close=async()=>{await E('CM.ui.opsApp?.close(null,true);CM.Stats.close();CM.NetMap.close();CM.ui.closeScreen();CM.ui.closePanel(true);true');};
+ if (process.env.CM_MAP_OPENING_ONLY) {
+  await E('CM.Settings.set("language","zh-CN");CM.newGame({map:"sg",mode:"free",seed:19800101});true');
+  await until('!CM.isLoading()&&CM.game?.mapId==="sg"&&!CM.game.pending',180000);
+  await close();
+  const opening = await E(`(()=>{
+    const g=CM.game,c=g.city;
+    g.setSpeed(0);
+    const k=c.regions.findIndex(r=>r.id==="tekong"),state=c.lockState();
+    const p=c.region.findIndex((r,i)=>r===k&&c.landFrac[i]>=0.75&&state.mask[i]&&state.year[i]===2045);
+    if(p<0)throw Error("Could not find land closed until 2045");
+    const x=p%c.W+0.5,y=Math.floor(p/c.W)+0.5;
+    CM.R.flyTo(x,y,24);
+    return {p,x,y};
+  })()`);
+  const search = `(()=>{CM.ui.openSearch();const input=document.querySelector(".search-pop input");input.value="德光岛";input.dispatchEvent(new Event("input",{bubbles:true}));const row=[...document.querySelectorAll(".srch-item")].find(e=>e.textContent.includes("区域"));const text=row?.textContent||"";CM.ui.closeSearch();return text})()`;
+  if (!(await E(search)).includes("2045")) throw Error("Search did not show the scheduled opening");
+  await until('CM.R.sharpReady()&&!CM.R.cam.fly',60000);
+  await E('CM.game.clock.y=2044;CM.game.clock.m=12;CM.ui.jump(1);true');
+  await until('!CM.game.jumping&&!CM.game.pending&&CM.game.clock.y===2045&&CM.game.clock.m===1',180000);
+  await close();
+  if (!await E(`CM.Metro.checkSite(CM.game.city,${opening.x},${opening.y},"underground").ok`)) throw Error("The scheduled area still rejects construction");
+  if (!(await E(search)).includes("已开放")) throw Error("Search did not refresh the open area");
+  await until(`CM.R.sharpReady()&&(!CM.R.tiles?.list||CM.R.tiles.sent.lk?.mask[${opening.p}]===0)`,60000);
+  report.cities.push("sg");
+  await fs.writeFile(path.join(task,"report.json"),JSON.stringify(report));
+  console.log("PASS Singapore monthly settlement, buildability, search and rendered lock refresh");
+  return;
+ }
+ if (process.env.CM_RAIL_SYNC_ONLY) {
+  await E('CM.endGame();CM.ui.showStart();true');
+  await until('document.querySelector("#menubg canvas") && !document.getElementById("menubg").classList.contains("off")');
+  await tap('.start-menu button');
+  await E('CM.newGame({map:"hk",mode:"challenge",seed:198307});true');
+  await until('!CM.isLoading() && CM.game?.mapId === "hk" && !CM.game.pending');
+  await close();
+  await E('CM.game.clock.y=1983; CM.game.clock.m=7; CM.game.econ.funds=1e8; CM.ui.openOpsApp("takeover");true');
+  await until('document.querySelector(".tk-svg [data-stop=hh]") && document.querySelector(".tk-bgc")?.getContext("2d").getImageData(1,1,1,1).data[3] > 0',15000);
+  await tap('.tk-svg [data-stop=hh] .tk-p');
+  await tap('.tk-svg [data-stop=st] .tk-p');
+  await until('document.querySelector(".tk-plan .tk-go button:not(:disabled)")');
+  await audit('rail takeover', '.tk-zctl button,.tk-plan .tk-go button');
+  await tap('.tk-zctl button');
+  await until('document.querySelector(".tk-map").classList.contains("zoomed")');
+  await close();
+  await E('CM.ui.setLayer("bgt");CM.tools.setTool("line");true');
+  await until('document.querySelector(".vnode-toggle")');
+  await tap('.vnode-toggle');
+  if (!await E('CM.tools.virtualPoint && document.querySelector(".vnode-toggle").getAttribute("aria-pressed")==="true"')) throw Error('Virtual node mode did not activate on touch');
+  await E('CM.tools.setTool("select");CM.ui.openOpsApp("finance");true');
+  await until('Array.from(document.querySelectorAll(".mc-tools button")).some(e=>e.textContent.includes("车站收支"))');
+  const airport = await E(`(()=>{
+   const R=CM.R, list=CM.TERMINALS.hk.hk_cklair;
+   if(!list?.length || !CM.TerminalActive(list[0],2030))return false;
+   const before=new CM.City(), after=new CM.City();
+   before.generate(198307,1995); after.generate(198307,2010);
+   const early=R.hubModels(before,1995).map(x=>x.id), late=R.hubModels(after,2010).map(x=>x.id);
+   return early.includes("hhk_kaitak_kt") && !early.includes("hhk_cklair_t1") && late.includes("hhk_cklair_t1") && !late.includes("hhk_kaitak_kt");
+  })()`);
+  if (!airport) throw Error('Airport terminal phase is not rendered from historical data');
+  console.log('PASS mobile menu, rail selection and zoom, virtual-node control, finance and terminal phases');
+  return;
+ }
  if(process.env.CM_V272_ONLY){
   await send('Emulation.setHardwareConcurrencyOverride',{hardwareConcurrency:12});
   await E('CM.Settings.set("language","zh-CN");CM.newGame({map:"tutorial",mode:"free",seed:20000101});true');

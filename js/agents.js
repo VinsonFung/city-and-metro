@@ -26,7 +26,7 @@
     tw: [[1980, [0.28, 0.10, 0.06, 0.12, 0.04, 0.40]], [2000, [0.36, 0.10, 0.05, 0.10, 0.02, 0.37]], [2020, [0.44, 0.08, 0.05, 0.09, 0.03, 0.31]]],
     jp: [[1950, [0.10, 0.18, 0.16, 0.38, 0.12, 0.06]], [1965, [0.34, 0.18, 0.10, 0.30, 0.05, 0.03]], [1990, [0.62, 0.12, 0.06, 0.18, 0.01, 0.01]], [2020, [0.70, 0.10, 0.05, 0.14, 0.01, 0]]],
   };
-  const REGION_KEY = { '中国内地': 'cn', '中国香港': 'hk', '中国台湾': 'tw', '日本': 'jp', '法国': 'eu', '英国': 'eu' };
+  const REGION_KEY = { '中国内地': 'cn', '中国香港': 'hk', '中国台湾': 'tw', '日本': 'jp', '法国': 'eu', '英国': 'eu', '新加坡': 'hk', '美国': 'eu', '澳大利亚': 'eu' };
   const VCOL = {
     taxi: { cn: ['#c8372d', '#e8b62c', '#2f7fd0'], hk: ['#d0312d', '#d0312d', '#3a9a4a'], tw: ['#f1c232'], jp: ['#2f7a4f', '#f0c419', '#1f2a44', '#e8e8e8'], eu: ['#2d3748', '#1f2a44', '#c8ccd2'] },
     bus: { cn: ['#2e7bd1', '#3a9a5a', '#e0b13a'], hk: ['#c8102e', '#e8d9a8', '#f3c300'], tw: ['#2f6fb6', '#e04a3a'], jp: ['#3a8f4e', '#e8e0c8', '#2e6eb5'], eu: ['#3e7d5a', '#e8e0c8', '#2f8f6a'] },
@@ -467,30 +467,6 @@
     const a = rt.hs[i], b = rt.hs[Math.min(rt.hs.length - 1, i + 1)];
     return a + (b - a) * f;
   }
-
-  // ---------------- 开始界面背景：列车与汽车（不依赖交通模型） ----------------
-  // 列车按固定班次在示意线路上往返（开场即按间隔铺满全线），汽车按道路等级给出的示意流量在真实道路上行驶
-  const PV_FREQ = 12, PV_VOL = [0, 0, 300, 950, 1800];
-  const PV_MODEL = { freqAt: function () { return PV_FREQ; } };
-  Agents.prototype.updatePreview = function (dt, pg, R) {
-    if (!pg || !pg.compiled) return;
-    if (!pg.pnet) pg.pnet = { C: pg.compiled, routeKey: pg.compiled.routes.map(function (r, i) { return 'pv' + i; }), rideEdge: [] };
-    // 开场即按间隔铺满全线（reset 后的第一次 updateTrains 完成）
-    if (this.netRef !== pg.pnet) { this.reset(); this.syncNetwork(pg.pnet); }
-    const dtv = dt * CFG.time.visualPerSec;
-    this.vt += dtv; this.W = null;
-    this.updateTrains(dtv, dt, PV_MODEL, null);
-    if (!R.view) return;
-    const road = pg.city.car;
-    if (!pg.pmodel) pg.pmodel = {
-      road: road,
-      arcVolAt: function (a) { const L = road.links[a >> 1]; return (PV_VOL[L.cls] || 0) * (0.4 + 0.9 * U.hash2(a, 3, 7)); },
-      arcRatioAt: function (a) { return 1 + 0.7 * U.hash2(a, 5, 9); },
-    };
-    this.updateCars(dtv, dt, { model: pg.pmodel, city: pg.city, clock: pg.clock }, R, null);
-    this.pal = this.palette(pg.clock);
-    this.updateWalkers(dtv, dt, { city: pg.city, clock: pg.clock }, R, R.agentsOn && R.z >= 22 && R.cam.under < .5);
-  };
 
   // ---------------- 汽车 ----------------
   // 三维视野的世界包围盒远大于屏幕：动画名额优先给实际画面内的道路。

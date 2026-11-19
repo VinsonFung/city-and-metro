@@ -31,12 +31,16 @@
     for (const id in net.stations) stations[id] = net.stations[id];
     const add = function (s, t1) {
       if (!stations[s.a] || !stations[s.b]) return;
-      const t0 = timeOf(s.built, (CM.CFG.START.y)); if (t0 < T0) T0 = t0;
+      const t0 = timeOf(s.replayFrom || s.built, CM.CFG.START.y); if (t0 < T0) T0 = t0;
       const cuts = (s.lh || []).map(function (c) { return { t: timeOf(c, t0), line: c[2] }; });
       let from = t0;
       cuts.concat([{ t: t1, line: s.line, last: true }]).forEach(function (c, k) {
         const L = cuts[k] ? cuts[k].line : s.line, to = c.last ? t1 : Math.max(from, c.t);
-        if (to > from + 1e-6 && lines[L]) segs.push({ s: k || cuts.length ? Object.assign({}, s, { id: s.id + '~' + k, line: L }) : s, id: k || cuts.length ? s.id + '~' + k : s.id, base: s.id, line: L, a: s.a, b: s.b, t0: from, t1: to, relabel: k > 0 });
+        if (to > from + 1e-6 && lines[L]) {
+          const id = cuts.length ? s.id + '~' + k : s.id;
+          const track = cuts.length ? Object.assign({}, s, { id: id, line: L }) : s;
+          segs.push({ s: track, id: id, base: s.id, line: L, a: s.a, b: s.b, t0: from, t1: to, relabel: k > 0, rewired: k === 0 && !!s.replayFrom });
+        }
         from = to;
       });
     };
@@ -120,7 +124,8 @@
   // 总时长按变化的多少定：一个有变化的月份约 1.4–3 秒，最短 30 秒、最长 150 秒
   const IDLE = 0.15;
   function timeWarp(H) {
-    const m0 = Math.round(H.T0 * 12), m1 = Math.round(H.T1 * 12), n = Math.max(1, m1 - m0), w = new Float64Array(n);
+    // 当前月也要完整播放，才能画完当月新建的线网。末帧日期仍停在当前月。
+    const m0 = Math.round(H.T0 * 12), m1 = Math.round(H.T1 * 12) + 1, n = Math.max(1, m1 - m0), w = new Float64Array(n);
     const mon = function (t) { return U.clamp(Math.floor(t * 12 + 1e-6) - m0, 0, n - 1); };
     const bump = function (t) { if (!isFinite(t)) return; const k = mon(t); w[k] += w[k] ? 0.4 : 1.4; };
     for (const x of H.segs) { if (!x.relabel || !w[mon(x.t0)]) bump(x.t0); if (!x.relabel) bump(x.t1); }
@@ -130,7 +135,7 @@
     return {
       dur: U.clamp(tot, 30, 150),
       t2p: function (t) { const f = U.clamp(t * 12 - m0, 0, n), i = Math.min(n - 1, Math.floor(f)); return (acc[i] + w[i] * (f - i)) / tot; },
-      p2t: function (p) { const v = U.clamp(p, 0, 1) * tot; let lo = 0, hi = n; while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (acc[mid] <= v) lo = mid; else hi = mid; } return (m0 + lo + (v - acc[lo]) / (w[lo] || 1)) / 12; },
+      p2t: function (p) { const v = U.clamp(p, 0, 1) * tot; let lo = 0, hi = n; while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (acc[mid] <= v) lo = mid; else hi = mid; } return Math.min(H.T1, (m0 + lo + (v - acc[lo]) / w[lo]) / 12); },
     };
   }
   // 同一天开通的同一条线沿线路方向依次长出来；插站造成的替换不重新生长
@@ -141,7 +146,8 @@
     const earlier = function (sid, t0) { for (const x of H.segs) if ((x.a === sid || x.b === sid) && x.t0 < t0 - 1e-6 && x.t1 > t0) return true; return false; };
     groups.forEach(function (list, k) {
       // 改归线路（贯通、拆开）只换颜色，不重新生长；插站造成的少量替换也不重新生长
-      const t0 = list[0].t0, p0 = W.t2p(t0), instant = list.every(function (x) { return x.relabel; }) || (goneAt.has(k) && list.length <= 3), n = list.length, gd = Math.min(0.012, 0.07 / n, Math.max(0, W.t2p(t0 + 1 / 12) - p0) * 0.9 / n);
+      const t0 = list[0].t0, p0 = W.t2p(t0), instant = list.every(function (x) { return x.relabel; }) || (goneAt.has(k) && list.length <= 3), n = list.length;
+      const gd = Math.min(U.clamp(2.4 / n, 0.2, 0.6) / W.dur, (Math.max(0, W.t2p(t0 + 1 / 12) - p0)) * 0.98 / n);
       const at = new Map(); for (const x of list) { for (const sid of [x.a, x.b]) { let l = at.get(sid); if (!l) at.set(sid, l = []); l.push(x); } }
       const starts = []; at.forEach(function (l, sid) { if (earlier(sid, t0)) starts.push(sid); });
       if (!starts.length) { at.forEach(function (l, sid) { if (l.length === 1) starts.push(sid); }); if (starts.length > 1) starts.length = 1; if (!starts.length) starts.push(list[0].a); }
@@ -150,13 +156,13 @@
       for (const x of list) if (!seen.has(x)) { x.from = x.a; order.push(x); }
       // 一段长完再长下一段，不会在前面出现断开的小段；从多处同时开始时各走各的
       const depth = new Map(); for (const sid of starts) depth.set(sid, 0);
-      for (const x of order) { const o = x.a === x.from ? x.b : x.a, dep = depth.get(x.from) || 0, now = instant || x.relabel; x.p0 = now ? p0 : p0 + dep * gd; x.gd = now ? 0 : gd; if (!depth.has(o) || depth.get(o) > dep + 1) depth.set(o, dep + 1); }
+      for (const x of order) { const o = x.a === x.from ? x.b : x.a, dep = depth.get(x.from) || 0, now = instant || x.relabel || x.rewired; x.p0 = now ? p0 : p0 + dep * gd; x.gd = now ? 0 : gd; if (!depth.has(o) || depth.get(o) > dep + 1) depth.set(o, dep + 1); }
     });
     for (const x of H.segs) { x.p1 = isFinite(x.t1) ? W.t2p(x.t1) : Infinity; }
     const st = new Map();
     for (const x of H.segs) {
       const a0 = x.from === x.b ? x.p0 + x.gd : x.p0, b0 = x.from === x.b ? x.p0 : x.p0 + x.gd;
-      for (const e of [[x.a, a0], [x.b, b0]]) { let v = st.get(e[0]); if (!v) st.set(e[0], v = { p0: Infinity, p1: -Infinity, name: H.stations[e[0]].name }); v.p0 = Math.min(v.p0, e[1]); v.p1 = Math.max(v.p1, x.p1); }
+      for (const e of [[x.a, a0], [x.b, b0]]) { if (H.stations[e[0]].v) continue; let v = st.get(e[0]); if (!v) st.set(e[0], v = { p0: Infinity, p1: -Infinity, name: H.stations[e[0]].name }); v.p0 = Math.min(v.p0, e[1]); v.p1 = Math.max(v.p1, x.p1); }
     }
     return st;
   }
@@ -185,7 +191,7 @@
     });
     // 已有线路在之后的月份增加新区段：从中间车站分出去是开通支线，否则是延伸
     const grp = new Map();
-    for (const x of H.segs) { if (x.relabel || x.t0 <= first.get(x.line) + eps) continue; const k = x.line + '|' + Math.round(x.t0 * 12); let l = grp.get(k); if (!l) grp.set(k, l = []); l.push(x); }
+    for (const x of H.segs) { if (x.relabel || x.rewired || x.t0 <= first.get(x.line) + eps) continue; const k = x.line + '|' + Math.round(x.t0 * 12); let l = grp.get(k); if (!l) grp.set(k, l = []); l.push(x); }
     grp.forEach(function (list) {
       const l = list[0].line, t = list[0].t0, ids = new Set(); for (const x of list) { ids.add(x.a); ids.add(x.b); }
       if (H.segs.some(function (x) { return x.line === l && Math.abs(x.t1 - t) < eps && !x.relabel; }) && list.length <= 3) return;   // 插站
@@ -290,7 +296,7 @@
         const k = S.snap || !S.cameraMoving || (CM.Settings && CM.Settings.reducedMotion()) ? 1 : 1 - Math.exp(-dt * 2.4);
         if (k === 1) S.cameraMoving = false;
         V.x += (tx - V.x) * k; V.y += (ty - V.y) * k; V.w += (tw - V.w) * k; V.h += (th - V.h) * k; S.snap = false;
-        A.setView();
+        A.setView(S.cameraMoving);
       }
     }
     const sc = Math.min(cw / V.w, ch / V.h), ox = (cw - V.w * sc) / 2 - V.x * sc, oy = (ch - V.h * sc) / 2 - V.y * sc;

@@ -636,6 +636,24 @@
       el.appendChild(h('div', { class: 'tr-sec' }, h('b', null, '特色线'), h('small', null, '每一站是这座城市会遇到的一件大事，列车停在现在')));
       el.appendChild(h('div', { class: 'tr-linewrap' }, line));
     }
+    // 考古发现（v3.0）：本局在保护区施工时的发现，按时间倒序；展示加成写明起止年份
+    if (T.Arch && T.Arch.on()) {
+      const F = (g.finds || []).slice().reverse(), now = g.year();
+      el.appendChild(h('div', { class: 'tr-sec' }, h('b', null, '考古发现'), h('small', null, '在保护区确认地下工程时判定；发现后另付调查与保护费，工期不变')));
+      const box = h('div', { class: 'tr-finds' });
+      if (!F.length) box.appendChild(h('div', { class: 'tr-find-empty' }, '还没有发现。保护区内的地下车站和隧道在确认建设时判定，草案栏会提示概率。'));
+      for (const q of F) {
+        const st = !q.fac ? { cls: '', text: '已入藏' } : now < q.from ? { cls: 'info', text: Math.floor(q.from) + ' 年展出' } : now < q.to + 2 ? { cls: 'good', text: '展示中' } : { cls: '', text: '已结束' };
+        const art = CM.Sketch ? CM.Sketch.traitArt('archaeo', q.id) : '';
+        const pic = art ? h('div', { class: 'tr-artifact still', html: art }) : h('span', { class: 'badge b-violet' }, CM.icon('search', 14));
+        box.appendChild(h('article', { class: 'tr-find' + (art ? ' has-art' : '') }, pic,
+          h('h4', null, h('span', null, q.site), ' · ', h('span', null, q.kind)),
+          h('span', { class: 'tr-stamp ' + (st.cls || 'off') }, st.text),
+          h('p', null, q.y + ' 年 ' + q.m + ' 月发现，调查与保护费 ' + U.fmtMoney(q.fee) + '。' + (q.fac ? '在' + q.facName + '展示：' + Math.floor(q.from) + '–' + Math.floor(q.to) + ' 年游客约多 ' + Math.round((q.k - 1) * 100) + '%，之后两年回落。' : '附近没有对外开放的景点，文物移交博物馆收藏。')),
+          h('button', { class: 'tr-go', 'data-tip': '在地图上看', 'aria-label': '在地图上看', onclick: function () { Stats.close(); ui.locatePoint(q.x, q.yy, q.site, 1.2); } }, CM.icon('pin', 13))));
+      }
+      el.appendChild(box);
+    }
     // 其余机制
     const rest = all.filter(function (x) { return !x.star; });
     if (rest.length) {
@@ -722,7 +740,7 @@
   function signature(g) {
     const th = document.documentElement.dataset.theme + '|' + AX.flag(), n = g.milestones ? g.milestones.list.length : 0;
     if (tab === 'milestones') return 'ms|' + n + '|' + th + '|' + (window.innerWidth < 820 ? 1 : 2);
-    if (tab === 'traits') return 'tr|' + g.clock.y + '|' + (g.foresight ? Object.keys(g.foresight).length : 0) + '|' + g.netVersion + '|' + th;
+    if (tab === 'traits') return 'tr|' + g.clock.y + '-' + g.clock.m + '|' + (g.foresight ? Object.keys(g.foresight).length : 0) + '|' + g.netVersion + '|' + (g.finds ? g.finds.length : 0) + '|' + th;
     if (tab === 'review') return 'rev|' + (g.cityReview ? g.cityReview.when + '|' + (g.cityReview.thumb ? 1 : 0) : 0) + '|' + th;
     if (tab === 'econ') return 'ec|' + g.clock.y + '-' + g.clock.m + '|' + (g.macro ? g.macro.rec.length + '|' + g.macro.gv : '') + '|' + th;
     return g.clock.y + '-' + g.clock.m + '-' + g.clock.d + '|' + (g.model.dailyStale ? 0 : 1) + '|' + g.history.length + '|' + g.econ.ledger.length + '|' + g.netVersion + '|' + th + '|' + n;

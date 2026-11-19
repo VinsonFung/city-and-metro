@@ -41,9 +41,10 @@
 
   // 两条线实际相交的点（v2.7 玩家反馈：以很小角度相交的两条线会被吸附成平行，交叉点丢失，交叉点两侧的站左右排反）：
   // 不共用车站、实际相交的两段站间连线，交点作为两条线共用的隐形控制点，两段都从交点断开，排版时两条线必须在这一点相交。
-  // 返回交点坐标与每段被切开的位置（按段内比例）
-  function crossings(edges, gx, gy) {
-    const pts = [], cuts = edges.map(function () { return []; }), box = edges.map(function (e) { return [Math.min(gx[e.a], gx[e.b]), Math.min(gy[e.a], gy[e.b]), Math.max(gx[e.a], gx[e.b]), Math.max(gy[e.a], gy[e.b])]; });
+  // 几乎重合的交点（v3.1 修复：三条线几乎在同一点相交时，两个交点相距只有几米，排版时先后顺序可能排反，线路在这里来回折、两端车站挤在一起）
+  // 距离小于 eps 的交点合并成一个，几条线都经过这一点。返回交点坐标与每段被切开的位置（按段内比例）
+  function crossings(edges, gx, gy, eps) {
+    const raw = [], cuts = edges.map(function () { return []; }), box = edges.map(function (e) { return [Math.min(gx[e.a], gx[e.b]), Math.min(gy[e.a], gy[e.b]), Math.max(gx[e.a], gx[e.b]), Math.max(gy[e.a], gy[e.b])]; });
     const ori = function (ax, ay, bx, by, cx, cy) { return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax); };
     for (let i = 0; i < edges.length; i++) for (let j = i + 1; j < edges.length; j++) {
       const p = edges[i], q = edges[j], bi = box[i], bj = box[j];
@@ -54,9 +55,16 @@
       if (!(d1 * d2 < 0 && d3 * d4 < 0)) continue;
       const t = d3 / (d3 - d4), u = d1 / (d1 - d2);   // 交点在 p 上的比例 t、在 q 上的比例 u
       if (t < 0.02 || t > 0.98 || u < 0.02 || u > 0.98) continue;   // 几乎压在车站上的不算（交给车站本身）
-      const v = pts.length; pts.push([ax + (bx - ax) * t, ay + (by - ay) * t]);
-      cuts[i].push({ t: t, v: v }); cuts[j].push({ t: u, v: v });
+      raw.push({ i: i, j: j, t: t, u: u, x: ax + (bx - ax) * t, y: ay + (by - ay) * t });
     }
+    // 合并：并查集，相距小于 eps 的交点归为一组，组的位置取平均；同一段上落在同一组的切口只留一个（比例取平均）
+    const par = raw.map(function (_, k) { return k; }), find = function (k) { while (par[k] !== k) k = par[k] = par[par[k]]; return k; };
+    for (let p = 0; p < raw.length; p++) for (let q = p + 1; q < raw.length; q++) if (Math.hypot(raw[p].x - raw[q].x, raw[p].y - raw[q].y) < eps) par[find(p)] = find(q);
+    const pts = [], idOf = new Map(), cnt = [];
+    raw.forEach(function (r, k) { const root = find(k); let v = idOf.get(root); if (v == null) { v = pts.length; idOf.set(root, v); pts.push([0, 0]); cnt.push(0); } pts[v][0] += r.x; pts[v][1] += r.y; cnt[v]++; r.v = v; });
+    pts.forEach(function (p, v) { p[0] /= cnt[v]; p[1] /= cnt[v]; });
+    const add = function (ei, t, v) { const c = cuts[ei].find(function (o) { return o.v === v; }); if (c) { c.t = (c.t * c.n + t) / (c.n + 1); c.n++; } else cuts[ei].push({ t: t, v: v, n: 1 }); };
+    for (const r of raw) { add(r.i, r.t, r.v); add(r.j, r.u, r.v); }
     return { pts: pts, cuts: cuts };
   }
 
@@ -66,7 +74,8 @@
     const gx0 = new Float64Array(N0), gy0 = new Float64Array(N0);
     for (let i = 0; i < N0; i++) { const s = net.stations[st[i]]; gx0[i] = s.x; gy0[i] = s.y; }
     // 实际交叉点：编号 N0 起，是控制点但不是车站，不输出站位
-    const X = crossings(lay.edges, gx0, gy0), N = N0 + X.pts.length;
+    const geoLens = lay.edges.map(function (e) { return e.geo; }).sort(function (a, b) { return a - b; });
+    const X = crossings(lay.edges, gx0, gy0, Math.max(0.5, geoLens[geoLens.length >> 1] || 1) * 0.12), N = N0 + X.pts.length;
     const gx = new Float64Array(N), gy = new Float64Array(N);
     gx.set(gx0); gy.set(gy0); X.pts.forEach(function (p, k) { gx[N0 + k] = p[0]; gy[N0 + k] = p[1]; });
     const adj = []; for (let i = 0; i < N; i++) adj.push([]);
@@ -125,7 +134,9 @@
     // 走廊长度按站距计：两头若是交叉点（不是车站）各只算半个站距，一段站间连线被交叉点切开后合起来仍约一个站距，不会被拉长
     const E = chains.map(function (ch) {
       const n = ch.nodes.length, eff = Math.max(0.35, n + 1 - 0.5 * ((ch.a >= N0 ? 1 : 0) + (ch.b >= N0 ? 1 : 0)));
-      return { a: ch.a, b: ch.b, nodes: ch.nodes, lmin: eff * unit, lmax: eff * unit * 1.7 + unit * 0.6, d: 0, ang0: angOf(gx[ch.b] - gx[ch.a], gy[ch.b] - gy[ch.a]) };
+      let gl = 0, pv = ch.a; for (const v of ch.nodes.concat([ch.b])) { gl += Math.hypot(gx[v] - gx[pv], gy[v] - gy[pv]); pv = v; }
+      const shrink = Math.max(0.6, Math.min(1, Math.sqrt(gl / (eff * med))));
+      return { a: ch.a, b: ch.b, nodes: ch.nodes, lmin: eff * unit * shrink, lmax: eff * unit * 1.7 + unit * 0.6, d: 0, ang0: angOf(gx[ch.b] - gx[ch.a], gy[ch.b] - gy[ch.a]) };
     });
     const inc = new Map(); for (const k of keys) inc.set(k, []);
     E.forEach(function (e, i) { inc.get(e.a).push(i); inc.get(e.b).push(i); });
@@ -243,11 +254,20 @@
       // 拆成主方向 + 相邻方向两段
       const sideK = vx * d[1] - vy * d[0] > 0 ? (e.d + 7) % 8 : (e.d + 1) % 8, s = DIRS[sideK], det = d[0] * s[1] - d[1] * s[0], l1 = (vx * s[1] - vy * s[0]) / det, l2 = (d[0] * vy - d[1] * vx) / det;
       const total = Math.abs(l1) + Math.abs(l2);
+      // 先走哪一折（v3.1）：看两头车站的实际走向——靠近起点的车站更像沿相邻方向时先走相邻方向，免得近距离的小站被画到与实际不符的那一折上
+      const f0 = e.nodes[0], f1 = e.nodes[n - 1], g0 = angOf(gx[f0] - gx[e.a], gy[f0] - gy[e.a]), g1 = angOf(gx[e.b] - gx[f1], gy[e.b] - gy[f1]);
+      const aM = angOf(d[0] * Math.sign(l1), d[1] * Math.sign(l1)), aS = angOf(s[0] * Math.sign(l2), s[1] * Math.sign(l2)), swap = angDiff(g0, aS) + angDiff(g1, aM) < angDiff(g0, aM) + angDiff(g1, aS) - 0.2;
       for (let k = 0; k < n; k++) {
         const u = total * tOf(k), id = e.nodes[k];
-        if (u <= Math.abs(l1)) { px[id] = ax + d[0] * u * Math.sign(l1); py[id] = ay + d[1] * u * Math.sign(l1); }
-        else { const rest = u - Math.abs(l1); px[id] = ax + d[0] * l1 + s[0] * rest * Math.sign(l2); py[id] = ay + d[1] * l1 + s[1] * rest * Math.sign(l2); }
+        if (!swap) {
+          if (u <= Math.abs(l1)) { px[id] = ax + d[0] * u * Math.sign(l1); py[id] = ay + d[1] * u * Math.sign(l1); }
+          else { const rest = u - Math.abs(l1); px[id] = ax + d[0] * l1 + s[0] * rest * Math.sign(l2); py[id] = ay + d[1] * l1 + s[1] * rest * Math.sign(l2); }
+        } else {
+          if (u <= Math.abs(l2)) { px[id] = ax + s[0] * u * Math.sign(l2); py[id] = ay + s[1] * u * Math.sign(l2); }
+          else { const rest = u - Math.abs(l2); px[id] = ax + s[0] * l2 + d[0] * rest * Math.sign(l1); py[id] = ay + s[1] * l2 + d[1] * rest * Math.sign(l1); }
+        }
       }
+      if (swap) e.swap = true;
     }
     for (let i = 0; i < N0; i++) out.set(st[i], [px[i], py[i]]);
     // 交叉点：画线时站间路线要经过它们（netmap.js diagramRoute），江海底图也把它们当控制点

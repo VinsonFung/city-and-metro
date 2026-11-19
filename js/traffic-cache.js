@@ -133,6 +133,8 @@
         staged.push({P,S,values});
       }
       for(const {P,S,values}of staged){for(const k of scalars)if(S[k]!==undefined)P[k]=S[k];Object.assign(P,values);P.solveSignature={net:m.net,od:m.od,year:m.year,fare:CM.Model.fareKey(m.fare),road:m.roadVer,habit:m.habitVer||0};}
+      // 缓存保存的是站对需求，恢复日汇总前按同一组参数重建背景交通的路径表。
+      if(CM.BgNet&&m.ctxs.wd.per[0].bgDS)CM.BgNet.forModel(m,m.params());
       verified.delete(record);
       m.computeDaily();m.gen=null;Object.assign(m,C);m.settledAt={year:m.year,fare:CM.Model.fareKey(m.fare),city:m.city.version,road:m.city.roadVersion,net:m.net,od:m.od};g.trafficCacheHit=true;return true;
     }catch(e){return false;}

@@ -10,8 +10,8 @@ for(const [,src]of(await readFile(new URL('index.html',root),'utf8')).matchAll(/
 const C=c.CM,M=C.Metro,copy=x=>JSON.parse(JSON.stringify(x));
 C.UI=function(){};for(const name of ['settings','corp','fleet','opsapp'])await load('js/'+name+'.js');
 const F=C.Fleet;
-assert.equal(C.CFG.GAME_VERSION,'2.7.2');assert.equal(C.CFG.RULES_REVISION,12);
-assert.equal(C.MAP_ORDER.length,12);assert.equal(F.MODELS.length,56);assert.ok(C.TaskPlans.ld);
+assert.equal(C.CFG.GAME_VERSION,'2.9');assert.equal(C.CFG.RULES_REVISION,14);
+assert.equal(C.MAP_ORDER.length,15);assert.equal(F.MODELS.length,78);assert.ok(C.TaskPlans.ld);
 for(const map of C.MAP_ORDER)for(const y of [1900,1950,1990,2025])for(const m of F.available(map,y))assert.ok(m.from<=y&&m.to>=y&&(!m.maps||m.maps.includes(map)));
 C.useMap('tutorial');const g=C.Game.create({mode:'free',tutorial:true,seed:20000101});
 F.ensure(g);let sample;

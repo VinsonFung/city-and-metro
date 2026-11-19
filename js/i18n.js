@@ -5,9 +5,15 @@
   let language='zh-CN',traditional=null,namesReady=false,trie=null,templates=null;
   try{const s=JSON.parse(localStorage.getItem('cm1.settings')||'null');if(s&&allowed.includes(s.language))language=s.language;}catch(e){/* settings unavailable */}
   const en=CM.I18N_EN||Object.create(null),names=new Map(),nameLengths=new Map(),missing=new Set();
+  // Per-map names (v2.9): the shared catalogue holds other cities' translated names (清塘 is New York's Fresh Pond,
+  // 南岸 London's South Bank), so on a map with its own list the current map's spelling wins, whole or inside a sentence.
+  const enMaps=CM.I18N_EN_MAP||Object.create(null),mapTries=new Map();
+  function mapNames(){const id=CM.mapId;return language==='en'&&id&&enMaps[id]||null;}
+  function mapTrie(){const id=CM.mapId;let t=mapTries.get(id);if(!t){t=new Map();for(const [source,target]of Object.entries(enMaps[id])){let n=t;for(const c of source){if(!n.has(c))n.set(c,new Map());n=n.get(c);}n.out=target;}mapTries.set(id,t);}return t;}
   const compactFormat=new Intl.NumberFormat('en',{notation:'compact',maximumFractionDigits:2});
   function sanitize(s){return s.replace(/笕桥机场(?:[（(]军用[）)])?/g,'城东片区').replace(/王家墩机场(?:[（(]军用[）)])?/g,'王家墩片区').replace(/军用机场[^，。；\n]*/g,'未开发用地');}
   function nameEnglish(s){
+    const own=mapNames();if(own&&own[s]!==undefined)return own[s];
     if(en[s])return en[s];
     const suffix=[['街道','Subdistrict'],['自治区','Region'],['特别行政区',''],['风景名胜区','Scenic Area'],['国家湿地公园','Wetland Park'],['森林公园','Forest Park'],['火车站','Railway Station'],['地铁站','Station'],['国际机场','International Airport'],['机场','Airport'],['大学','University'],['医院','Hospital'],['公园','Park'],['大桥','Bridge'],['高架路','Viaduct'],['隧道','Tunnel'],['大道','Avenue'],['大街','Avenue'],['广场','Square'],['水库','Reservoir'],['街','Street'],['路','Road'],['河','River'],['江','River'],['区','District'],['镇','Town'],['市','City']];
     let tail='',stem=s;for(const [a,b]of suffix)if(s.endsWith(a)&&s.length>a.length){stem=s.slice(0,-a.length);tail=b;break;}
@@ -30,6 +36,7 @@
     for(const [source,target]of Object.entries(en)){if(!source||!hasHan(source))continue;let n=trie;for(const c of source){if(!n.has(c))n.set(c,new Map());n=n.get(c);}n.out=target;}
   }
   function english(s){
+    const own=mapNames();if(own&&own[s]!==undefined)return own[s];
     if(en[s]!==undefined)return en[s];
     // Leading or trailing spaces (text joined to a following tag or number) must not stop whole-sentence templates from matching.
     const core=s.trim();if(core&&core!==s)return (/^\s/.test(s)?' ':'')+english(core)+(/\s$/.test(s)?' ':'');
@@ -38,8 +45,8 @@
     for(const t of templates){const m=t.re.exec(s);if(m)return t.target.replace(/\{([\w.]+)\}/g,(_,k)=>text(m[t.keys.indexOf(k)+1]));}
     // 不先改写整句中的数字，否则会破坏含线路号 / 日期的完整短语。仅在没有更长译文时处理数字前缀。
     const numbered=function(t){let m;
-      const money=/^(-?\d[\d,]*(?:\.\d+)?)\s*(亿|万)?(新台币|新法郎|欧元|法郎|人民币|日元|港币|元)/.exec(t);
-      if(money){const code={'新台币':'TWD','新法郎':'FRF','法郎':'FRF','欧元':'EUR','人民币':'CNY','日元':'JPY','港币':'HKD'};return[money[0].length,compactFormat.format(Number(money[1].replace(/,/g,''))*(money[2]==='亿'?1e8:money[2]==='万'?1e4:1))+' '+(code[money[3]]||CM.CFG.money.code)];}
+      const money=/^(-?\d[\d,]*(?:\.\d+)?)\s*(亿|万)?(新台币|新法郎|欧元|法郎|人民币|日元|港币|新元|美元|澳元|元)/.exec(t);
+      if(money){const code={'新台币':'TWD','新法郎':'FRF','法郎':'FRF','欧元':'EUR','人民币':'CNY','日元':'JPY','港币':'HKD','新元':'SGD','美元':'USD','澳元':'AUD'};return[money[0].length,compactFormat.format(Number(money[1].replace(/,/g,''))*(money[2]==='亿'?1e8:money[2]==='万'?1e4:1))+' '+(code[money[3]]||CM.CFG.money.code)];}
       if(m=/^(-?\d[\d,]*(?:\.\d+)?)\s*万/.exec(t))return[m[0].length,compactFormat.format(Number(m[1].replace(/,/g,''))*1e4)];
       if(m=/^(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/.exec(t))return[m[0].length,m[1]+'-'+m[2]+'-'+m[3]];
       if(m=/^(\d{4})\s*年\s*(\d{1,2})\s*月/.exec(t))return[m[0].length,m[1]+'-'+m[2]];
@@ -52,11 +59,18 @@
     // Prefer the longest phrase; a place name inside a translated sentence must not break that sentence.
     let out='',i=0;while(i<s.length){
       let n=trie,end=-1,value='';for(let j=i;j<s.length&&n.has(s[j]);j++){n=n.get(s[j]);if(n.out!==undefined){end=j+1;value=n.out;}}
+      // The map's own name replaces a catalogue match of the same or shorter length; a longer catalogue phrase still wins.
+      if(own){let m=mapTrie();for(let j=i;j<s.length&&m.has(s[j]);j++){m=m.get(s[j]);if(m.out!==undefined&&j+1>=end){end=j+1;value=m.out;}}}
       // Fragments that start with a space (" 站", " 列") must not cut off a longer phrase that begins right after the space.
       if(end>0&&s[i]===' '){let m=trie,e2=-1;for(let j=i+1;j<s.length&&m.has(s[j]);j++){m=m.get(s[j]);if(m.out!==undefined)e2=j+1;}if(e2>end){out+=' ';i++;continue;}}
       for(let len=Math.min(nameLengths.get(s[i])||0,s.length-i);len>Math.max(1,end-i);len--){
         const candidate=s.slice(i,i+len);if(!names.has(candidate))continue;
         value=names.get(candidate);if(!value){value=nameEnglish(candidate);names.set(candidate,value);}end=i+len;break;
+      }
+      // 年代标签比词典里的年份前缀更长，例如「1900 年代」优先于「1900 年」。
+      if(/[0-9]/.test(s[i])){
+        const decade=/^(\d{4})\s*年代/.exec(s.slice(i));
+        if(decade&&i+decade[0].length>end){end=i+decade[0].length;value=decade[1]+'s';}
       }
       if(end>=0){out+=' '+value+' ';i=end;}else{const n=/[0-9-]/.test(s[i])?numbered(s.slice(i)):null;if(n){out+=' '+n[1]+' ';i+=n[0];}else out+=s[i++];}
     }
@@ -66,7 +80,7 @@
   }
   function text(value){
     if(typeof value!=='string'||!hasHan(value))return value;
-    const key=value;let result=cache.get(key);if(result!==undefined)return result;
+    const key=language==='en'?(CM.mapId||'gz')+'\0'+value:value;let result=cache.get(key);if(result!==undefined)return result;
     // Paths and URLs are data. Preserve them byte-for-byte, including Chinese directory names.
     const protectedParts=[];
     const source=sanitize(value.replace(/(?:[A-Za-z]:[\\/]|\\\\)[^\r\n<>"|]*|https?:\/\/[^\s<>"）)]+/g,p=>{const token='\uE000'+protectedParts.length+'\uE001';protectedParts.push(p);return token;}));

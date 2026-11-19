@@ -8,6 +8,13 @@ import { geoIndex } from './geo-index.mjs';
 
 export const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const gameEntries = ['index.html', 'css', 'img', 'js', 'LICENSE.txt', 'THIRD_PARTY_NOTICES.txt', 'licenses'];
+const documentationAssets = new Set([
+  'img/screenshot-map-selection.png',
+  'img/screenshot-tokyo-day.png',
+  'img/screenshot-guangzhou-night.png',
+  'img/screenshot-economy-statistics.png',
+]);
+export const isDocumentationAsset = (root, file) => documentationAssets.has(path.relative(root, file).split(path.sep).join('/'));
 const manifestName = 'game-manifest.json';
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 
@@ -30,7 +37,11 @@ export async function inspectGame(root = projectRoot) {
       return;
     }
     if (!info.isFile()) throw new Error('资源不是普通文件：' + file);
-    const rel = path.relative(root, file).replaceAll('\\', '/');
+    const rel = path.relative(root, file).split(path.sep).join('/');
+    if (isDocumentationAsset(root, file)) {
+      if (root !== projectRoot) throw new Error('发布资源包含 README 截图：' + rel);
+      return;
+    }
     if (rel.split('/').some(p => p.startsWith('.')) || /\.md$/i.test(rel)) throw new Error('发布资源包含开发文件：' + rel);
     if (info.size > 25 * 1024 * 1024) throw new Error('单个资源超过25 MiB：' + rel);
     const bytes = await readFile(file);

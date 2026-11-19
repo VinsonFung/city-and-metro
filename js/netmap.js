@@ -469,16 +469,27 @@
       l.push(X.length); X.push(G[i][0]); Y.push(G[i][1]); TX.push(P[i][0]); TY.push(P[i][1]);
     }
     const ns = X.length;
+    // 车站被排版挪动的距离（换回地理单位）：固定点离车站不到挪动量的两倍时不放，三角网不会翻折
+    const disp = []; for (let s = 0; s < ns; s++) disp.push(Math.hypot(TX[s] - (sc * X[s] + tx), TY[s] - (sc * Y[s] + ty)) / (sc || 1));
+    const foldRisk = function (px, py) { for (let s = 0; s < ns; s++) if (disp[s] > 0 && Math.hypot(X[s] - px, Y[s] - py) < disp[s] * 2) return true; return false; };
+    const nearSt = function (px, py, rr) { for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) { const l = seen.get(bk(px + i * L, py + j * L)); if (l) for (const s of l) if (Math.hypot(X[s] - px, Y[s] - py) < rr) return true; } return false; };
+    // 地图边框（v3.0 玩家反馈：线路图和回放的边缘扭曲）：边框上每半格放一个固定点，框外格点也固定，只做整体缩放平移，边框保持矩形；
+    // 框内远离车站的格点挪动量随离边框越近越小（三格内渐变到 0），水面在边框附近平顺过渡。离车站不到 1.5 个站距的边框点不放，避免折叠
+    for (const b of [[0, 0, W, 0], [W, 0, W, H], [W, H, 0, H], [0, H, 0, 0]]) {
+      const len = Math.hypot(b[2] - b[0], b[3] - b[1]), n = Math.max(1, Math.ceil(len / (L / 2)));
+      for (let k = 0; k < n; k++) { const px = b[0] + (b[2] - b[0]) * k / n, py = b[1] + (b[3] - b[1]) * k / n; if (nearSt(px, py, med * 1.5) || foldRisk(px, py)) continue; X.push(px); Y.push(py); TX.push(sc * px + tx); TY.push(sc * py + ty); }
+    }
     // 网外格点：离控制点 1.5 个站距以外；挪动量按控制点挪动量加权平均（越近权重越大），格点略微错开，避免四点共圆
     let r = 12345; const rnd = function () { r = (r * 16807) % 2147483647; return r / 2147483647 - 0.5; };
     for (let y = -L; y <= H + L + 1e-6; y += L) for (let x = -L; x <= W + L + 1e-6; x += L) {
       const px = x + rnd() * L * 0.02, py = y + rnd() * L * 0.02;
-      let close = false;
-      for (let i = -1; i <= 1 && !close; i++) for (let j = -1; j <= 1 && !close; j++) { const l = seen.get(bk(px + i * L, py + j * L)); if (l) for (const s of l) if (Math.hypot(X[s] - px, Y[s] - py) < med * 1.5) { close = true; break; } }
-      if (close) continue;
+      if (nearSt(px, py, med * 1.5)) continue;
+      const inside = Math.min(px, py, W - px, H - py), risky = foldRisk(px, py);   // 到边框的距离（框外为负）
+      if (inside <= L * 0.25 && !risky) { X.push(px); Y.push(py); TX.push(sc * px + tx); TY.push(sc * py + ty); continue; }   // 贴边或框外：固定
       let sw = 0, sx = 0, sy = 0;
       for (let s = 0; s < ns; s++) { const d2 = (X[s] - px) * (X[s] - px) + (Y[s] - py) * (Y[s] - py) + 1e-6, w = 1 / (d2 * d2); sw += w; sx += w * (TX[s] - (sc * X[s] + tx)); sy += w * (TY[s] - (sc * Y[s] + ty)); }
-      X.push(px); Y.push(py); TX.push(sc * px + tx + sx / sw); TY.push(sc * py + ty + sy / sw);
+      const fall = risky ? 1 : Math.min(1, inside / (L * 3));
+      X.push(px); Y.push(py); TX.push(sc * px + tx + fall * sx / sw); TY.push(sc * py + ty + fall * sy / sw);
     }
     // 三角形按外接框放进格子，变形时按格子找所在三角形
     const tri = delaunay(X, Y), cell = Math.max(med * 2, Math.max(W, H) / 50), grid = new Map(), gk = function (i, j) { return i * 100003 + j; };
@@ -907,6 +918,7 @@
     let lab = '', dots = '', needsRoom = false;
     const DIRS = [[0, -1], [0, 1], [1, 0], [-1, 0], [0.707, -0.707], [-0.707, -0.707], [0.707, 0.707], [-0.707, 0.707]];
     for (const i of order) {
+      if (net.stations[lay.st[i]].v) continue;   // 虚拟节点只是版面上的拐点，不画站点和站名
       const s = net.stations[lay.st[i]], xfer = linesOf[i].length > 1, walk = walkSet.has(i), x = px(i), y = py(i);
       measure.font = (xfer || walk ? '700 ' : '500 ') + LABEL_SIZE + 'px ' + font;
       const rows = stationText(s.name, measure), lineHeight = LABEL_SIZE + 5;
@@ -1203,7 +1215,7 @@
       c.fillStyle = INK; c.textBaseline = 'alphabetic';
       c.font = '800 ' + (30 * sc) + 'px ' + font; c.fillText((D.city || '') + (isGeo ? '地铁地理线网图' : '地铁线路示意图'), M0, 56 * sc);
       c.font = (15 * sc) + 'px ' + font; c.fillStyle = P.sub;
-      let nSt = 0; for (const id in net.stations) if (M.stationLines(net, id).length) nSt++;
+      let nSt = 0; for (const id in net.stations) if (!net.stations[id].v && M.stationLines(net, id).length) nSt++;
       const KM = lineKm(g);
       c.fillText('游戏时间 ' + g.clock.y + ' 年 ' + g.clock.m + ' 月' + (useDraft ? '（含建设草案）' : '') + ' · ' + lines.length + ' 条线路 · ' + nSt + ' 座车站 · 线路总长 ' + kmText(KM.total) + ' · 《城市与地铁》', M0, 84 * sc);
       c.drawImage(img, (cw - W * sc) / 2, headH, W * sc, H * sc);
@@ -1256,7 +1268,8 @@
     }
     // 线路多时条目放不下：滚轮横向滚动
     chips.addEventListener('wheel', function (e) { if (chips.scrollWidth > chips.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) { chips.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false });
-    const nLines = chips.childNodes.length, nStations = Object.keys(net.stations).filter(function (sid) { return M.stationLines(net, sid).length; }).length;
+    CM.UI.dragStrip(chips, '.nm-chip');
+    const nLines = chips.childNodes.length, nStations = Object.keys(net.stations).filter(function (sid) { return !net.stations[sid].v && M.stationLines(net, sid).length; }).length;
     const head = h('div', { class: 'stats-head nm-head' }, h('span', { class: 'badge b-blue' }, CM.icon('network')),
       h('div', { class: 'nm-heading' }, h('h2', null, (CM.DATA.city || '') + '地铁线网'), h('div', { class: 'tiny muted' }, g.clock.y + ' 年 ' + g.clock.m + ' 月')),
       h('div', { class: 'seg-ctl sm nm-mode', 'aria-label': '线路图布局' }, [[true, '地理线网'], [false, '线路图']].map(function (o) { return h('button', { class: geographic === o[0] ? 'on' : '', 'data-mode': o[0] ? 'geographic' : 'schematic', 'aria-pressed': geographic === o[0] ? 'true' : 'false', 'data-silent': '1', onclick: function () { if (geographic !== o[0]) { geographic = o[0]; CM.Sound && CM.Sound.play('soft'); render(); } } }, o[1]); })),
@@ -1293,7 +1306,7 @@
   const API = {
     root: function () { return root; }, canvas: function () { return root && root.querySelector('.nm-canvas'); }, svg: function () { return root && root.querySelector('.nm-svg'); },
     // 回放跟镜头时直接按新视野重画（回放中大部分图层隐藏，重画很轻）
-    view: function () { return view; }, setView: function () { setView(true, true); }, fitView: fitView, geographic: function () { return geographic; }, spacing: function () { return lastSpacing; },
+    view: function () { return view; }, setView: function (lazy) { setView(!lazy, true); }, fitView: fitView, geographic: function () { return geographic; }, spacing: function () { return lastSpacing; },
     computeRoutes: computeRoutes, hubGeom: hubGeom, palette: palette, medianSpacing: medianSpacing,
     waterLayer: function (G, P, med) { return showTerrain ? waterLayer(game() && game().city, G, P, med) : null; }, mapFont: mapFont, ui: function () { return ui; },
     setBusy: function (on) { const b = root && root.querySelector('.nm-export'); if (b) b.disabled = on || exporting || !canExport(); },

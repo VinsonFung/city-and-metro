@@ -7,22 +7,32 @@
   const U = CM.U;
   const BG = { trains: [], boats: [], key: '', routes: [], ferries: [] };
   CM.BgTransit = BG;
-  const REGION_KEY = { '中国内地': 'cn', '中国香港': 'hk', '中国台湾': 'tw', '日本': 'jp', '法国': 'eu', '英国': 'eu' };
+  const REGION_KEY = { '中国内地': 'cn', '中国香港': 'hk', '中国台湾': 'tw', '日本': 'jp', '法国': 'eu', '英国': 'eu', '新加坡': 'hk', '美国': 'eu', '澳大利亚': 'eu' };
   const TRAIN_COL = { jp: ['#3a9a4a', '#f08a24', '#2a8fd0', '#c9c3b6'], eu: ['#2f4f3f', '#6b2f2a', '#3a4a6a'], hk: ['#7a2e2a', '#2f5a8a'], cn: ['#2f6b3a', '#3a5a8a'], tw: ['#e9eef2', '#2f5a8a'] };
   const CAR_L = 0.09, CAR_GAP = 0.012;   // 车厢长度与间隙（格）
   const pick = function (a) { return a[Math.floor(Math.random() * a.length)]; };
   const rkey = function () { const m = CM.curMap ? CM.curMap() : null; return (m && REGION_KEY[m.region]) || 'cn'; };
 
-  // 铁路：原网页范围中的地面路段（至少500m，保留香港等小图的分段）（隧道不画；高速铁路与新线按开通年份）
-  function railRoutes(year) {
-    const D = CM.DATA, out = [];
+  // 铁路：地面上较长的路段（隧道不画；高速铁路与新线按开通年份）；玩家接管的区段（v3.1）从路段里剔除，背景列车不再在上面跑
+  function railRoutes(year, taken) {
+    const out = [];
     for (const r of (CM.Geo && CM.Geo.rail) || []) {
-      if ((r.flags & 2) || (r.year && year < r.year) || ((r.flags & 16) && year < (D.hsrYear || 2009))) continue;
-      const p = r.p, pts = [];
-      for (let i = 0; i + 1 < p.length; i += 2) pts.push([p[i], p[i + 1]]);
-      if (pts.length < 2) continue;
-      const cum = U.cumLen(pts), total = cum[cum.length - 1];
-      if (total >= 2) out.push({ pts: pts, cum: cum, total: total, hsr: !!(r.flags & 16) });
+      if ((r.flags & 2) || !CM.City.railActiveAt(r, year)) continue;
+      const p = r.p; let pts = [];
+      const flush = function () {
+        if (pts.length >= 2) { const cum = U.cumLen(pts), total = cum[cum.length - 1]; if (total >= 2) out.push({ pts: pts, cum: cum, total: total, hsr: !!(r.flags & 16), key: pts[0][0].toFixed(2) + ',' + pts[0][1].toFixed(2) + ':' + total.toFixed(1) }); }
+        pts = [];
+      };
+      // 被接管的部分：有接管时折线按约 1/4 格加密，逐点看是否落在已接管线位旁且走向平行
+      const n = p.length / 2;
+      for (let i = 0; i < n; i++) {
+        const x = p[2 * i], y = p[2 * i + 1];
+        if (!taken) { pts.push([x, y]); continue; }
+        if (i + 1 >= n) { const dx = x - p[2 * i - 2], dy = y - p[2 * i - 1]; if (taken.has(x, y, dx, dy)) flush(); else pts.push([x, y]); continue; }
+        const dx = p[2 * i + 2] - x, dy = p[2 * i + 3] - y, m = Math.max(1, Math.ceil(Math.hypot(dx, dy) * 4));
+        for (let k = 0; k < m; k++) { const px = x + dx * k / m, py = y + dy * k / m; if (taken.has(px, py, dx, dy)) flush(); else pts.push([px, py]); }
+      }
+      flush();
     }
     out.sort(function (a, b) { return b.total - a.total; });
     return out.slice(0, 40);
@@ -78,20 +88,31 @@
   };
   // 年份或地图变化时调整列车与渡轮的数量
   BG.sync = function (g) {
-    const D = CM.DATA, y = g.clock.y, key = (CM.mapId || '') + ':' + y + ':' + g.city.N;
+    const D = CM.DATA, y = g.clock.y, taken = CM.Takeover && CM.Takeover.takenRail ? CM.Takeover.takenRail(g.net) : null;
+    const key = (CM.mapId || '') + ':' + y + ':' + g.city.N + ':' + (taken ? taken.sig : '');
     if (key === BG.key && BG.city === g.city) return;
     if (BG.city !== g.city) { BG.trains = []; BG.boats = []; }
     BG.city = g.city;
     BG.key = key;
-    const rk = rkey(), bg = CM.Eras && CM.Eras.bg ? CM.Eras.bg(g.year()) : null, share = bg ? bg.share : 0;
-    BG.routes = railRoutes(y);
-    const nT = BG.routes.length ? Math.min(BG.routes.length * 2, Math.round(3 + 30 * share)) : 0;
-    BG.trains = BG.trains.filter(function (t) { return t.r < BG.routes.length; });
+    const rk = rkey(), bg = CM.Eras && CM.Eras.bg ? CM.Eras.bg(g.year()) : null, share = bg ? (bg.road != null ? 0.15 : bg.share) : 0;   // 路面公交（v3.0）不是铁路，图上的列车按普通城市的数量
+    // 线路重排后（跨年、接管区段变化），列车留在原来的路段上；路段被接管剔除的列车消失，由新的列车补上
+    const oldRoutes = BG.routes;
+    BG.routes = railRoutes(y, taken);
+    const idx = new Map(BG.routes.map(function (r, i) { return [r.key, i]; }));
+    BG.trains = BG.trains.filter(function (t) { const o = oldRoutes[t.r], i = o ? idx.get(o.key) : undefined; if (i == null) return false; t.r = i; return true; });
+    // 有背景交通线路的地图（v2.9）：列车数随运营中的铁路线路数，渡轮按线路走向
+    const BN = CM.BgNet && CM.BgNet.lines(), tNow = g.year();
+    const nRail = BN ? BN.filter(function (L) { return L.kind === 'rail' && CM.BgNet.active(L, tNow); }).length : 0;
+    const nT = BG.routes.length ? Math.min(BG.routes.length * 2, BN ? Math.min(40, 4 + nRail * 3) : Math.round(3 + 30 * share)) : 0;
     while (BG.trains.length < nT) BG.trains.push(newTrain(BG.routes, rk));
     for (let i = nT; i < BG.trains.length; i++) BG.trains[i].out = true;   // 多出的列车驶到线路尽头后不再出现
     // 渡轮：航线按年份出现；船数随背景交通比重相对开局时的变化增减（至少一艘）
-    const fv = ((D.bgViz && D.bgViz.ferries) || []).filter(function (f) { return (!f.from || y >= f.from) && (!f.to || y <= f.to); });
-    const s0 = D.bg ? U.interp(D.bg.share, CM.CFG.START.y) : 0, ratio = s0 > 0 ? U.clamp(share / s0, 0.2, 1.2) : 1;
+    let fv = ((D.bgViz && D.bgViz.ferries) || []).filter(function (f) { return f.piers && (!f.from || y >= f.from) && (!f.to || y <= f.to); });   // 只有标注了码头的航线（v2.9）
+    if (BN && !(D.bgViz && D.bgViz.ferries)) fv = BN.filter(function (L) { return L.kind === 'ferry' && CM.BgNet.active(L, tNow); }).map(function (L) {
+      const H = CM.BgNet.hubs(), G = H.lineGeo[BN.indexOf(L)];
+      return { name: L.name, n: Math.max(1, Math.round(60 / (L.head || 30))), color: '#f4f1e8', pts: G.pts.map(function (p) { return [p[0], p[1]]; }) };
+    });
+    const s0 = D.bg ? U.interp(D.bg.share, CM.CFG.START.y) : 0, ratio = BN ? 1 : (s0 > 0 ? U.clamp(share / s0, 0.2, 1.2) : 1);
     BG.ferries = fv.map(function (f) { return { f: f, r: ferryRoute(f, g.city) }; });
     const boats = [];
     BG.ferries.forEach(function (fr, i) {

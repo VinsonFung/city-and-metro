@@ -164,7 +164,7 @@
       if (arr.length > keep) arr.shift();
     };
     M.withSegIndex([g.net], function () { for (const lid in g.net.lines) put('l', lid, lineSig(g, lid, count), lm[lid] || [0, 0, 0, 0, 0], KEEP_L); });
-    for (const sid in g.net.stations) put('s', sid, stationSig(g.net.stations[sid]), sm[sid] || [0, 0], KEEP_S);
+    for (const sid in g.net.stations) if (!g.net.stations[sid].v) put('s', sid, stationSig(g.net.stations[sid]), sm[sid] || [0, 0], KEEP_S);
     for (const k of ['l', 's']) { const live = k === 'l' ? g.net.lines : g.net.stations; for (const id in T[k]) if (!live[id]) { delete T[k][id]; delete S[k][id]; } }
     while (log.length > KEEP_LOG) log.shift();
   };
@@ -391,7 +391,7 @@
     const g = this.g(); if (!g) return;
     if (this.opsApp) { if (view) this.opsApp.go(view, id); else this.opsApp.close(); return; }
     const self = this, reduce = CM.Settings.reducedMotion(), F = CM.Fleet, I18 = function (el) { if (CM.I18n) CM.I18n.localize(el); return el; };
-    const st = { root: 'home', view: 'home', id: null, hist: [], page: 0, f: { lines: 'all', stations: 'all' }, q: { lines: '', stations: '' }, tab: { line: 'info', station: 'info', fare: 'fare' }, lineF: 'all', sel: new Set(), batch: false, ask: 0, metric: {}, sort: { lines: ['ord', 1], stations: ['flow', -1], stops: ['n', 1] } };
+    const st = { root: 'home', view: 'home', id: null, hist: [], page: 0, f: { lines: 'all', stations: 'all' }, q: { lines: '', stations: '' }, tab: { line: 'info', station: 'info', fare: 'fare' }, lineF: 'all', sel: new Set(), batch: false, ask: 0, metric: {}, sort: { lines: ['ord', 1], stations: ['flow', -1], stops: ['n', 1], finL: ['net', 1], finS: ['net', 1] } };
     let closing = false, endGateHold = null, refreshAfterEdit = false, refreshTimer = 0, editPointer = null;
     const back = h('div', { class: 'mc-back', onclick: function () { close(); } });
     const app = h('div', { class: 'mc-app', role: 'dialog', 'aria-modal': 'true', 'aria-label': '地铁芯 · 线网管理系统', tabindex: '-1' });
@@ -414,6 +414,8 @@
     const go = function (v, target) {
       if (v === 'lines' || v === 'stations') { setRoot(v); if (target) (v === 'lines' ? openLine : openStation)(target); return; }
       if (v === 'fare') { setRoot('fare'); return; }
+      if (v === 'finance') { setRoot('finance'); return; }
+      if (v === 'takeover' && navs.takeover) { if (target) self._tk = { rid: target }; setRoot('takeover'); return; }
       if (v === 'gates' && !navs.gates.hidden) { setRoot('gates'); return; }
       setRoot(v === 'fleet' && g.fleet ? 'fleet' : 'home');
     };
@@ -422,7 +424,9 @@
     const nav = function (v, icon, label) { return h('button', { class: 'mc-nav', 'aria-label': label, 'data-v': v, 'data-silent': '1', onclick: function () { if (st.root !== v || st.view !== v) sfx('tab'); setRoot(v); } }, ic(icon, 18), h('span', { class: 'lb' }, label), h('em', { style: { display: 'none' } })); };
     const navs = { home: nav('home', 'chart', '总览'), lines: nav('lines', 'route', '线路管理'), stations: nav('stations', 'metro', '车站管理') };
     if (g.fleet) navs.fleet = nav('fleet', 'train', '列车管理');
+    navs.finance = nav('finance', 'coin', '财务');   // 线路与车站收支、商业开发（v3.0 玩家建议）
     navs.fare = nav('fare', 'ticket', '票价管理');
+    if (CM.Takeover && CM.Takeover.list().length) navs.takeover = nav('takeover', 'train', '铁路接管');   // 既有铁路接管（v3.0）：只在写了 railTakeover 的地图上出现
     navs.gates = nav('gates', 'bridge', '口岸管理');
     navs.gates.hidden = !CM.CityLink.gates(g).some(function (q) { return q.open; });
     const stateEl = h('div', { class: 'mc-state' });
@@ -430,7 +434,7 @@
     const drawRail = function () {
       for (const k in navs) navs[k].classList.toggle('on', st.root === k);
       const al = A.active(g).length;
-      count(navs.home, al, true); count(navs.lines, Object.keys(g.net.lines).length); count(navs.stations, Object.keys(g.net.stations).length);
+      count(navs.home, al, true); count(navs.lines, Object.keys(g.net.lines).length); count(navs.stations, Object.keys(g.net.stations).filter(function (sid) { return !g.net.stations[sid].v; }).length);
       if (navs.fleet) count(navs.fleet, g.fleet.trains.length);
       const gates = CM.CityLink.gates(g);
       navs.gates.hidden = !gates.some(function (q) { return q.open; });
@@ -470,7 +474,7 @@
     };
     const stationRows = function () {
       const C = g.model.net ? g.model.net.C : g.compiled, sd = g.model.dailyStale ? null : g.model.stDailyWk || g.model.stDaily;
-      return M.sortIds(Object.keys(g.net.stations)).map(function (sid) {
+      return M.sortIds(Object.keys(g.net.stations).filter(function (sid) { return !g.net.stations[sid].v; })).map(function (sid) {
         const s = g.net.stations[sid], k = C.sIndex.get(sid), ok = k !== undefined && sd && k < sd.peak.length;
         const ds = g.draft && g.draft.net.stations[sid], next = ds && ds.size !== s.size ? ds.size : null;   // 草案里改了规模（v2.7.1 玩家反馈：批量改大型后列表看不出变化）
         return { sid: sid, next: next, s: s, lines: M.stationLines(g.net, sid), live: k !== undefined && !!C.serviced[k], flow: ok ? sd.inn[k] + sd.out[k] + sd.xfer[k] : 0, load: ok ? sd.peak[k] / CFG.metro.stationCap[s.size] : 0 };
@@ -543,7 +547,7 @@
       if (o.station) {
         const s = net.stations[o.station], rw = (CFG.walk.maxAccessM / CFG.CELL_M).toFixed(2);
         o2 += '<circle class="mc-walk" cx="' + s.x.toFixed(1) + '" cy="' + s.y.toFixed(1) + '" r="' + rw + '"/>';
-        for (const id in net.stations) { const q = net.stations[id]; if (id !== o.station && Math.abs(q.x - s.x) < w / 2 && Math.abs(q.y - s.y) < ht / 2) o2 += dotAt(q, 2.5, 'mc-st2'); }
+        for (const id in net.stations) { const q = net.stations[id]; if (!q.v && id !== o.station && Math.abs(q.x - s.x) < w / 2 && Math.abs(q.y - s.y) < ht / 2) o2 += dotAt(q, 2.5, 'mc-st2'); }
         o2 += dotAt(s, 6, 'mc-st1') + label(s, s.name, 9, 4);
       } else if (o.focus) {
         const tp = M.lineTopo(net, o.focus), ids = tp.stations || [], ends = tp.routes.length ? tp.routes.map(function (r) { return [r.st[0], r.st[r.st.length - 1]]; }).flat() : [];
@@ -653,7 +657,7 @@
         al.length ? al.map(todoRow) : (rows.length ? empty('check', '线网运行平稳', '线路或车站连续两个月负荷超过 110% 时列在这里。') : empty('route', '还没有线路', '回到地图用「绘线」修第一条线，修好后在这里管理。')));
       const topL = rows.filter(function (r) { return r.lf > 0; }).sort(function (a, b) { return b.lf - a.lf; }).slice(0, 6).map(function (r) { return { name: r.L.name, v: r.lf, badge: lb(r.L), go: function () { openLine(r.lid); } }; });
       const topS = srows.filter(function (r) { return r.load > 0; }).sort(function (a, b) { return b.load - a.load; }).slice(0, 6).map(function (r) { return { name: r.s.name, v: r.load, go: function () { openStation(r.sid); } }; });
-      const allSt = Object.values(g.net.stations), over = srows.filter(function (r) { return r.load > 1; });
+      const allSt = Object.values(g.net.stations).filter(function (s) { return !s.v; }), over = srows.filter(function (r) { return r.load > 1; });
       const dev = srows.filter(function (r) { return r.s.tod; });
       const netCard = h('section', { class: 'mc-card' }, cardHead('线网预览', rows.length + ' 条线路', h('span', { class: 'mc-maplg' }, over.length ? [h('i'), '过载 ' + over.length] : null, dev.length ? [h('i', { class: 'tod' }), '已开发 ' + dev.length] : null)),
         allSt.length ? mapEl({ fit: boundsOf(allSt), all: true, alerts: over, tods: dev, minW: 40 }) : h('div', { class: 'mc-none' }, '修好线路后在这里预览线网'));
@@ -900,6 +904,65 @@
     };
 
     // ---------------- 列车管理 ----------------
+    // ---------------- 财务（v3.0 玩家建议）：每条线路、每座车站的月收支，车站的商业开发（TOD）也在这里 ----------------
+    const money = function (v) { return h('span', { class: v < 0 ? 'mc-warn' : '' }, (v < 0 ? '−' : '') + U.fmtMoney(Math.abs(v))); };
+    const finLCols = [
+      { key: 'name', label: '线路', value: function (r) { return r.L.name; }, cell: function (r) { return h('span', { class: 'mc-obj' }, lb(r.L), h('b', null, r.L.name)); } },
+      { key: 'riders', label: '日客运量', cls: 'num', desc: true, value: function (r) { return r.riders; }, cell: function (r) { return r.riders ? U.fmtPeople(r.riders) : '—'; } },
+      { key: 'fare', label: '月票款', cls: 'num', desc: true, value: function (r) { return r.fare; }, cell: function (r) { return U.fmtMoney(r.fare); } },
+      { key: 'com', label: '商业收入', cls: 'num opt', desc: true, value: function (r) { return r.com; }, cell: function (r) { return r.com ? U.fmtMoney(r.com) : '—'; } },
+      { key: 'cost', label: '运营成本', cls: 'num', desc: true, value: function (r) { return r.cost; }, cell: function (r) { return h('span', { 'data-tip': '列车 ' + U.fmtMoney(r.train) + ' · 车站 ' + U.fmtMoney(r.station) + (r.todCost ? ' · 商业 ' + U.fmtMoney(r.todCost) : '') }, U.fmtMoney(r.cost)); } },
+      { key: 'net', label: '月盈亏', cls: 'num', value: function (r) { return r.net; }, cell: function (r) { return money(r.net); } },
+      { key: 'rec', label: '票款覆盖', cls: 'num opt', desc: true, value: function (r) { return r.rec; }, cell: function (r) { return U.fmtPct(r.rec, 0); } },
+      { key: 'go', label: '', cls: 'mc-act', cell: function (r) { return locateBtn('line', r.lid, '在地图上定位这条线路'); } },
+    ];
+    const toggleFinanceTod = function (id) {
+      st.todOpen = st.todOpen === id ? null : id;
+      draw();
+      if (st.todOpen) {
+        content.querySelector('#mc-fin-tod').scrollIntoView({ block: 'start' });
+      } else {
+        const button = Array.from(content.querySelectorAll('[data-fin-tod]')).find(function (b) { return b.dataset.finTod === id; });
+        if (button) {
+          button.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+          button.focus({ preventScroll: true });
+        }
+      }
+    };
+    const finSCols = [
+      { key: 'name', label: '车站', value: function (r) { return r.name; }, cell: function (r) { return h('span', { class: 'mc-obj' }, r.lines.map(function (l) { return g.net.lines[l] ? lb(g.net.lines[l]) : null; }), h('b', null, r.name)); } },
+      { key: 'flow', label: '日客流', cls: 'num', desc: true, value: function (r) { return r.flow; }, cell: function (r) { return U.fmtPeople(r.flow); } },
+      { key: 'fare', label: '月票款', cls: 'num', desc: true, value: function (r) { return r.fare; }, cell: function (r) { return U.fmtMoney(r.fare); } },
+      { key: 'ops', label: '车站运营', cls: 'num opt', desc: true, value: function (r) { return r.ops; }, cell: function (r) { return U.fmtMoney(r.ops); } },
+      { key: 'lv', label: '商业开发', desc: true, value: function (r) { return r.lv; }, cell: function (r) { return r.lv ? CM.TOD.LEVELS[r.lv].name + ' · ' + U.fmtMoney(r.com - r.todCost) + '/月' : '未开发'; } },
+      { key: 'net', label: '月盈亏', cls: 'num', value: function (r) { return r.net; }, cell: function (r) { return money(r.net); } },
+      { key: 'tod', label: '', cls: 'mc-act', cell: function (r) { return h('button', { class: 'btn sm', 'data-fin-tod': r.id, 'aria-expanded': st.todOpen === r.id ? 'true' : 'false', 'aria-controls': st.todOpen === r.id ? 'mc-fin-tod' : null, onclick: function (e) { e.stopPropagation(); toggleFinanceTod(r.id); } }, r.lv >= CM.TOD.LEVELS.length - 1 ? '商业详情' : (r.lv ? '升级商业' : '商业开发')); } },
+    ];
+    const financeView = function () {
+      setBar([['财务']]);
+      const tab = st.tab.finance || (st.tab.finance = 'lines'), D = CM.Finance ? CM.Finance.compute(g) : null;
+      const tabs = h('div', { class: 'mc-tools' }, h('div', { class: 'seg-ctl sm', role: 'tablist' }, [['lines', '线路收支'], ['stations', '车站收支与商业开发']].map(function (x) { return h('button', { class: tab === x[0] ? 'on' : '', role: 'tab', 'data-silent': '1', onclick: function () { if (st.tab.finance !== x[0]) sfx('tab'); st.tab.finance = x[0]; draw(); } }, x[1]); })));
+      if (!D || !D.ready) { setContent([tabs, h('section', { class: 'mc-card' }, empty('coin', '收支计算中', '线路运营后，这里按月显示每条线路、每座车站的票款、成本与盈亏。'))]); return; }
+      const T = D.tot, cost = T.train + T.station + T.todCost, net = T.fare + T.com - cost;
+      const sum = h('section', { class: 'mc-card mc-pad' }, h('div', { class: 'mc-kpis' },
+        kpi('月票款', U.fmtMoney(T.fare), '按当前客流估算'), kpi('商业收入', U.fmtMoney(T.com), '车站商业开发'), kpi('运营成本', U.fmtMoney(cost), '列车 ' + U.fmtMoney(T.train) + ' · 车站 ' + U.fmtMoney(T.station)),
+        kpi('月盈亏', (net < 0 ? '−' : '') + U.fmtMoney(Math.abs(net)), cost > 0 ? '票款覆盖 ' + U.fmtPct(T.fare / Math.max(1e-9, T.train + T.station), 0) : '', net < 0 ? 'warn' : '')),
+        h('div', { class: 'tiny muted', style: { marginTop: '6px' } }, '估算：票款按乘客公里分到线路、按进站人次 × 全网平均票价分到车站；列车运营费按车厢公里分摊；换乘站的车站运营费和商业收支在各线路间平分。实际收支以每月账目为准。'));
+      const prev = content.querySelector('.mc-fin-table');
+      const left = prev && prev.dataset.tab === tab ? prev.scrollLeft : 0;
+      const host = h('section', { class: 'mc-card mc-fin-table', 'data-tab': tab });
+      let details = null;
+      if (tab === 'lines') host.appendChild(D.lines.length ? table('finL', finLCols, D.lines, function (r) { openLine(r.lid); }, draw) : empty('route', '还没有运营线路'));
+      else {
+        host.appendChild(D.stations.length ? table('finS', finSCols, D.stations, function (r) { openStation(r.id); }, draw) : empty('metro', '还没有运营车站'));
+        if (st.todOpen && g.net.stations[st.todOpen]) details = h('section', { id: 'mc-fin-tod', class: 'mc-card' },
+          cardHead('商业开发 · ' + g.net.stations[st.todOpen].name, '投入后只能升级，不退还', h('button', { class: 'btn sm ghost', onclick: function () { toggleFinanceTod(st.todOpen); } }, '收起')),
+          h('div', { class: 'mc-pad' }, self.todBody(st.todOpen, function () { CM.Finance._c = null; draw(); })));
+      }
+      setContent([tabs, sum, details, host]);
+      host.scrollLeft = left;
+    };
+    const takeoverView = function () { setBar([['铁路接管']]); setContent(CM.Takeover.opsView(g, self, { kpi: kpi, cardHead: cardHead, empty: empty, redraw: function () { const t = content.scrollTop; draw(); content.scrollTop = t; }, toast: function (m, k) { self.toast(m, k); } })); };
     const fleetView = function () {
       setBar([['列车管理']]);
       const pg = self.page_fleet ? self.page_fleet() : null;
@@ -980,7 +1043,7 @@
         h('button', { class: 'btn sm primary', disabled: can.ok ? null : true, 'data-tip': can.ok ? null : can.reason, onclick: function () { const r = g.confirmDraft(); if (!r.ok) self.toast(r.reason || '不能确认', 'bad'); } }, ic('check', 13), '确认建设'));
       I18(draftBar);
     };
-    const VIEWS = { home: overview, lines: linesView, stations: stationsView, fleet: fleetView, line: lineDetail, station: stationDetail, fare: fareView, gates: gatesView };
+    const VIEWS = { home: overview, lines: linesView, stations: stationsView, fleet: fleetView, finance: financeView, takeover: takeoverView, line: lineDetail, station: stationDetail, fare: fareView, gates: gatesView };
     const draw = function () {
       if (CM.game !== g) { close(null, true); return; }
       const keepLive = self.live;   // 详情面板的定时刷新项不受影响；App 内容按月与操作刷新

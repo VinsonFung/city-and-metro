@@ -38,6 +38,40 @@
   const pull = function (regions, areaName, target) { return part('dev', 'regionPull', { regions: regions, areaName: areaName, target: target }); };
 
   CM.TaskPlans = {
+    ny: {
+      ny01: { base: 'direct', parts: [riders(10000)] },
+      ny05: { parts: [fac('ny_hoboken', 0.1)] },
+      ny08: { parts: [netLoad(1.2)] },
+      ny12: { parts: [fac('ny_jfk', 0.08)] },
+      ny13: { parts: [fac('ny_hudsonyards', 0.15)] },
+      'ny-g3': { parts: [fac('ny_fair39', 0.12)] },
+      'ny-sc1': { parts: [fac('ny_yankee_old', 0.1)] },
+    },
+    sy: {
+      sy01: { base: 'direct', parts: [riders(10000), cross(1, 300, '过港轨道')] },
+      sy02: { parts: [fac('sy_stadium_f', 0.1)] },
+      sy05: { parts: [fac('sy_ksa', 0.05)] },
+      sy06: { parts: [cross(1, 150, '过中港轨道'), regCov(['warringah'], '北部海滩', 0.08)] },
+      sy07: { parts: [fac('sy_barangaroo_f', 0.15)] },
+      sy09: { parts: [regCov(['hills'], '山区郡', 0.12)] },
+      sy10: { parts: [fac('sy_unsw_f', 0.15)] },
+      sy11: { parts: [cross(2, 300, '过港轨道'), netLoad(1.2)] },
+      sy12: { parts: [fac('sy_wsi', 0.08)] },
+      'sy-g5': { parts: [fac('sy_parra_cbd', 0.12)] },
+      'sy-sc2': { parts: [riders(8000)] },
+    },
+    sg: {
+      sg1: { base: 'direct', parts: [riders(8000)] },
+      sg3: { parts: [fac('sg_jurongind', 0.08)] },
+      sg4: { parts: [fac('sg_gate_wl', 0.12)] },
+      sg6: { parts: [fac('sg_changi', 0.1)] },
+      sg7: { parts: [regCov(['sengkang', 'punggol'], '盛港与榜鹅', 0.2)] },
+      sg8: { parts: [fac('sg_gate_tu', 0.1)] },
+      sg9: { parts: [fac('sg_marinabay', 0.15)] },
+      sg10: { parts: [fac('sg_rws', 0.15)] },
+      'sg-g5': { parts: [fac('sg_jld', 0.15)] },
+      'sg-sc2': { parts: [fac('sg_marinabay', 0.2)] },
+    },
     // 广州：老城与天河双中心、跨珠江、大学城、亚运
     gz: {
       h1: { base: 'direct', parts: [riders(10000)] },
@@ -96,7 +130,7 @@
       wh2: { base: 'direct', parts: [cross(1, 500, '跨长江轨道')] },
       wh3: { parts: [fac('wh_station', 0.2)] },
       wh4: { parts: [cross(2, 100, '跨江轨道')] },
-      wh5: { parts: [regCov(['hankou'], '汉口老城', 0.35), regCov(['hanyang'], '汉阳', 0.25), regCov(['wuchang'], '武昌', 0.3)], desc: '2016 年底前，步行 15 分钟可到达地铁站的人口不低于全市人口的 30%，而且汉口、汉阳、武昌三镇都要覆盖到，不能只顾一处。' },
+      wh5: { parts: [regCov(['hankou'], '汉口老城', 0.35), regCov(['hanyang'], '汉阳', 0.25), regCov(['wuchang'], '武昌', 0.3)], desc: '2016 年底前，步行 15 分钟可到达地铁站的人口不低于全市人口的 26%，而且汉口、汉阳、武昌三镇都要覆盖到，不能只顾一处。' },
       wh6: { parts: [fac('wh_sports', 0.12)] },
       wh7: { parts: [cross(4, 300, '跨江轨道')] },
       whd1: { parts: [cross(1, 500, '跨长江轨道')] },
@@ -115,7 +149,7 @@
       hk3: { parts: [regCov(['tw'], '荃湾新市镇', 0.3), tod(['tw', 'kwt'], '荃湾与葵青', 1)] },
       hk4: { base: 'direct', parts: [regCov(['central', 'wanchai', 'eastern'], '港岛北岸', 0.5)] },
       hk5: { parts: [regCov(['st'], '沙田新市镇', 0.3), tod(['st'], '沙田新市镇', 1)], desc: '连接沙田与九龙塘，穿越狮子山时可以建设山体隧道。铁路要带动新市镇：沙田的人步行能到车站，站城商业也要赚钱。' },
-      hk6: { parts: [recov(0.75)], sustain: 3, desc: '回归前，步行 15 分钟可到达地铁站的人口不低于全市人口的 50%，经营也要站得住：票款加车站商业连续 3 个月达到运营费用的 75%。' },
+      hk6: { parts: [recov(0.75)], sustain: 3, desc: '回归前，步行 15 分钟可到达地铁站的人口不低于全市人口的 47%，经营也要站得住：票款加车站商业连续 3 个月达到运营费用的 75%。' },
       hk7: { parts: [regCov(['tko'], '将军澳新市镇', 0.3), tod(['tko'], '将军澳新市镇', 1)] },
       'hk-sc1': { parts: [cars(8)] },
       'hk-sc2': { parts: [tod(['tw', 'st'], '荃湾与沙田', 2)], desc: '新市镇隔着山与市区相望，人口快速增长，进城只能挤公路与隧道。铁路加物业是香港的办法：让荃湾、沙田接近一半的居民步行就能到地铁站，并在新市镇开发站城商业，形成正收益。', tips: ['穿山隧道很贵：一条线只穿一次山', '新市镇内部站点放在屋邨最集中的地方', '客流大的新市镇车站先做商业开发，收益才能转正'] },

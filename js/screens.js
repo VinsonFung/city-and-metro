@@ -5,7 +5,7 @@
   const h = U.h, ic = CM.icon;
   const snd = function (name) { if (CM.Sound) CM.Sound.play(name); };
   const LEVEL = ['入门', '普通', '进阶', '挑战'];
-  const REGION_ORDER = ['中国内地', '中国香港', '中国台湾', '日本', '法国', '英国', '虚构'];
+  const REGION_ORDER = ['中国内地', '中国香港', '中国台湾', '日本', '新加坡', '法国', '英国', '美国', '澳大利亚', '虚构'];
 
   // 公告是否已读（本机记录；无法访问本地存储时视为已读，不打扰）
   const NEWS_KEY = 'cm1.newsSeen';
@@ -25,7 +25,7 @@
   const eraOf = function (mp) { return Math.floor(mp.cfg.START.y / 10) * 10; };
   const eraName = function (e) { return e + ' 年代'; };
   // 鼠标/笔横拖筛选，触屏保留原生惯性滚动；捕获原按钮以保留普通点击。
-  function scrollFilters(chips) {
+  UI.dragStrip = function (chips, item) {
     let drag = null, suppressClick = false;
     const edges = function () {
       const max = Math.max(0, chips.scrollWidth - chips.clientWidth);
@@ -44,7 +44,7 @@
       if (!e.isPrimary || e.button !== 0) return;
       suppressClick = false;
       if (e.pointerType === 'touch' || chips.scrollWidth <= chips.clientWidth + 1) return;
-      const owner = e.target.closest('.fchip') || chips;
+      const owner = e.target.closest(item) || chips;
       drag = { id: e.pointerId, x: e.clientX, y: e.clientY, left: chips.scrollLeft,
         scale: chips.getBoundingClientRect().width / (chips.offsetWidth || 1), owner: owner, moved: false };
       owner.setPointerCapture(e.pointerId);
@@ -77,7 +77,7 @@
       for (const button of chips.children) observer.observe(button);
     }
     requestAnimationFrame(edges);
-  }
+  };
 
 
   // ======================== 开始界面 ========================
@@ -150,7 +150,7 @@
           drawList();
         } }, o[1]));
       }
-      scrollFilters(chips);
+      UI.dragStrip(chips, '.fchip');
       return h('div', { class: 'ms2-frow' }, h('span', { class: 'ms2-fl' }, ic(icon, 14), label), chips);
     };
     const filters = h('div', { class: 'ms2-filters' },
@@ -205,7 +205,7 @@
         if (mp.tutorial) CM.newGame({ map: sel, mode: 'free', tutorial: true, name: '新手教程 · ' + mp.data.city });
         else CM.newGame({ map: sel, mode: mode, name: (free ? '自由建造' : '经营挑战') + ' · ' + mp.data.city + ' ' + yr, startYear: free && yr > y0 ? yr : null, unlockAll: free && fo.unlock });
       };
-      // 自由建造：点击按钮展开一行选项（起始年份滑块、解锁全图、开始），按钮说明显示当前选择
+      // 自由建造选项置于顶层，避免被选图面板和手机上的滚动容器裁切。
       const freeParts = function () {
         const hEnd = (mp.cfg.growth && mp.cfg.growth.histEnd) || 2020;
         fo.year = U.clamp(fo.year, y0, hEnd);
@@ -217,15 +217,42 @@
         };
         const slider = h('input', { type: 'range', min: y0, max: hEnd, step: 1, value: fo.year, 'aria-label': '起始年份', oninput: function () { fo.year = +slider.value; show(); } });
         const sw = h('button', { class: 'switch' + (fo.unlock ? ' on' : ''), role: 'switch', 'aria-checked': fo.unlock ? 'true' : 'false', 'aria-label': '解锁全图', 'data-silent': '1', onclick: function () { fo.unlock = !fo.unlock; sw.classList.toggle('on', fo.unlock); sw.setAttribute('aria-checked', fo.unlock ? 'true' : 'false'); snd('toggle'); show(); } }, h('i'));
-        const pop = h('div', { class: 'map-free' + (fo.open ? ' open' : '') },
+        const pop = h('dialog', { class: 'map-free', 'aria-label': '自由建造选项' },
           h('label', { class: 'fo-item fo-yr', 'data-tip': '晚于默认年份开局时，之前的城市发展按历史推演' }, h('span', { class: 'fo-k' }, '起始年份'), slider, yv),
           h('label', { class: 'fo-item', 'data-tip': '尚未开放的区域也可以建设地铁' }, h('span', { class: 'fo-k' }, '解锁全图'), sw),
-          h('button', { class: 'btn primary fo-go', onclick: function () { start('free'); } }, ic('play', 14), '开始'));
-        const btn = h('button', { class: 'map-mode free-toggle' + (fo.open ? ' open' : ''), 'aria-expanded': fo.open ? 'true' : 'false', 'data-silent': '1',
-          onclick: function () { fo.open = !fo.open; btn.classList.toggle('open', fo.open); pop.classList.toggle('open', fo.open); btn.setAttribute('aria-expanded', fo.open ? 'true' : 'false'); snd(fo.open ? 'open' : 'close'); } },
+          h('button', { class: 'btn primary fo-go', onclick: function () { pop.close(); start('free'); } }, ic('play', 14), '开始'));
+        const btn = h('button', { class: 'map-mode free-toggle', 'aria-expanded': 'false', 'aria-haspopup': 'dialog', 'data-silent': '1',
+          onclick: function () {
+            const r = btn.getBoundingClientRect();
+            pop.style.setProperty('--free-left', r.left + 'px');
+            pop.style.setProperty('--free-bottom', (window.innerHeight - r.top + 8) + 'px');
+            pop.showModal();
+            pop.classList.add('open');
+            btn.classList.add('open');
+            btn.setAttribute('aria-expanded', 'true');
+            snd('open');
+          } },
           h('span', { class: 'badge b-teal' }, ic('sparkle')), h('span', { class: 'grow' }, h('b', null, '自由建造'), desc), ic('chev', 16));
+        pop.addEventListener('click', function (e) {
+          if (e.target !== pop) return;
+          const r = pop.getBoundingClientRect();
+          if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) pop.close();
+        });
+        pop.addEventListener('keydown', function (e) {
+          if (e.key !== 'Escape') return;
+          e.preventDefault();
+          e.stopPropagation();
+          pop.close();
+        });
+        pop.addEventListener('close', function () {
+          if (pop.open) return;
+          pop.classList.remove('open');
+          btn.classList.remove('open');
+          btn.setAttribute('aria-expanded', 'false');
+          snd('close');
+        });
         show();
-        return [btn, pop];
+        return h('div', { class: 'free-wrap' }, btn, pop);
       };
       const modeBtn = function (mode, icon, badge, title, desc, primary) {
         return h('button', { class: 'map-mode' + (primary ? ' primary' : ''), onclick: function () { start(mode); } },
@@ -260,13 +287,13 @@
         if (col) ev.style.setProperty('--ec', col);
         tl.appendChild(ev);
       });
-      // 开始方式：经营挑战（主按钮）、自由建造（展开选项）、继续、读取存档
+      // 开始方式：经营挑战（主按钮）、自由建造（弹出选项）、继续、读取存档
       const acts = h('div', { class: 'ms2-acts' });
       if (mp.tutorial) acts.appendChild(modeBtn('free', 'play', 'b-teal', '开始教程', '主线 13 步、约 12 分钟：规划、管理与经营（不限资金）', true));
       else {
         const ch = modeBtn('challenge', 'trophy', 'b-gold', '经营挑战', '初始资金 ' + U.fmtMoney(mp.cfg.economy.startFunds, undefined, mp.cfg.money), true);
         ch.dataset.tip = '新游戏 · 拨款随城市经济变化'; acts.appendChild(ch);
-        acts.append.apply(acts, freeParts());
+        acts.appendChild(freeParts());
       }
       acts.appendChild(h('button', { class: 'map-mode sub', disabled: latest ? null : true, 'data-tip': latest ? latest.name + ' · ' + fmtDate(latest) : null, onclick: function () { if (latest) self.loadSlot(latest.slotId); } },
         h('span', { class: 'badge b-blue' }, ic('clock')), h('span', { class: 'grow' }, h('b', null, mp.tutorial ? '继续教程' : '继续游戏'), h('small', null, latest ? latest.name + ' · ' + fmtDate(latest) : '该地图还没有存档')), ic('chev', 16)));

@@ -75,10 +75,10 @@ C.useMap('hz');{
 console.log('PASS browser synchronization integration checks');
 // Outside-map airports retain demand at their city-side host node. A lone gate
 // station is insufficient: it must be served by an operating metro route.
-for(const map of ['gz','tp','sh']){
-  C.useMap(map);const city=new C.City();city.generate(12345,2024);
-  const model=new C.Model(city,{deferDemand:true});model.setYear(2024);model.buildZones();model.buildDemand();
-  const f=model.fn.list.find(f=>f.ext);assert.ok(f,map+' outside airport');
+for (const [map,id,year] of [['bj','bj_pkx',2024],['tp','tp_tpe',2024],['sy','sy_wsi',2027]]) {
+  C.useMap(map);const city=new C.City();city.generate(12345,year);
+  const model=new C.Model(city,{deferDemand:true});model.setYear(year);model.buildZones();model.buildDemand();
+  const f=model.fn.list.find(f=>f.id===id);assert.ok(f?.ext,map+' outside airport');
   const p=C.Fac.portal(f);assert.ok(p.x>=0&&p.x<city.W&&p.y>=0&&p.y<city.H);
   const alone=C.Metro.empty(),sid=C.Metro.addStation(alone,p.x,p.y,{type:'underground',size:'M',portal:f.id},city);
   assert.equal(C.Fac.extLink(f,{compiled:C.Metro.compile(alone,city)}),null,'Gate station must be served by a line');

@@ -50,6 +50,10 @@
   function lineOf(sel) { const n = net(), s = sel.kind === 'seg' ? n.segments[sel.id] : null; return s ? s.line : null; }
   function stationActs(id) {
     const n = net(), s = n.stations[id]; if (!s) return [];
+    if (s.v) return [   // 虚拟节点（v3.0）：只能移动、从这里继续绘线和拆除
+      { icon: 'route', label: '从这里绘线', fn: function (b) { popDraw(id, b); } },
+      { icon: 'cursor', label: '移动节点', fn: function () { ui.tools.setTool('edit'); ui.select({ kind: 'station', id: id }); ui.toast('拖动虚拟节点到新位置', 'info'); } },
+      { icon: 'bulldozer', label: '拆除节点', danger: true, fn: function () { ui.demolish({ kind: 'station', id: id }); } }];
     const acts = [
       { icon: 'pencil', label: '改名', fn: function (b) { popRename('station', id, b); } },
       { icon: 'route', label: '从这里绘线', fn: function (b) { popDraw(id, b); } },

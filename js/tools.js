@@ -12,7 +12,7 @@
     this.lineChoice = 'new';
     this.newLineColor = null; this.newLineSpeed = null;
     this.curveMode = CM.Settings.get('curveMode') === 'pass' ? 'pass' : 'smooth';   // 绘线线形（v2.1）
-    this.chain = null; this.bends = [];
+    this.chain = null; this.bends = []; this.virtualPoint = false;
     this.cursor = null; this.hover = null; this.hint = null; this.meas = { pts: [], done: false };
     this.ptr = null; this.drag = null;
     this.touches = new Map(); this.pinch = null; this.multiTouch = false;
@@ -27,6 +27,7 @@
     this.cancelDrag();
     if (this.ui.closeLinePicker) this.ui.closeLinePicker();
     this.tool = t;
+    this.virtualPoint = false;
     this.chain = null; this.bends = []; this.drag = null; this.hint = null; this.hover = null; this.lineLock = false; this.snapPt = null; this.lastSeg = null; this.meas = { pts: [], done: false };
     this.ui.setTooltip(null);
     this.ui.onToolChange(t);
@@ -156,7 +157,7 @@
       this.ptr.x = e.clientX; this.ptr.y = e.clientY;
     }
     if (e.target !== R.cv && !this.ptr) { this.cursorOut = true; this.hover = null; this.ui.setTooltip(null); return; }
-    this.updateHover(e.clientX, e.clientY, e.shiftKey || e.altKey);
+    this.updateHover(e.clientX, e.clientY, e.shiftKey || e.altKey || (this.tool === 'line' && this.virtualPoint));
     if (e.pointerType === 'touch') this.ui.setTooltip(null);   // 触屏没有悬停：拖动地图时不显示提示
   };
   Tools.prototype.onUp = function (e) {
@@ -165,7 +166,9 @@
     if (!g || this.ui.blocking()) { this.cancelDrag(); return; }
     this.ptr = null;
     if (this.drag) {
-      const ch = this.drag.changed && p.moved; this.drag = null; this.snapPt = null; g.endLive(ch); if (ch) sfx('place');
+      const drag = this.drag, ch = drag.changed && p.moved;
+      this.drag = null; this.snapPt = null; g.endLive(ch);
+      if (ch) { sfx('place'); if (drag.kind === 'station') this.offerMerge(drag.id); }
       if (ch || this.tool !== 'line') return;   // 绘线工具里只是点了一下控制点（没拖动）：照常当作绘线点击
     }
     if (p.extend) {
@@ -179,14 +182,14 @@
     if (p.button === 2) { this.onRight(e); return; }
     // 选择工具下点击行驶中的列车：进入跟随模式（车站优先）
     if (p.button === 0 && !p.moved && this.tool === 'select' && CM.Follow && !this.R.pickStation(e.clientX, e.clientY)) { const tr = CM.Follow.pick(e.clientX, e.clientY); if (tr) { CM.Follow.start(tr); return; } }
-    if (p.button === 0 && !p.moved) this.onClick(e.clientX, e.clientY, e.shiftKey || e.altKey, e.ctrlKey || e.metaKey || e.shiftKey);
+    if (p.button === 0 && !p.moved) this.onClick(e.clientX, e.clientY, (e.shiftKey || (this.tool === 'line' && this.virtualPoint)) || e.altKey, e.ctrlKey || e.metaKey || e.shiftKey);
   };
 
   // ---------------- 悬停与提示 ----------------
   // h：投影到该高度的水平面（v2.3）；建站与绘线按所选建设方式的高度，2D / 2.5D 下落点都在光标正下方
   Tools.prototype.world = function (sx, sy, h) { return this.R.unproject(sx, sy, h); };
   Tools.prototype.buildH = function () { return this.tool === 'line' || this.tool === 'station' ? this.R.trackH(this.buildType) : 0; };
-  // 经纬网格吸附：建站、绘线（含 Shift 转弯点）与修改工具拖动时，新落点取最近的网格交叉点；点击已有车站、在轨道上插站不吸附
+  // 经纬网格吸附：建站、绘线（含 Shift 虚拟节点）与修改工具拖动时，新落点取最近的网格交叉点；点击已有车站、在轨道上插站不吸附
   Tools.prototype.snapAt = function (w) {
     if (!CM.Grid || (this.tool !== 'station' && this.tool !== 'line' && this.tool !== 'edit')) return null;
     return CM.Grid.snap(this.R, w.x, w.y);
@@ -214,7 +217,7 @@
     let best = null, bd = Math.max(30, Math.min(48, R.z * 1.2));
     for (const p of list) {
       const gate = p.f.ext.gate;
-      if (gate && !CM.Fac.active(p.f, game.year(), game.city)) continue;
+      if ((gate || p.f.ext.hideBeforeOpen) && !CM.Fac.active(p.f, game.year(), game.city)) continue;
       let d = Math.hypot(sx - p.sx, sy - p.sy);
       const c = p.card;
       const onCard = c && sx >= c.x && sx <= c.x + c.w && sy >= c.y && sy <= c.y + c.h;
@@ -301,9 +304,10 @@
       if (train) tip = CM.Follow.describe(train);
       else if (st && net.stations[st]) {
         const s = net.stations[st];
-        tip = { title: s.name, lines: [CFG.metro.sizeName[s.size] + ' · ' + (s.lv ? M.levelsText(M.stationLevels(net, st)) + '（天地换乘）' : CFG.metro.typeName[s.type] + '车站')] };
-        if (this.tool === 'select') tip.lines.push('双击可直接改站名');
-        if (this.tool === 'demolish') this.demolishTip(tip, { kind: 'station', id: st });
+        if (s.v) { tip = { title: '虚拟节点', lines: ['不停车的线路控制点：两侧的区段可以用不同的建设方式', this.tool === 'edit' ? '拖动移动节点' : this.tool === 'demolish' ? '点击拆除：两侧区段合并，节点处变成转弯点' : '点击查看两侧区段'] }; if (this.tool === 'demolish') this.demolishTip(tip, { kind: 'station', id: st }); }
+        else tip = { title: s.name, lines: [CFG.metro.sizeName[s.size] + ' · ' + (s.lv ? M.levelsText(M.stationLevels(net, st)) + '（天地换乘）' : CFG.metro.typeName[s.type] + '车站')] };
+        if (!s.v && this.tool === 'select') tip.lines.push('双击可直接改站名');
+        if (!s.v && this.tool === 'demolish') this.demolishTip(tip, { kind: 'station', id: st });
       } else if (seg && net.segments[seg]) {
         const sg = net.segments[seg], ln = net.lines[sg.line];
         tip = { title: (ln && ln.name ? ln.name + ' · ' : '') + net.stations[sg.a].name + '—' + net.stations[sg.b].name, lines: [CFG.metro.typeName[sg.type] + '轨道'] };
@@ -532,7 +536,7 @@
     if (!A) return null;
     let end = [w.x, w.y], newSt = true;
     if (st) { end = [net.stations[st].x, net.stations[st].y]; newSt = false; }
-    const pv = this.previewGeom(end, !mod && st ? st : null);
+    const pv = this.previewGeom(end, st || null, mod && !st);
     const geo = pv.geo;
     let cost = pv.host ? 0 : M.trackCost(geo, this.buildType, g.clock.y);
     if (newSt && !mod && !seg) cost += M.stationCost(this.buildType, this.stationSize, g.clock.y);
@@ -542,10 +546,10 @@
     const envS = newSt && !mod && !seg && endC >= 0 && g.city.regions[g.city.region[endC]].scenic ? M.envStationFee(this.buildType, this.stationSize, g.clock.y) : 0;
     const herS = newSt && !mod && !seg ? M.heritageStationFee(g.city, end[0], end[1], this.buildType, this.stationSize, g.clock.y) : 0;
     cost += envT + envS + herS;
-    const lines = pv.host ? ['沿用 ' + (net.lines[pv.host.line] ? net.lines[pv.host.line].name : '') + ' 的既有轨道（共线运营），不另收建设费', '需要单独建轨道时，先 Shift+点击加一个转弯点']
+    const lines = pv.host ? ['沿用 ' + (net.lines[pv.host.line] ? net.lines[pv.host.line].name : '') + ' 的既有轨道（共线运营），不另收建设费', '需要单独建轨道时，先 Shift+点击放一个虚拟节点']
       : ['长度 ' + U.fmtKm(geo.lenM) + (geo.waterM > 1 ? '，' + (this.buildType === 'underground' ? '越江隧道 ' : '跨江桥梁 ') + U.fmtKm(geo.waterM) : '') + ' · 约 ' + U.fmtMoney(cost)];
     let bad = false;
-    if (mod) lines.unshift('松开 Shift 点击 = 连接；当前为添加转弯点');
+    if (mod && !st) lines.unshift('虚拟节点：不停车、不上下客，只收轨道费；下一段可以换一种建设方式（如穿过保护区的一段改为地下）');
     const ty = pv.host ? pv.host.type : this.buildType;
     if (geo.hillM > 1 && ty !== 'underground') { lines.push('经过山地风景区：仅可地下穿越'); bad = true; }
     if (!pv.host && (geo.herM > 1 || geo.guardM > 1)) { if (ty !== 'underground') { lines.push((geo.herHit && geo.herHit[3] === 2 ? '经过「' : '经过历史城区「') + (geo.herHit ? geo.herHit[2] : '') + '」：只能走地下'); bad = true; } else lines.push((geo.herHit && geo.herHit[3] === 2 ? '穿过「' : '穿过历史城区「') + (geo.herHit ? geo.herHit[2] : '') + '」' + U.fmtKm((geo.herM || 0) + (geo.guardM || 0)) + '：隧道要避开古建基础，造价已提高'); }
@@ -554,11 +558,11 @@
     const toPortal = CM.Fac.isPortalStation(A) || (st && CM.Fac.isPortalStation(net.stations[st]));   // 接驳口区段可穿过尚未开放的区域
     const lockedHit = geo.locked.filter(function (l) { return !toPortal || l.open == null; });
     if (lockedHit.length) { lines.push('经过未开放区域：' + lockedHit[0].name); bad = true; }
-    const minRdraw = this.drawMinRadius(); if (!mod && isFinite(geo.minRadiusM) && geo.minRadiusM < minRdraw) { lines.push('弯道过急：半径约 ' + Math.round(geo.minRadiusM) + ' m（最小 ' + minRdraw + ' m），可 Shift+点击加转弯点'); bad = true; }
+    const minRdraw = this.drawMinRadius(); if (isFinite(geo.minRadiusM) && geo.minRadiusM < minRdraw) { lines.push('弯道过急：半径约 ' + Math.round(geo.minRadiusM) + ' m（最小 ' + minRdraw + ' m），可在中途 Shift+点击放虚拟节点放缓弯道'); bad = true; }
     const turnMax = this.curveMode === 'smooth' ? CFG.metro.maxTurnArcDeg : CFG.metro.maxTurnAtStationDeg;
-    if (!mod && pv.turn > turnMax) { lines.push('在「' + A.name + '」处转向约 ' + Math.round(pv.turn) + '°（最大 ' + turnMax + '°）'); bad = true; }
+    if (!M.isVirt(A) && pv.turn > turnMax) { lines.push('在「' + A.name + '」处转向约 ' + Math.round(pv.turn) + '°（最大 ' + turnMax + '°）'); bad = true; }
     if (newSt && !mod && !st && !seg) { const chk = M.checkSite(g.city, w.x, w.y, this.buildType); if (!chk.ok) { lines.push(chk.msg); bad = true; } }
-    return { title: st ? '连接到「' + net.stations[st].name + '」' : (seg ? '连接并在该轨道上新建换乘站' : (mod ? '添加转弯点' : '新建车站并连接')), lines: lines, bad: bad };
+    return { title: st ? '连接到「' + net.stations[st].name + '」' : (seg ? (mod ? '连接并在该轨道上插入虚拟节点' : '连接并在该轨道上新建换乘站') : (mod ? '放置虚拟节点并连接' : '新建车站并连接')), lines: lines, bad: bad };
   };
   // 预览：与正式建设相同的线形规则（站台直线段、与既有线路切线连续）
   // stId：目标为既有车站时，两站之间已有其他线路的轨道且未加转弯点，则沿用该轨道（共线运营）
@@ -574,12 +578,12 @@
     if (withStation || !(hillM > 1)) parts.push('景区站按车站造价的 ' + U.fmtPct(C.envStation || 0, 0));
     return '含风景区环境保护费约 ' + U.fmtMoney(fee) + '（' + parts.join('，') + '）';
   };
-  Tools.prototype.previewGeom = function (end, stId) {
+  Tools.prototype.previewGeom = function (end, stId, virt) {
     const g = this.game(), net = this.net();
     const A = net.stations[this.chain];
     const lid = this.lineChoice !== 'new' && net.lines[this.lineChoice] ? this.lineChoice : '__new';
     const stations = Object.create(net.stations);
-    stations.__end = { id: '__end', x: end[0], y: end[1], type: this.buildType, size: this.stationSize, name: '' };
+    stations.__end = { id: '__end', x: end[0], y: end[1], type: this.buildType, size: this.stationSize, name: '', v: virt ? 1 : 0 };
     const proxy = { stations: stations, segments: net.segments, lines: net.lines };
     const host = this.coHostFor(stId);
     // 已建车站接新区段时站台方向保持不变，预览与确认后的线形一致（见 lineClick）。在副本上设定，不改草案
@@ -703,9 +707,12 @@
     this.syncDraft();
     // 线路选择框打开时直接在地图上继续点击：按当前（默认）选择继续绘制
     if (ui.linePicker && !mod) ui.closeLinePicker();
-    if (mod) {
-      if (this.chain) { this.bends.push([w.x, w.y]); sfx('soft'); }
-      else ui.toast('请先选择或放置起点车站，再添加转弯点', 'info');
+    // 虚拟节点（v3.0 玩家建议，替代原来的 Shift+点击转弯点）：绘线途中 Shift+点击空地放置虚拟节点并连过去；
+    // 还没有起点时 Shift+点击已有轨道，在轨道上插入虚拟节点（之后可以把两侧的一段单独改为地下、地面或高架）
+    const virt = !!mod && !(st && !M.isVirt(this.net().stations[st]));
+    if (mod && !this.chain && !st) {
+      if (seg) { const r = g.edit(function (net) { return M.splitSegment(net, seg, w.x, w.y, { virtual: true }, g.city); }); if (r && r.station) { sfx('soft'); ui.toast('已在轨道上插入虚拟节点：选中两侧的一段，可以单独改为地下、地面或高架', 'info'); } return; }
+      ui.toast('先选起点车站，再按住 Shift 点击放置虚拟节点；按住 Shift 点击已有轨道可以在轨道上插入虚拟节点', 'info');
       return;
     }
     if (!this.chain) {
@@ -740,7 +747,7 @@
     // 已有起点：连接
     const from = this.chain, bends = this.bends.slice();
     let target = st;
-    if (!st && !seg) {
+    if (!st && !seg && !virt) {
       const chk = this.siteCheck(w);
       if (!chk.ok) { ui.toast('不能在此建站：' + chk.msg, 'bad'); return; }
     }
@@ -749,8 +756,8 @@
       const created = lid === 'new' || !net.lines[lid];
       if (created) { lid = M.newLine(net); if (self.newLineColor) net.lines[lid].color = self.newLineColor; if (self.newLineSpeed && self.newLineSpeed !== 80) net.lines[lid].speed = self.newLineSpeed; }
       let to = st;
-      if (!to && seg) { const sp = M.splitSegment(net, seg, w.x, w.y, opts, g.city); to = sp.station; }
-      if (!to) to = M.addStation(net, w.x, w.y, opts, g.city);
+      if (!to && seg) { const sp = M.splitSegment(net, seg, w.x, w.y, virt ? { virtual: true } : opts, g.city); to = sp.station; }
+      if (!to) to = M.addStation(net, w.x, w.y, virt ? { virtual: true, type: self.buildType } : opts, g.city);
       if (to === from) return { error: '不能连接到同一车站' };
       // 共线运营：两站之间已有其他线路的轨道且没有加转弯点时，沿用该轨道的线形与建设方式
       const host = st && !bends.length ? M.coHost(net, from, to, lid) : null;
@@ -762,9 +769,9 @@
       // 平滑模式的新区段用圆弧线形（v2.6.1）；共线运营沿用既有轨道的线形。已建车站的站台方向保持不变，既有线路不会被带歪
       const newCurve = host ? host.curve : (self.curveMode === 'smooth' ? 'arc' : undefined);
       if (newCurve) net.segments[res.id].curve = newCurve;
-      if (!host) for (const sid of [from, to]) M.lockPlatform(net, g.net, sid, lid);
-      // 天地换乘：本线首次接入一座建设方式不同的既有车站时，为本线单独设站台层（如地下站增设高架站台）
-      [from, to].forEach(function (sid, i) { const s0 = net.stations[sid]; if (!served[i] && s0 && s0.type !== segType) { s0.lv = Object.assign({}, s0.lv || {}); s0.lv[lid] = segType; } });
+      if (!host) for (const sid of [from, to]) if (!M.isVirt(net.stations[sid])) M.lockPlatform(net, g.net, sid, lid);
+      // 天地换乘：本线首次接入一座建设方式不同的既有车站时，为本线单独设站台层（如地下站增设高架站台）；虚拟节点没有站台
+      [from, to].forEach(function (sid, i) { const s0 = net.stations[sid]; if (!served[i] && s0 && !s0.v && s0.type !== segType) { s0.lv = Object.assign({}, s0.lv || {}); s0.lv[lid] = segType; } });
       M.normalizeLevels(net);
       const levels = [from, to].filter(function (sid) { const s0 = net.stations[sid]; return s0 && s0.lv && s0.lv[lid]; }).map(function (sid) { const s0 = net.stations[sid]; return '「' + s0.name + '」增设' + CFG.metro.typeName[s0.lv[lid]] + '站台，与' + CFG.metro.typeName[s0.type] + '站台天地换乘'; });
       return { lid: lid, to: to, created: created, host: host && net.lines[host.line] ? net.lines[host.line].name : null, levels: levels };
@@ -861,6 +868,25 @@
     if (!best) { const st = this.R.pickStation(sx, sy); if (st && this.ui.selection && this.ui.selection.kind === 'station' && this.ui.selection.id === st) { const so = this.net().stations[st]; best = { kind: 'station', id: st, h: so ? this.R.trackH(so.type) : 0 }; } }
     return best ? Object.assign({}, best) : null;
   };
+  // 移动车站后与另一座车站几乎重叠（约 110 m 内）时，询问是否合并为换乘站（v3.1 玩家建议）；不合并则保留移动结果（站距冲突照常提示）
+  Tools.prototype.mergeTarget = function (id) {
+    const g = this.game(), net = g && g.draft ? g.draft.net : null, s = net && net.stations[id]; if (!s) return null;
+    let best = null, bd = 110 / CFG.CELL_M;
+    for (const o in net.stations) { if (o === id || !M.canMerge(net, id, o)) continue; const t = net.stations[o], d = Math.hypot(t.x - s.x, t.y - s.y); if (d < bd) { bd = d; best = o; } }
+    return best;
+  };
+  Tools.prototype.offerMerge = function (id) {
+    const g = this.game(), ui = this.ui, into = this.mergeTarget(id); if (!into) return;
+    const net = g.draft.net, A = net.stations[id], B = net.stations[into];
+    const la = M.stationLines(net, id).map(function (l) { return net.lines[l] ? net.lines[l].name : ''; }).filter(Boolean), lb = M.stationLines(net, into).map(function (l) { return net.lines[l] ? net.lines[l].name : ''; }).filter(Boolean);
+    const all = Array.from(new Set(lb.concat(la)));
+    const h = U.h, msg = h('span', null, '「' + A.name + '」移到了「' + B.name + '」旁边。', '合并后两站成为同一座换乘站，沿用「' + B.name + '」的站名。', all.length > 1 ? all.join('、') + ' 在此换乘。' : '', '合并进入建设草案，可以撤销。');
+    ui.confirm('合并为换乘站？', msg, '合并为换乘站', function () {
+      const r = g.edit(function (n) { return M.mergeStations(n, id, into); });
+      if (r && r.error) { ui.toast(r.error, 'bad'); return; }
+      sfx('place'); ui.select({ kind: 'station', id: into }); ui.toast('已合并为换乘站「' + B.name + '」', 'good');
+    }, false, 'route');
+  };
   Tools.prototype.dragTo = function (sx, sy, shiftKey) {
     const g = this.game(), d = this.drag;
     let w = this.world(sx, sy, d.h || 0);
@@ -897,9 +923,13 @@
       // 文本框内 Esc 只取消编辑（移出焦点）；滑块、复选框、下拉框等控件上的 Esc 按全局关闭处理
       const textual = tag === 'TEXTAREA' || t.isContentEditable || (tag === 'INPUT' && /^(text|search|number|email|password|url|tel)$/i.test(t.type || 'text'));
       t.blur();
-      if (textual) return;
+      if (textual) { e.preventDefault(); return; }
     }
-    if (!g || this.ui.blocking()) { this.keys.clear(); this.keyMods = {}; if (e.key === 'Escape') this.ui.escape(); return; }
+    if (!g || this.ui.blocking()) {
+      this.keys.clear(); this.keyMods = {};
+      if (e.key === 'Escape') { e.preventDefault(); this.ui.escape(); }
+      return;
+    }
     const esc = e.key === 'Escape';
     if (esc) {
       e.preventDefault();
@@ -968,28 +998,33 @@
     e.preventDefault();
   };
   Tools.prototype.escape = function () {
-    const ui = this.ui;
-    // 快捷操作的气泡或右键菜单打开时，Esc 只关闭它们
+    const ui = this.ui, g = this.game();
+    // 1. 快捷气泡、右键菜单、下拉菜单、线路选择框
     if (CM.Quick && CM.Quick.busy()) { CM.Quick.close(); return; }
-    if (this.tool === 'measure') { if (this.meas.pts.length) this.clearMeasure(); else this.setTool('select'); return; }
-    if (this.tool === 'demolish' && (ui.multi || this.boxSel)) { this.cancelDrag(); if (ui.multi) ui.clearMulti(); return; }
-    // 依次收起：图层面板、搜索、右侧面板（指标、任务等；指标自带的图层随之恢复）、仍开着的图层——都不暂停；
-    // 正在建设（非选择工具）时按原规则处理
+    if (ui.dropdown) { ui.closeMenu(); return; }
+    if (ui.linePicker) { ui.closeLinePicker(); return; }
+    if (Object.values(ui.timeOptions).some(function (opt) { return !opt.menu.classList.contains('off'); })) { ui.closeTimeOptions(); return; }
+    // 2. 正在进行的操作：拖动控制点或框选、本次绘线、拆除多选、测距的点
+    if (this.drag || this.boxSel || (g && g.draft && g.draft.liveSnap)) { this.cancelDrag(); return; }
+    if (this.tool === 'line' && (this.chain || this.bends.length)) { this.endChain(); return; }
+    if (this.tool === 'demolish' && ui.multi) { ui.clearMulti(); return; }
+    if (this.tool === 'measure' && this.meas.pts.length) { this.clearMeasure(); return; }
+    // 3. 图层面板与搜索
     if (ui.layerPanelOpen()) { ui.toggleLayerPanel(false); return; }
     if (ui.searchEl) { ui.closeSearch(); return; }
-    if (this.tool === 'select' && !ui.dropdown) {
-      if (ui.stack.length && !ui.right.classList.contains('closed')) { ui.closePanel(); return; }
-      if (ui.layer !== 'none') { ui.setLayer('none'); return; }
-    }
+    // 4. 退出建设工具（回到选择）
+    if (this.tool !== 'select') { this.setTool('select'); return; }
+    // 5. 跟随、高亮、右侧面板与选中、分析图层
+    if (CM.Follow && CM.Follow.active()) { CM.Follow.stop(); return; }
+    if (this.R.hl) { this.R.setHighlight(null); return; }
+    if (ui.stack.length && !ui.right.classList.contains('closed')) { ui.closePanel(); return; }
+    if (ui.multi) { ui.clearMulti(); return; }
+    if (ui.selection) { ui.select(null); return; }
+    if (ui.layer !== 'none') { ui.setLayer('none'); return; }
+    // 6. 都没有了：暂停并打开菜单
     ui.setSpeed(0);
     this.keys.clear(); this.keyMods = {};
-    // 再次按 Esc 只收起菜单，保持暂停；绘线和拖动退出时保留已形成的草案。
-    if (ui.dropdown) { ui.closeMenu(); return; }
-    this.cancelDrag();
-    if (this.tool === 'line') this.endChain(true);
-    if (this.tool !== 'select') this.setTool('select');
-    if (CM.Follow && CM.Follow.active()) CM.Follow.stop();
-    ui.closeLinePicker(); ui.closeSearch(); ui.setTooltip(null);
+    ui.setTooltip(null);
     ui.showMenu(ui.hbtns.menu);
   };
   // 每帧：键盘平移
@@ -1109,6 +1144,18 @@
     if (this.tool === 'measure') this.drawMeasure(ctx, R);
     const cur = this.cursor;
     this.drawLockHover(ctx, R, performance.now());
+    // 拖动车站到另一座车站旁：目标车站外画一圈并提示松开可合并为换乘站
+    if (this.drag && this.drag.kind === 'station') {
+      const tg = this.mergeTarget(this.drag.id), ts = tg && net.stations[tg];
+      if (ts) {
+        const p = R.P(ts.x, ts.y, R.trackH ? R.trackH(ts.type) : 0), r = 16 + 2 * Math.sin(performance.now() / 180);
+        ctx.save(); ctx.strokeStyle = 'rgba(46,160,96,0.95)'; ctx.lineWidth = 3; ctx.setLineDash([6, 4]); ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+        const txt = CM.I18n && CM.I18n.text ? CM.I18n.text('松开可合并为换乘站') : '松开可合并为换乘站';
+        ctx.font = '600 12px system-ui, sans-serif'; const w = ctx.measureText(txt).width + 16;
+        ctx.fillStyle = 'rgba(46,160,96,0.95)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(p.x - w / 2, p.y - r - 30, w, 22, 11); else ctx.rect(p.x - w / 2, p.y - r - 30, w, 22); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, p.x, p.y - r - 19); ctx.restore();
+      }
+    }
     // 网格吸附：缩放后间隔会变，按当前鼠标位置重新取交叉点，并画出淡色十字
     if (cur && !this.drag && !this.portalHover && this.snapWanted(this.hover && this.hover.kind === 'station', this.hover && this.hover.kind === 'seg', cur.mod)) {
       const r = this.snapPick(this.world(cur.sx, cur.sy), cur.mod), sp = r && r.sp;
@@ -1119,7 +1166,7 @@
     if (this.tool === 'line' && this.chain && net.stations[this.chain] && cur) {
       const st = this.hover && this.hover.kind === 'station' ? net.stations[this.hover.id] : null;
       const end = st ? [st.x, st.y] : [cur.x, cur.y];
-      const pv0 = this.previewGeom(end, st && !cur.mod ? st.id : null), geo = pv0.geo, hb = R.trackH(pv0.host ? pv0.host.type : this.buildType);
+      const pv0 = this.previewGeom(end, st ? st.id : null, cur.mod && !st), geo = pv0.geo, hb = R.trackH(pv0.host ? pv0.host.type : this.buildType);
       const lid = this.lineChoice;
       const col = net.lines[lid] ? AX.line(net.lines[lid]) : this.nextLineColor();
       ctx.lineJoin = 'round'; ctx.lineCap = 'round';
@@ -1130,7 +1177,7 @@
       // 预览线形中弯道过急的部分直接标红（v2.3），与确认建设时的检查一致
       for (const run of M.tightStretch(geo, this.drawMinRadius()).stretch) { polyPath(ctx, R, run, hb); ctx.strokeStyle = 'rgba(214,48,49,0.95)'; ctx.lineWidth = R.lineWidthPx() + 2; ctx.stroke(); }
       for (const b of this.bends) { const q = R.P(b[0], b[1], hb); ctx.fillStyle = '#fff'; ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(q.x, q.y, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
-      if (!st) { const q = R.P(end[0], end[1], hb); ctx.strokeStyle = this.hint && this.hint.bad ? AX.color('#d63031') : col; ctx.lineWidth = 2.5; ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.beginPath(); ctx.arc(q.x, q.y, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); if (!cur.mod) this.drawNameTag(ctx, R, end[0], end[1], hb, this.hint && this.hint.bad); }
+      if (!st) { const q = R.P(end[0], end[1], hb); ctx.strokeStyle = this.hint && this.hint.bad ? AX.color('#d63031') : col; ctx.lineWidth = 2.5; ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.beginPath(); if (cur.mod) { ctx.moveTo(q.x, q.y - 6); ctx.lineTo(q.x + 6, q.y); ctx.lineTo(q.x, q.y + 6); ctx.lineTo(q.x - 6, q.y); ctx.closePath(); } else ctx.arc(q.x, q.y, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); if (!cur.mod) this.drawNameTag(ctx, R, end[0], end[1], hb, this.hint && this.hint.bad); }   // Shift：虚拟节点画成菱形
     }
     // 绘线的第一座车站：还没有起点时，光标处即将放下的车站
     if (this.tool === 'line' && !this.chain && cur && !this.drag && !(this.hover && this.hover.kind === 'station')) {

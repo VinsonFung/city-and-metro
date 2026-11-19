@@ -4,17 +4,24 @@ export async function captureReadme({E,send,until,screenshot,delay,settle,close,
  await send('Emulation.setDeviceMetricsOverride',{width:1600,height:1000,deviceScaleFactor:1,mobile:false});await send('Emulation.setTouchEmulationEnabled',{enabled:false});await send('Page.bringToFront');
  await E('CM.Settings.set("language","zh-CN");CM.Settings.set("uiScale",1);CM.Settings.set("theme","light");CM.Settings.set("gfx","high");CM.Settings.set("labels","all");CM.Settings.set("immersive",false);CM.Settings.set("autosave",false);true');await E('document.fonts.ready.then(()=>true)');
  const warm=async()=>{await delay(700);await until('CM.R.sharpReady()',120000);await delay(350)};
- // Hong Kong remains the selected example, while the new twelve-map catalogue is visible.
+ // Keep Hong Kong selected and verify every registered map is available.
  await close();await E('CM.endGame();CM.ui.showMapSelect("hk");true');await until('!!document.querySelector(".ms2-poster img")&&[...document.querySelectorAll(".ms2 img")].every(e=>e.complete&&e.naturalWidth>0)',120000);await settle();
- const map=await E('({count:CM.MAP_ORDER.length,text:document.querySelector(".ms2-count").textContent,selected:document.querySelector(".ms2-item.on")?.dataset.id})');
- if(map.count!==12)throw Error('README map catalogue is not current');await screenshot('screenshot-map-selection');report.screenshots.push({file:'screenshot-map-selection.png',...map});console.log('CAPTURE current twelve-map catalogue');
+ const map=await E('({expected:CM.MAP_ORDER,shown:[...document.querySelectorAll(".ms2-item:not(.hidden-el)")].map(el=>el.dataset.id),text:document.querySelector(".ms2-count").textContent,selected:document.querySelector(".ms2-item.on")?.dataset.id})');
+ if(!map.expected.length||map.shown.length!==map.expected.length||map.expected.some((id,i)=>id!==map.shown[i])||map.selected!=='hk')throw Error('README map catalogue did not show every map with Hong Kong selected');
+ await screenshot('screenshot-map-selection');report.screenshots.push({file:'screenshot-map-selection.png',count:map.shown.length,text:map.text,selected:map.selected});console.log('CAPTURE catalogue with '+map.shown.length+' maps');
  // The inherited Ginza Line is shown at its real 1950 starting state.
  await E('CM.newGame({map:"tk",mode:"challenge",seed:19500101});true');await until('!CM.isLoading()&&CM.game?.mapId==="tk"&&!CM.game.pending',180000);await close();
  await E('CM.game.setSpeed(0);CM.R.cam.view=CM.R.cam.t=0;CM.R.cam.under=CM.R.cam.tu=0;CM.R.computeTransform();var s=CM.game.compiled.stations;CM.ui.fitBox(Math.min(...s.map(s=>s.x))-10,Math.min(...s.map(s=>s.y))-8,Math.max(...s.map(s=>s.x))+12,Math.max(...s.map(s=>s.y))+10,24);CM.ui.clearCelebrations();true');await warm();await until('!CM.R.cam.fly');
  const tokyo=await E('({map:CM.game.mapId,clock:{...CM.game.clock},stations:CM.game.compiled.stations.length,lines:Object.keys(CM.game.net.lines).length,view:CM.R.cam.t})');if(tokyo.stations!==18||tokyo.clock.y!==1950||tokyo.view!==0)throw Error('Unexpected Tokyo fixture');await settle();await screenshot('screenshot-tokyo-day');report.screenshots.push({file:'screenshot-tokyo-day.png',...tokyo});console.log('CAPTURE Tokyo 1950, 18 inherited stations');
- // Use the built-in Guangzhou menu demonstration, retaining its 2012 city and four lines.
- await E('CM.endGame();CM.ui.closeScreen();CM.Settings.set("theme","dark");CM.Settings.set("labels","none");window.readmeCamera=CM.R.updateCamera;CM.R.updateCamera=function(dt){this.cam.cx=49;this.cam.cy=83;this.cam.zoom=this.cam.tz=18;this.cam.view=this.cam.t=1;this.cam.fly=null;this.cam.anchor=null;return readmeCamera.call(this,dt)};true');await warm();await settle();
- const night=await E('({preview:CM.R.game.preview,year:CM.R.game.clock.y,theme:CM.R.themeName,view:CM.R.cam.t,stations:CM.R.game.compiled.stations.length,lines:Object.keys(CM.R.game.net.lines).length})');if(!night.preview||night.year!==2012||night.theme!=='dark'||night.view!==1)throw Error('Unexpected night demonstration');await screenshot('screenshot-guangzhou-night');report.screenshots.push({file:'screenshot-guangzhou-night.png',...night});await E('CM.R.updateCamera=readmeCamera;CM.Settings.set("theme","light");CM.Settings.set("labels","all");true');console.log('CAPTURE Guangzhou 2012 built-in night demonstration');
+ // Capture the Guangzhou night backdrop without the main menu overlay.
+ await E('CM.endGame();CM.ui.closeScreen();CM.Settings.set("theme","dark");true');
+ await E('new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(true);img.onerror=reject;img.src="img/menu-bg-dark.webp"})');
+ await until('document.documentElement.dataset.theme==="dark" && !document.querySelector("#menubg").classList.contains("off")');
+ await delay(850);
+ await screenshot('screenshot-guangzhou-night');
+ report.screenshots.push({file:'screenshot-guangzhou-night.png',map:'gz',theme:'dark'});
+ await E('CM.Settings.set("theme","light");CM.Settings.set("labels","all");true');
+ console.log('CAPTURE Guangzhou night backdrop');
  // Build a legal five-station line, then advance two years using the normal settlement path.
  await E('CM.newGame({map:"gz",mode:"free",startYear:2000,seed:20000101});true');await until('!CM.isLoading()&&CM.game?.mapId==="gz"&&!CM.game.pending',180000);await close();
  await E(`(()=>{const g=CM.game,M=CM.Metro,c=g.city;g.setSpeed(0);let best=null;
