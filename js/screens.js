@@ -9,10 +9,10 @@
 
   // 公告是否已读（本机记录；无法访问本地存储时视为已读，不打扰）
   const NEWS_KEY = 'cm1.newsSeen';
-  // 按大小版本比较：修订版（如 2.6.1）没有新公告，不提示
-  const newsVer = function (v) { return String(v || '').split('.').slice(0, 2).join('.'); };
-  const newsSeen = function () { try { return newsVer(localStorage.getItem(NEWS_KEY)) === newsVer(CFG.GAME_VERSION); } catch (e) { return true; } };
-  const markNews = function () { try { localStorage.setItem(NEWS_KEY, CFG.GAME_VERSION); } catch (e) { /* ignore */ } };
+  // 只有新增公告才显示未读提示，修订版也可单列公告。
+  const newsVersion = function () { return CM.NEWS?.[0]?.v || CFG.GAME_VERSION; };
+  const newsSeen = function () { try { return localStorage.getItem(NEWS_KEY) === newsVersion(); } catch (e) { return true; } };
+  const markNews = function () { try { localStorage.setItem(NEWS_KEY, newsVersion()); } catch (e) { /* ignore */ } };
   UI.prototype.newsUnread = function () { return !newsSeen(); };
 
   // 难度：点 + 文字

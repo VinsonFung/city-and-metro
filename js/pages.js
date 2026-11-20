@@ -350,6 +350,13 @@
   // 不停车的线路控制点：列出连到这里的各段轨道，可以逐段改建设方式（如把穿过保护区的一段改为地下），也可以拆除节点（两侧区段合并，节点处变成转弯点）
   UI.prototype.page_vnode = function (id) {
     const g = this.g(), self = this, net = g.draft ? g.draft.net : g.net, s = net.stations[id], el = h('div');
+    const ends = this.tools.endLines(id);
+    if (ends.length) el.appendChild(h('button', { class: 'btn sm primary', 'data-resume-drawing': '', style: { marginBottom: '6px' }, onclick: function () {
+      const lid = self.tools.lineForStart(id);
+      self.closePanel();
+      self.startDraw(id, lid);
+      if (ends.length > 1) self.showLinePicker(id, ends);
+    } }, '继续绘线'));
     el.appendChild(h('div', { class: 'note' }, '虚拟节点是线路上不停车、不上下客的控制点：两侧的区段可以用不同的建设方式，可以固定绕开房屋的走向，几条线路也可以在虚拟节点之间共用轨道、在节点处分开。只收轨道费。'));
     const segs = []; for (const k in net.segments) { const sg = net.segments[k]; if (sg.a === id || sg.b === id) segs.push(sg); }
     const box = h('div');
@@ -360,7 +367,7 @@
       box.appendChild(h('div', { class: 'field' }, h('label', null, h('span', { class: 'tag', style: L ? { background: AX.line(L) + '22', color: AX.line(L) } : null }, L ? L.name : '—'), ' 往' + (other ? other.name : '') + ' · ' + U.fmtKm(geo.lenM)), tc));
     }
     el.appendChild(this.sec('vn-segs', '连到这里的轨道', segs.length + ' 段', function () { return box; }));
-    el.appendChild(h('div', { class: 'row', style: { marginTop: '8px' } },
+    el.appendChild(h('div', { class: 'row', style: { marginTop: '8px', flexWrap: 'wrap' } },
       h('button', { class: 'btn sm', onclick: function () { self.tools.setTool('edit'); self.select({ kind: 'station', id: id }); } }, '移动节点'),
       h('button', { class: 'btn sm danger', onclick: function () { self.demolish({ kind: 'station', id: id }); } }, '拆除节点')));
     return { title: '虚拟节点', el: el, highlightLine: null };
@@ -652,7 +659,7 @@
     const g = this.g(), T = this.tools, net = g.draft ? g.draft.net : g.net, s = net.stations[sid];
     if (!s) return;
     T.setTool('line');
-    T.lineChoice = lid; T.chain = sid; T.bends = [];
+    T.lineChoice = lid; T.chain = sid; T.bends = []; T.pointMode = '';
     T.lineLock = true;
     this.renderToolOpts();
     const ln = lid !== 'new' ? net.lines[lid] : null;
@@ -2446,7 +2453,8 @@
       'Y 字支线：在同一处可设「主线」方向和「起点端」（主干从哪头发车）。',
       '共线：连接已有轨道的两站、不加转弯点，就免费沿用；端点站在另一条线上时，可一键「并线」沿它的轨道继续开。',
       '平滑曲线：工具条「线形」选「平滑」，画好后用「修改」工具拖动区段中点的菱形加控制柄。',
-      '虚拟节点：绘线时按住 Shift 点击空地，放一个不停车的节点并连过去；下一段可以换一种建设方式（如穿过保护区的一段走地下），两条线也可以在虚拟节点之间共用轨道、在节点处分开。还没开始画时按住 Shift 点击已有轨道，可以在轨道上插入虚拟节点。',
+      '转弯点：选好起点后，按住 Ctrl 点击或启用「转弯点」按钮在地图上放置。转弯点会随下一次连线写入区段线形。',
+      '虚拟节点：绘线时按住 Shift 点击或启用「虚拟节点」按钮放置不停车的节点，可分段改变建设方式。从未完工的虚拟端点可以继续原线路。',
       '改名、改色：右键车站或线路，或点详情标题。'],
       actions: [] },
     { id: 'time', icon: 'clock', title: '时间太慢，或想看高峰', steps: [
@@ -2490,7 +2498,7 @@
     // 键位取自「设置 → 键位」（可自定义）
     const K = CM.Keys, kk = function () { return Array.prototype.map.call(arguments, function (id) { return K.hint(id) || '—'; }).join(' / '); };
     const rows = [['鼠标左键拖动 / ' + kk('cam.up', 'cam.left', 'cam.down', 'cam.right'), '平移地图'], ['滚轮 / ' + kk('cam.zoomIn', 'cam.zoomOut'), '缩放'],
-      [kk('tool.select', 'tool.station', 'tool.line', 'tool.edit', 'tool.demolish'), '选择 / 建站 / 绘线 / 修改 / 拆除'], ['Shift + 点击（绘线）', '放置虚拟节点（不停车）'],
+      [kk('tool.select', 'tool.station', 'tool.line', 'tool.edit', 'tool.demolish'), '选择 / 建站 / 绘线 / 修改 / 拆除'], ['Ctrl + 点击（绘线）', '添加转弯点'], ['Shift + 点击（绘线）', '放置虚拟节点（不停车）'],
       ['右键 / ' + kk('build.finish') + '（绘线）', '结束本次绘线（下次从线路端点开始会自动延长该线路）'], ['1–9（线路选择框）', '起点同时是多条线路的端点时，选择要延长的线路'],
       [kk('build.back'), '撤销转弯点或草案上一步'], [kk('build.undo', 'build.redo'), '撤销 / 重做草案'], [kk('build.confirm'), '确认建设草案'],
       ['Ctrl / Shift + 点击（选择、修改）', '多选车站或轨道，批量修改'], ['拖动线路端点的「+」', '直接延长所选线路'],

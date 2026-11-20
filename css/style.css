@@ -1841,6 +1841,9 @@ html.vt-theme *, html.vt-theme *::before, html.vt-theme *::after { transition: n
   #rightPanel .p-head .badge { width: 26px; height: 26px; }
   #rightPanel .p-body { padding: 8px; }
   #rightPanel .ptabs { position: static; }
+  #buildStack { gap: 4px; }
+  #draftbar, #toolopts { padding-block: 3px; }
+  #draftbar .db-main { padding-block: 2px; }
   #app:has(#rightPanel:not(.closed)) #toolopts { display: none; }
   #app:has(#rightPanel:not(.closed)) #draftbar .db-main .cost { display: none; }
   #app:has(#rightPanel:not(.closed)) #draftbar { flex-wrap: nowrap; }

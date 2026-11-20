@@ -140,7 +140,7 @@
     CM.releaseGeos();
     showMenuBg(false);
     CM.agents.reset();
-    tools.tool = 'select'; tools.chain = null; tools.bends = []; tools.virtualPoint = false; tools.lineChoice = 'new';
+    tools.tool = 'select'; tools.chain = null; tools.bends = []; tools.pointMode = ''; tools.lineChoice = 'new';
     tools.newLineColor = null; tools.newLineSpeed = null; tools.clearMeasure();
     tools.drag = tools.ptr = tools.cursor = tools.hover = tools.hint = tools.snapPt = tools.mouse = tools.portalHover = null;
     tools.lineLock = false; tools.keys.clear(); tools.keyMods = {};
@@ -308,7 +308,7 @@
     // 清掉游戏里的视图状态：分析图层、选中与高亮、建设工具、相机飞行与缩放锚点、地下视图、特效
     ui.layer = 'none'; R.layer = 'none'; R.heatKey = ''; R.layerFade = 0;
     ui.selection = null; ui.highlightLine = null; ui.multi = null;
-    tools.tool = 'select'; tools.chain = null; tools.bends = []; tools.virtualPoint = false; tools.drag = null; tools.ptr = null; tools.hover = null; tools.keys.clear(); tools.resetTouches();
+    tools.tool = 'select'; tools.chain = null; tools.bends = []; tools.pointMode = ''; tools.drag = null; tools.ptr = null; tools.hover = null; tools.keys.clear(); tools.resetTouches();
     R.cv.style.cursor = '';
     R.setGame(null);
     R.fx = [];

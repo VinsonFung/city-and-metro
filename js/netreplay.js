@@ -76,6 +76,7 @@
       const R = A.computeRoutes(g, net, [], A.spacing());
       F.real = R.lay.st.slice();   // 这一帧真正排了版的车站（江海底图按它们和线路交叉点变形）
       F.virt = (R.base.virt || []).map(function (v) { return { g: v.g, p: [v.p[0] + R.base.ox, v.p[1] + R.base.oy] }; });
+      F.magnify = R.base.warp || null;
       R.lay.st.forEach(function (sid, i) { const p = R.positions[i], anch = R.stationAnchors.get(sid), G = A.hubGeom(p[0], p[1], anch); F.pos.set(sid, [p[0], p[1]]); F.hub.set(sid, G); });
       for (const tr of R.tracks) F.route.set(tr.seg.id, resample(tr.screen));
     });
@@ -221,7 +222,7 @@
       const G = [], P = [];
       for (const sid of F.real) { const s = H.stations[sid]; G.push([s.x, s.y]); P.push(F.pos.get(sid)); }
       for (const v of F.virt) { G.push(v.g); P.push(v.p); }
-      F.water = G.length >= 2 ? A.waterLayer(G, P, A.medianSpacing(lenses)) : null;
+      F.water = G.length >= 2 ? A.waterLayer(G, P, A.medianSpacing(lenses), F.magnify) : null;
     }
     let km = new Map(), kmOK = true;
     try {

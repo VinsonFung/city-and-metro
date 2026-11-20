@@ -537,7 +537,7 @@
     if (tp.nodes.length === tp.stations.length) { for (const rt of tp.routes) rt.nodes = rt.st; return tp; }
     for (const rt of tp.routes) {
       rt.nodes = rt.st;
-      if (!rt.loop && (M.isVirt(net.stations[rt.st[0]]) || M.isVirt(net.stations[rt.st[rt.st.length - 1]]))) return { topo: 'invalid', reason: '线路不能在虚拟节点结束（端点要放在车站上）', routes: [], stations: tp.stations, nodes: tp.nodes, adj: tp.adj };
+      if (!rt.loop && (M.isVirt(net.stations[rt.st[0]]) || M.isVirt(net.stations[rt.st[rt.st.length - 1]]))) return { topo: 'invalid', reason: '线路不能在虚拟节点结束（端点要放在车站上）', virtualEnd: true, routes: [], stations: tp.stations, nodes: tp.nodes, adj: tp.adj };
       rt.st = realOf(net, rt.st);
       if (rt.st.length < 2) return { topo: 'invalid', reason: '线路上至少要有两座车站', routes: [], stations: tp.stations, nodes: tp.nodes, adj: tp.adj };
     }
@@ -1892,7 +1892,7 @@
     const A = net.stations[s.a], B = net.stations[s.b];
     if (k < 0) {
       const nearSt = U.dist(tp[0], tp[1], A.x, A.y) < U.dist(tp[0], tp[1], B.x, B.y) ? A : B;
-      out.text = '弯道紧挨「' + nearSt.name + '」的站台端：车站两侧约 ' + CFG.metro.platformHalfM + ' m 必须是直线，可以在区间中部 Shift+点击加一个转弯点，让线路先直行出站再转弯，或拉开两站距离。';
+      out.text = '弯道紧挨「' + nearSt.name + '」的站台端：车站两侧约 ' + CFG.metro.platformHalfM + ' m 必须是直线，可以在区间中部 Ctrl+点击加一个转弯点，让线路先直行出站再转弯，或拉开两站距离。';
       return out;
     }
     // 试算：把第 k 个转弯点分别朝弯道内侧（相邻控制点连线的中点）与外侧移动，找最小的满足距离

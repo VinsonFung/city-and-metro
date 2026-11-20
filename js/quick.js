@@ -233,7 +233,7 @@
     const n = net(), rows = [];
     for (const lid of M.stationLines(n, sid)) {
       const tp = M.lineTopo(n, lid), L = n.lines[lid];
-      if (tp.topo === 'loop' || tp.topo === 'invalid' || !tp.adj || !tp.adj.get(sid)) continue;
+      if (tp.topo === 'loop' || (tp.topo === 'invalid' && !tp.virtualEnd) || !tp.adj?.get(sid)) continue;
       const branch = tp.adj.get(sid).length >= 2;
       rows.push([L, branch ? '画 ' + L.name + ' 支线' : '延长 ' + L.name, function () { closePop(); ui.startDraw(sid, lid, branch); }]);
     }

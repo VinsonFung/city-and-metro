@@ -37,7 +37,7 @@ export async function runSettlementChecks({ E, until, fs, path, task, close, tap
     const from = await E('CM.game.ym()');
     if (click) {
       await E('CM.ui.toggleTimeOptions("jump",true);true');
-      await tap('[data-act="jumpYear"]');
+      await tap(months === 3 ? '[data-act="jumpQuarter"]' : '[data-act="jumpYear"]');
     } else check(await E('CM.game.startJump(' + months + ')'), 'Advance did not start');
     await until(settled, 300000);
     const data = await js(() => {
@@ -62,6 +62,30 @@ export async function runSettlementChecks({ E, until, fs, path, task, close, tap
   await until(gameReady + ' && CM.game !== window.settlementBeforeReload', 180000);
   check(await E('CM.game.ym()===' + save.ym + ' && CM.game.econ.funds===' + save.funds), 'The first restore changed saved time or money');
   await close();
+
+  if (process.env.CM_SETTLEMENT_FLEET_REGRESSION) {
+    const ledgerLength = await js(() => {
+      const g = CM.game, F = CM.Fleet;
+      g.fleet.autoAlloc = g.fleet.autoBuy = true;
+      const sale = F.sell(g, g.fleet.trains.map(train => train.id));
+      if (!sale.ok) throw Error('Could not remove the fixture fleet');
+      return g.econ.ledger.length;
+    });
+    await until('CM.game.model.trafficReady()', 180000);
+    check(await E('CM.Fleet.allocPlan(CM.game).unmet > 0'), 'Fleet shortage did not reach the purchase branch');
+    await advance(3, true);
+    await advance(12, true);
+    const ledger = await E(`(()=>{const g=CM.game, rows=g.econ.ledger.slice(${ledgerLength});return {
+      count:rows.length, grants:rows.every(r=>r.grant>0 && r.days===CM.U.daysInMonth(r.y,r.m)),
+      currentGrant:g.econ.cur.grant, bought:g.fleet.trains.length, purchase:rows.some(r=>r.construction>0),
+    }})()`);
+    check(ledger.count === 15 && ledger.grants && ledger.currentGrant > 0 && ledger.bought > 0 && ledger.purchase,
+      'Fleet shortage stopped the clock or monthly funding: ' + JSON.stringify(ledger));
+    console.log('PASS player-facing quarter and year buttons, automatic fleet purchase and 15 grants after loading a 30-month save');
+    report.fleetSettlement = ledger;
+    await fs.writeFile(path.join(task, 'report.json'), JSON.stringify(report));
+    return;
+  }
 
   // Simulate receipt of a real early-month reward and a rebuild just before the year jump.
   await js(() => {

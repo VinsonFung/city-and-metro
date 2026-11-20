@@ -12,12 +12,12 @@ for(const[,src]of(await readFile(new URL('index.html',root),'utf8')).matchAll(/<
 const C=c.CM,M=C.Metro,copy=v=>JSON.parse(JSON.stringify(v));
 C.UI=function(){};for(const f of ['settings','corp','fleet','netlayout','netreplay','review'])await load('js/'+f+'.js');
 const F=C.Fleet;
-assert.equal(C.CFG.GAME_VERSION,'2.9.1');assert.equal(C.CFG.RULES_REVISION,14);
+assert.equal(C.CFG.GAME_VERSION,'2.9.2');assert.equal(C.CFG.RULES_REVISION,14);
 assert.equal(C.MAP_ORDER.length,15);assert.equal(F.MODELS.length,78);
 assert.equal(F.MODELS.filter(m=>m.maps?.includes('ld')).length,11);
 assert.equal(F.MODELS.filter(m=>m.maps?.includes('sz')).length,2);
 for(const mp of Object.values(C.MAPS))assert.equal(JSON.stringify(C.Traits.validate(mp)),'[]',mp.id);
-assert.equal(C.NEWS[0].v,'2.9');assert.equal(C.NEWS[1].v,'2.8');assert.equal(C.NEWS[2].v,'2.7');assert.equal(C.NEWS[3].v,'2.6');
+assert.deepEqual(Array.from(C.NEWS.slice(0,5), n=>n.v),['2.9.2','2.9','2.8','2.7','2.6']);
 assert.ok(C.NetReplay&&!C.Desktop&&!C.Achievements);
 console.log('PASS 15 maps, 78 models, all city mechanisms and separate announcements');
 

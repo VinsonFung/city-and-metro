@@ -487,6 +487,37 @@
     }
     return { ok: true, moved: moved };
   };
+  // 月初先用闲置车，再按缺口比例补车。手动线路已由 allocPlan 排除。
+  F.autoBuy = function (g, plan) {
+    const { rows, unavailable } = F.fillCost(g, plan);
+    if (unavailable || !rows.length) return { n: 0, cost: 0, limited: false };
+    rows.sort(function (a, b) { return b.x.short / Math.max(1, b.x.need) - a.x.short / Math.max(1, a.x.need); });
+    const parts = [];
+    let n = 0, cost = 0, limited = false;
+    for (const row of rows) {
+      const { x, m, cars } = row, unit = F.price(g, m, cars, g.clock.y);
+      const budget = Math.max(0, g.econ.funds) + Math.max(0, g.econ.capex);
+      let count = g.econ.isFree() || unit <= 0 ? row.n : Math.min(row.n, Math.floor(budget / unit));
+      // 用与购买相同的金额运算收尾，避免边界处舍入让整笔订单被拒。
+      if (count > 0 && !g.econ.canAffordBuild(count * unit)) count--;
+      if (count < row.n) limited = true;
+      if (count <= 0) continue;
+      const result = F.buy(g, x.lid, x.svc, m.id, cars, count, true);
+      if (!result.ok) continue;
+      n += count;
+      cost += result.cost;
+      parts.push(x.name + ' +' + count);
+    }
+    if (n) g.logEvent({ tag: '运营', title: '自动购车 ' + n + ' 列', desc: '智能分配后仍缺车的交路按推荐车型买入：' + parts.join('、') + '，共 ' + U.fmtMoney(cost) + '。可在车队页关闭「智能分配与自动购车」。' });
+    return { n: n, cost: cost, limited: limited };
+  };
+  F.oldIds = function (g) {
+    return g.fleet ? g.fleet.trains.filter(function (t) { return ageY(g, t) > F.model(t.model).life; }).map(function (t) { return t.id; }) : [];
+  };
+  F.sellOld = function (g) {
+    const ids = F.oldIds(g);
+    return ids.length ? F.sell(g, ids) : { error: '没有超龄列车' };
+  };
   F.setMode = function (g, lid, mode) {
     const o = g.fleet.ops[lid] || (g.fleet.ops[lid] = { mode: 'auto', n: {} });
     o.mode = mode === 'manual' ? 'manual' : 'auto';

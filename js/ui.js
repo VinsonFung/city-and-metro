@@ -1231,7 +1231,7 @@
     const colorLine = T.chain && net.lines[T.lineChoice];
     const lineColor = colorLine ? colorLine.color : T.nextLineColor(true);
     const nMulti = this.multi ? this.multi.stations.size + this.multi.segs.size : 0;
-    const key = [T.tool, T.chain, T.lineChoice, T.buildType, T.stationSize, T.curveMode, T.virtualPoint, T.newLineSpeed, g.draft ? g.draft.ver : 0, g.clock.y, gridOn, snapOn, lineColor, nMulti, T.meas.pts.length].join('|');
+    const key = [T.tool, T.chain, T.lineChoice, T.buildType, T.stationSize, T.curveMode, T.pointMode, T.bends.length, T.newLineSpeed, g.draft ? g.draft.ver : 0, g.clock.y, gridOn, snapOn, lineColor, nMulti, T.meas.pts.length].join('|');
     if (key === this._toKey && !el.classList.contains('hidden')) return;
     this._toKey = key;
     const self = this, mc = CFG.metro, y = g.clock.y;
@@ -1260,7 +1260,7 @@
         const opts = [['new', T.lineName('new').replace('（新）', ''), '从「' + net.stations[T.chain].name + '」开始一条新线路（与已有线路换乘）', T.nextLineColor()]];
         for (const lid of M.stationLines(net, T.chain)) {
           const tp = M.lineTopo(net, lid), L = net.lines[lid];
-          if (tp.topo === 'loop' || tp.topo === 'invalid') continue;
+          if (tp.topo === 'loop' || (tp.topo === 'invalid' && !tp.virtualEnd)) continue;
           const end = tp.adj && tp.adj.get(T.chain) && tp.adj.get(T.chain).length === 1;
           opts.push([lid, (end ? '延长 ' : '') + L.name + (end ? '' : ' 支线'), end ? '继续延长 ' + L.name : '从这里分出 ' + L.name + ' 的支线', AX.line(L)]);
         }
@@ -1275,18 +1275,29 @@
       const colorGroup = grp(colorLine ? '线路颜色' : '新线颜色', colors);
       colorGroup.classList.add('to-color');
       colorGroup.setAttribute('data-tip', (colorLine ? '修改当前线路整条线的颜色，立即生效且不产生费用' : '为即将新建的线路选色，预览与建成后的线路使用同一颜色') + (AX.enabled() ? '；色盲辅助已开启，地图使用辅助配色，所选原色会保留' : ''));
-      // 线形（v2.1）：平滑曲线把 Shift+点击的转弯点当作控制柄；穿点为原画法，曲线逐点穿过转弯点
-      const curveCtl = grp('线形', segc(T.curveMode, [['smooth', '平滑', '平滑曲线：直线加圆弧，半径自动取最大。Shift+点击或启用虚拟节点工具可放置节点；画好后可拖动调弯'], ['pass', '穿点', '穿过转弯点：线路逐点经过，适合贴着道路走线']], function (v) { T.curveMode = v; CM.Settings.set('curveMode', v); }));
-      const nodeButton = h('button', {
-        class: 'btn sm vnode-toggle' + (T.virtualPoint ? ' primary' : ''),
-        type: 'button', 'aria-pressed': String(T.virtualPoint), 'data-tip': '在绘线中放置不停车的虚拟节点',
-        onclick: function () { T.virtualPoint = !T.virtualPoint; self._toKey = ''; self.renderToolOpts(); }
-      }, '虚拟节点');
+      const curveCtl = grp('线形', segc(T.curveMode, [['smooth', '平滑', '平滑曲线：直线加圆弧，半径自动取最大；Ctrl+点击添加转弯点，Shift+点击放置虚拟节点'], ['pass', '穿点', '穿过转弯点：线路逐点经过，适合贴着道路走线']], function (v) { T.curveMode = v; CM.Settings.set('curveMode', v); }));
+      const pointButton = function (id, label, tip) {
+        const active = T.pointMode === id;
+        return h('button', { class: 'btn sm vnode-toggle' + (active ? ' primary' : ''), type: 'button', 'data-point': id,
+          'aria-pressed': String(active), 'data-tip': tip, onclick: function (e) {
+            const focused = document.activeElement === e.currentTarget;
+            T.pointMode = active ? '' : id;
+            self.renderToolOpts();
+            if (focused) el.querySelector('[data-point="' + id + '"]')?.focus({ preventScroll: true });
+          } }, label);
+      };
+      const nodeButton = pointButton('virtual', '虚拟节点', '在绘线中放置不停车的虚拟节点');
+      const bendButton = T.chain ? pointButton('bend', '转弯点', '点击地图添加转弯点，再关闭此按钮以连线') : null;
+      const undoBend = T.bends.length ? h('button', { class: 'btn sm vnode-toggle', type: 'button', 'data-bend-undo': '', 'aria-label': '撤销转弯点', 'data-tip': '撤销转弯点', onclick: function (e) {
+        const focused = document.activeElement === e.currentTarget;
+        T.undoBend();
+        if (focused) (el.querySelector('[data-bend-undo]') || el.querySelector('[data-point="bend"]'))?.focus({ preventScroll: true });
+      } }, ic('undo', 14)) : null;
       // 运行速度（v2.5）：新线路在这里选；延长既有线路时沿用该线的速度（在线路详情「列车运营」中调整）
       const speedCtl = grp('速度', colorLine
         ? h('span', { class: 'tag', 'data-tip': '本线最小转弯半径 ' + M.minRadius(colorLine) + ' m；可在线路详情「列车运营」中调整' }, M.lineKmh(colorLine) + ' km/h')
         : segc(T.newLineSpeed || 80, mc.speedGrades.filter(function (x) { return !CM.Fleet || CM.Fleet.speedOpen(g.mapId, y, x.kmh).ok; }).map(function (x) { return [x.kmh, String(x.kmh), x.kmh + ' km/h：最小转弯半径 ' + x.minR + ' m，运营成本 ×' + x.ops.toFixed(2)]; }), function (v) { T.newLineSpeed = v; }));
-      el.prepend(nodeButton);
+      el.prepend(...[nodeButton, bendButton, undoBend].filter(Boolean));
       el.append(colorGroup, h('span', { class: 'to-sep' }), typeCtl, sizeCtl('新站'), curveCtl, speedCtl);
       el.append.apply(el, snapCtl());
       if (T.chain) el.appendChild(h('button', { class: 'btn sm ghost', 'data-tip': '结束本次绘线', 'data-key-pre': self.compact() ? null : '右键', 'data-act': 'build.finish', onclick: function () { T.endChain(); } }, ic('check'), '完成'));

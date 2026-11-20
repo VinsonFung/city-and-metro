@@ -68,12 +68,27 @@ assert.deepEqual(Array.from(removed.offers,o=>o.type),['lineEff']);
 const g=C.Game.create({mode:'free',tutorial:true,seed:20000101});
 g.tutorial=false;
 g.econ.mode='challenge';
+const model=g.model, z=Array.from(model.zPop).reduce((best,p,i)=>p+model.zJobs[i]>model.zPop[best]+model.zJobs[best]?i:best,0);
+const near={name:'Near',x:model.zCx[z],y:model.zCy[z],r:1};
+const far={name:'Far',x:near.x<g.city.W/2?g.city.W-3:3,y:near.y,r:1};
+const first={type:'connect',gate:'reach',anchors:[near]};
+const remote={type:'connect',gate:'reach',anchors:[far]};
+const gate=T.gate(g);
+assert.ok(gate.check(first).ok);
+assert.ok(!gate.check(remote).ok);
+assert.ok(gate.check(first).w>gate.check(remote).w);
+const spare={W:40,H:40,pop:new Float32Array(1600),jobs:new Float32Array(1600)};
+const emptyGate=T.gate({city:spare,compiled:{stations:[{x:15,y:15}],serviced:[true],segs:[]},model:{zCx:[15],zCy:[15]}});
+assert.equal(emptyGate.check({zone:0}).low,true);
+assert.ok(emptyGate.check({gate:'reach',zone:0}).ok);
+
 C.DATA.histTasks=[];
 C.DATA.noDynTasks=true;
 C.DATA.events=[
   {y:1999,m:8,title:'Earlier',task:{id:'earlier',type:'connect',anchors:[]}},
-  {y:2000,m:1,title:'Opening',task:{id:'now',type:'connect',months:3,anchors:[
-    {name:'A',x:2,y:2,r:.8},{name:'B',x:30,y:24,r:.8}],rewardMonths:1,title:'Connection'}},
+  {y:2000,m:1,title:'Opening',task:{...first,id:'now',months:3,rewardMonths:1,title:'Connection'}},
+  {y:2000,m:1,title:'Deferred',task:{...remote,id:'later',months:12,title:'Deferred connection'}},
+  {y:2000,m:1,title:'Expires',task:{...remote,id:'expires',months:2,title:'Expired connection'}},
 ];
 g.tasks=new T();
 const issued=g.tasks.monthly(g).filter(o=>o.type==='issued');
@@ -83,14 +98,33 @@ assert.equal(t.cause,'Opening');
 assert.equal(t.reward,g.econ.grantQuota(2000,1));
 assert.equal(g.tasks.monthly(g).filter(o=>o.type==='issued').length,0);
 assert.equal(g.tasks.issued['ev:earlier'],1);
-t.optional='scenic';
-t.deadline=[2000,2];
+assert.equal(g.tasks.issued['evw:later'],g.ym());
+assert.equal(g.tasks.issued['evw:expires'],g.ym());
+g.tasks=T.restore(JSON.parse(JSON.stringify(g.tasks.serialize())));
+const restoredTask=g.tasks.active.find(task=>task.id===t.id);
+restoredTask.optional='scenic';
+restoredTask.deadline=[2000,2];
 g.clock.m=2;
 const mods=JSON.stringify(g.econ.mods);
 assert.ok(g.tasks.monthly(g).some(o=>o.type==='lapsed'&&o.task.id===t.id));
 assert.equal(JSON.stringify(g.econ.mods),mods);
 assert.equal(g.tasks.failed.length,0);
-console.log('PASS event issuance, optional expiry and legacy contract/offer retirement');
+g.clock.m=3;
+assert.ok(!g.tasks.monthly(g).some(o=>o.type==='issued'));
+assert.equal(g.tasks.issued['ev:expires'],1);
+assert.equal(g.tasks.issued['evw:expires'],undefined);
+g.clock.m=5;
+// A completed extension brings the outlying anchor into range, without making the objective complete.
+const initialCompiled=g.compiled;
+g.compiled={...initialCompiled,segs:[{g:{lenM:150000}}]};
+const posted=g.tasks.monthly(g).filter(o=>o.type==='issued');
+assert.equal(posted.length,1);
+assert.equal(posted[0].task.cause,'Deferred');
+assert.equal(posted[0].task.issuedAt[1],5);
+assert.equal(g.tasks.issued['evw:later'],undefined);
+assert.equal(g.tasks.monthly(g).filter(o=>o.type==='issued').length,0);
+g.compiled=initialCompiled;
+console.log('PASS distance and population gates, deferred event save/restore and expiry, legacy retirement');
 
 const city=g.city, n=M.empty();
 const station=(x,y,size,type)=>M.addStation(n,x,y,{size,type},city);

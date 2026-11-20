@@ -1129,6 +1129,7 @@
         g.upgradeNote = (g.upgradeNote ? g.upgradeNote + '；' : '') + '已有车站与任务所在的区域保持开放：' + kept;
       }
       if (airportOpened) g.logEvent({ tag: '规则', title: '新区域开放：' + airportOpened.name, desc: (D.airport.name || '机场') + '照常运营，用地不开发；范围内可以地下设站与地下穿越（v1.9 起）。' });
+      g.econ.restoreOpeningGrant(g.clock);
       complete = true;
       return g;
     } finally {

@@ -10,9 +10,12 @@ for(const[,src]of(await readFile(new URL('index.html',root),'utf8')).matchAll(/<
 const C=c.CM,M=C.Metro,copy=x=>JSON.parse(JSON.stringify(x));
 C.UI=function(){};for(const src of ['settings','corp','fleet','screens'])await load('js/'+src+'.js');
 const F=C.Fleet;
-assert.equal(C.CFG.GAME_VERSION,'2.9.1');assert.equal(C.CFG.RULES_REVISION,14);
+assert.equal(C.CFG.GAME_VERSION,'2.9.2');assert.equal(C.CFG.RULES_REVISION,14);
 assert.equal(C.MAP_ORDER.length,15);assert.equal(F.MODELS.length,78);assert.ok(C.MAPS.ld&&C.Traits);
-memory.set('cm1.newsSeen','2.9');assert.equal(C.UI.prototype.newsUnread(),false);
+assert.equal(C.NEWS[0].v,C.CFG.GAME_VERSION);
+memory.set('cm1.newsSeen','2.9.2');assert.equal(C.UI.prototype.newsUnread(),false);
+memory.set('cm1.newsSeen','2.9.1');assert.equal(C.UI.prototype.newsUnread(),true);
+memory.set('cm1.newsSeen','2.9');assert.equal(C.UI.prototype.newsUnread(),true);
 memory.set('cm1.newsSeen','2.8.0');assert.equal(C.UI.prototype.newsUnread(),true);
 memory.set('cm1.newsSeen','2.4.0');assert.equal(C.UI.prototype.newsUnread(),true);
 assert.ok(!C.NEWS.some(n=>n.v==='2.7.1'),'Patch release has no new announcement');
@@ -89,6 +92,79 @@ try {
   F.autoBuy=realAutoBuy;
 }
 console.log('PASS idle allocation, platform/speed/manual exclusions, previewed purchase cost and saved fleet preference');
+
+// A new game defaults to auto-buy. Missing rolling stock must not abort the
+// first monthly settlement or prevent the grant from being posted.
+C.useMap('tutorial');
+await load('js/icons.js');
+await load('js/pages.js');
+let late = C.Game.create({mode:'challenge',tutorial:true,seed:20000101});
+late.econ.funds += 1e7;
+late.econ.cur.start += 1e7;
+F.ensure(late);
+const lateNet = M.clone(sample.net);
+lateNet.lines[sample.line].speed = 80;
+late.edit(net => Object.assign(net, lateNet));
+assert.equal(late.confirmDraft().ok, true);
+late.fleet.trains = [];
+F.changed(late);
+late.model.solveNow(2);
+assert.ok(late.fleet.autoAlloc && late.fleet.autoBuy);
+const shortage = F.allocPlan(late);
+assert.ok(shortage.unmet > 0, 'Fixture must trigger automated purchasing');
+const { funds: savedFunds, capex: savedCapex } = late.econ;
+late.econ.funds = late.econ.capex = 0;
+const limited = F.autoBuy(late, shortage);
+assert.ok(limited.limited && !limited.n && !late.fleet.trains.length);
+Object.assign(late.econ, { funds: savedFunds, capex: savedCapex });
+const target = (months) => {
+  const ym = late.ym(), closed = late.econ.ledger.length;
+  const moneyBefore = late.econ.funds, countBefore = late.fleet.trains.length;
+  assert.ok(late.startJump(months));
+  while (late.jumping) late.stepJump();
+  assert.ok(!late.settlementError, late.settlementError?.stack);
+  assert.equal(late.ym() - ym, months);
+  const rows = late.econ.ledger.slice(closed);
+  assert.equal(rows.length, months);
+  for (const row of rows) {
+    assert.ok(row.grant > 0);
+    assert.equal(row.days, C.U.daysInMonth(row.y, row.m));
+    const built = C.Economy.BUILD_KINDS.reduce((sum, key) => sum + row[key], 0);
+    const expected = row.start + C.Economy.incomeOf(row) - built - C.Economy.opsOf(row) - row.pppOut -
+      row.interest - row.principal - row.penalty + row.capexUse;
+    assert.ok(Math.abs(row.end - expected) < 1e-7, 'Monthly funds must reconcile with the ledger');
+  }
+  assert.ok(late.econ.cur.grant > 0, 'Grant for the newly opened month must already be booked');
+  if (months === 3) {
+    assert.ok(late.fleet.trains.length > countBefore);
+    assert.ok(rows.some(row => row.construction > 0));
+    assert.ok(late.econ.funds !== moneyBefore);
+  }
+};
+target(3);
+const paid = copy(late.serialize());
+const missed = copy(paid);
+missed.econ.cur.grant = 0;
+delete missed.econ.cur.opsSub;
+missed.econ.funds -= paid.econ.cur.grant;
+missed.econ.flow = missed.econ.flow.filter(row => row.kind !== 'grant' || row.y !== missed.clock.y || row.m !== missed.clock.m);
+late = C.Game.restore(missed);
+assert.ok(Math.abs(late.econ.funds - paid.econ.funds) < 1e-7);
+assert.equal(late.econ.cur.grant, paid.econ.cur.grant);
+assert.equal(JSON.stringify(late.econ.ledger), JSON.stringify(paid.econ.ledger));
+const reload = C.Game.restore(copy(late.serialize()));
+assert.equal(reload.econ.funds, late.econ.funds);
+assert.equal(reload.econ.cur.grant, late.econ.cur.grant);
+late = reload;
+target(12);
+const oldest = late.fleet.trains[0];
+oldest.bought = late.ym() - (F.model(oldest.model).life + 1) * 12;
+const sale = F.sellOld(late);
+assert.equal(sale.n, 1);
+assert.equal(F.oldIds(late).length, 0);
+assert.equal(late.econ.cur.fleetSale, sale.value);
+console.log('PASS auto-buy with a genuine shortage, quarter and year advancement, grant recovery, and old-train sale');
+
 
 // v2.5.0 originals get an exact backup; historical fare, accounts, assets and task data survive the upgrade.
 const old=copy(g.serialize());old.rulesRevision=6;delete old.econ.fareMark;delete old.econ.fareAuto;delete old.econ.fareNote;delete old.fleet.autoAlloc;delete old.fleet.autoBuy;

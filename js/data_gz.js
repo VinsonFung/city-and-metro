@@ -361,7 +361,7 @@
       // v2.9 地图向北、向东扩大（追加在末尾）
       { y: 2000, m: 5, tag: '史实', title: '花都撤市设区', desc: '花都市改为广州市花都区，花都城区与白云北部的联系更加紧密。' },
       { y: 2010, m: 6, tag: '史实', title: '中新广州知识城起步区奠基', desc: '黄埔北部的九龙一带开始建设知识城，产业与人口逐步向这里集中。', fx: { grow: { region: 'zskc', pop: 1.2, jobs: 1.4, years: 6 } } },
-      { y: 2014, m: 2, tag: '史实', title: '增城撤市设区', desc: '增城市改为广州市增城区，新塘一带与黄埔、天河的联系更加紧密。', task: { id: 'gz-e3', type: 'regionCov', regions: ['zengcheng'], areaName: '新塘·永宁', target: 0.2, months: 72, rewardMonths: 1.2, title: '新塘进城', desc: '增城撤市设区，新塘和永宁成了广州的新城区，居民进城要换几趟车。让这一带两成的居民步行就能到地铁站。' } },
+      { y: 2014, m: 2, tag: '史实', title: '增城撤市设区', desc: '增城市改为广州市增城区，新塘一带与黄埔、天河的联系更加紧密。', task: { id: 'gz-e3', type: 'regionCov', regions: ['zengcheng'], areaName: '新塘·永宁', target: 0.2, months: 72, gate: 'reach', rewardMonths: 1.2, title: '新塘进城', desc: '增城撤市设区，新塘和永宁成了广州的新城区，居民进城要换几趟车。让这一带两成的居民步行就能到地铁站。' } },
       { y: 2018, m: 4, tag: '史实', title: '白云机场 T2 航站楼启用', desc: '白云机场的旅客吞吐能力大幅提升，往返机场的出行随之增加。' },
       { y: 2025, m: 10, tag: '史实', title: '白云机场 T3 航站楼与第五跑道投运', desc: '白云机场进入五条跑道、三座航站楼同时运行的时期。' },
     ],
