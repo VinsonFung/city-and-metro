@@ -6,8 +6,11 @@
   // 随地图切换的配置项：格网、起始日期、人口增长、货币与价格基年、建设与运营成本、票价、财政、城市经济、出行选择与道路参数
   const CFG_KEYS = ['W', 'H', 'ZONE', 'START', 'growth', 'money', 'econBase', 'cost', 'ops', 'fareDefault', 'fareRange', 'economy', 'macro', 'choice', 'road', 'workWeek'];
   const GZ_CFG = {}; for (const k of CFG_KEYS) GZ_CFG[k] = k === 'START' ? Object.assign({}, CFG.START) : CFG[k];
-  // 广州扩图后按原有范围的岗位份额校准岗位曲线，教程继续使用默认比例。
-  GZ_CFG.growth = Object.assign({}, GZ_CFG.growth, { jobsRatio: [[1990, 0.464], [2000, 0.502], [2010, 0.53], [2020, 0.532], [2030, 0.542]] });
+  // 广州图内人口与岗位按独立版校准；其他地图与青湾使用各自的增长曲线。
+  GZ_CFG.growth = Object.assign({}, GZ_CFG.growth, {
+    popCurve: [[1990, 4.1e6], [1995, 5.0e6], [2000, 6.9e6], [2005, 8.4e6], [2010, 10.3e6], [2015, 12.0e6], [2020, 14.0e6], [2030, 15.4e6], [2045, 16.3e6], [2070, 16.9e6], [2300, 17.3e6]],
+    jobsRatio: [[1990, 0.5], [2000, 0.55], [2010, 0.59], [2020, 0.62], [2030, 0.63]],
+  });
   // 出行选择参数按「发展阶段对应年份」平移并按本城货币缩放：devOffset 为广州曲线年份减本城年份，money 为本城货币相对广州曲线的倍数
   const shift = function (curve, off, k) { return curve.map(function (p) { return [p[0] - off, p[1] * (k || 1)]; }); };
   CM.deriveChoice = function (off, money) {
@@ -22,7 +25,7 @@
     gz: {
       id: 'gz', name: '广州', title: '广州 · 1990', sub: '真实地理 · 1990 年起 · 人民币',
       desc: '从 1990 年尚无地铁的广州开始：珠江水系、道路与桥梁、街道边界和地标都来自真实地理，区域按历史年份逐步开放，并有参考广州地铁发展的历史任务。',
-      facts: [['范围', '38 km × 57 km'], ['起始', '1990 年'], ['人口', '约 378 万'], ['货币', '人民币（元）'], ['模式', '经营挑战 / 自由建造']],
+      facts: [['范围', '38 km × 57 km'], ['起始', '1990 年'], ['人口', '约 410 万'], ['货币', '人民币（元）'], ['模式', '经营挑战 / 自由建造']],
       // 第 2 版（v2.1）：向北扩大 16 格到同和、京溪，向南扩大 32 格到市桥与广州南站；
       // 第 3 版（v2.9）：向北扩大 80 格到新白云机场与花都城区，向东扩大 32 格到知识城、永和与新塘西缘，向南扩大 4 格。旧存档载入时依次迁移（见 extentMigration）
       modes: ['challenge', 'free'], kind: 'real', mapVersion: 3, scenario: 'gz-1990',

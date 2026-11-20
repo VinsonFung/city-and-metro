@@ -10,6 +10,11 @@
   const enMaps=CM.I18N_EN_MAP||Object.create(null),mapTries=new Map();
   function mapNames(){const id=CM.mapId;return language==='en'&&id&&enMaps[id]||null;}
   function mapTrie(){const id=CM.mapId;let t=mapTries.get(id);if(!t){t=new Map();for(const [source,target]of Object.entries(enMaps[id])){let n=t;for(const c of source){if(!n.has(c))n.set(c,new Map());n=n.get(c);}n.out=target;}mapTries.set(id,t);}return t;}
+  const twControls=new Map([
+    ['设置','設定'], ['设置分类','設定分類'], ['恢复默认','恢復預設'], ['全屏','全螢幕'],
+    ['搜索车站','搜尋車站'], ['搜索车站、线路、道路、区域','搜尋車站、線路、道路、區域'],
+    ['已保存','已儲存'], ['保存中…','儲存中…'], ['移动车站','移動車站'],
+  ]);
   const compactFormat=new Intl.NumberFormat('en',{notation:'compact',maximumFractionDigits:2});
   function sanitize(s){return s.replace(/笕桥机场(?:[（(]军用[）)])?/g,'城东片区').replace(/王家墩机场(?:[（(]军用[）)])?/g,'王家墩片区').replace(/军用机场[^，。；\n]*/g,'未开发用地');}
   function nameEnglish(s){
@@ -86,7 +91,7 @@
     const source=sanitize(value.replace(/(?:[A-Za-z]:[\\/]|\\\\)[^\r\n<>"|]*|https?:\/\/[^\s<>"）)]+/g,p=>{const token='\uE000'+protectedParts.length+'\uE001';protectedParts.push(p);return token;}));
     const restore=s=>s.replace(/\uE000(\d+)\uE001/g,(_,i)=>protectedParts[+i]);
     if(language==='zh-CN'||!hasHan(source))return restore(source);
-    if(language==='zh-TW'){if(!traditional)traditional=window.OpenCC.Converter({from:'cn',to:'tw'});result=traditional(traditional(source));}else result=english(source);
+    if(language==='zh-TW'){if(!traditional)traditional=window.OpenCC.Converter({from:'cn',to:'tw'});result=twControls.get(source)||traditional(traditional(source));}else result=english(source);
     result=restore(result);
     if(cache.size>12000)cache.delete(cache.keys().next().value);cache.set(key,result);return result;
   }
@@ -105,7 +110,13 @@
   }
   function invalidate(){
     const R=CM.R;if(R){R.clearImages();R.dropThemeStash();R.textWidths.clear();R._rk=null;R.labelImage=null;R.overview=null;R.overviewStale=true;R.heatKey='';}
-    if(CM.ui){if(CM.ui.g())CM.ui.updateTop();CM.ui.layoutHud();if(CM.ui.opsApp)CM.ui.opsApp.refresh();if(CM.ui.voApp)CM.ui.voApp.refresh();}
+    const ui=CM.ui;
+    if(ui){
+      if(ui.g()){ui._ecoT=null;ui.updateTop();ui.rerenderPage();}
+      else if(ui.opsApp)ui.opsApp.refresh();
+      ui.layoutHud();
+      if(ui.voApp)ui.voApp.refresh();
+    }
     if(CM.Stats&&CM.Stats.isOpen())CM.Stats.redraw();if(CM.NetMap)CM.NetMap.refresh(true);
   }
   function apply(next){

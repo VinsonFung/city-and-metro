@@ -82,3 +82,58 @@ async function runTaskUIChecks({E,send,screenshot,delay,settle,tap,audit,close,r
  await close();await E('CM.game.tasks=tasksBefore;true');report.missing=await E('CM.I18n.missing()');if(report.missing.length)throw Error('Task translations: '+JSON.stringify(report.missing));
  console.log('PASS localized future-facility deadlines, waived subgoals, fare-management links and expandable task section loads');
 }
+
+// Exercise the live station panel with the same model outputs as a disconnected
+// station, then touch the real controls and check the map/tool result.
+export async function runWalkAndLanguageChecks({ E, send, until, close, tap, settle }) {
+  await close();
+  await until('CM.game.model.settled && CM.game.model.trafficReady()');
+  await E('CM.Settings.set("language","en");true');
+  const fixture = await E(`(() => {
+    const g = CM.game, m = g.model;
+    g.setSpeed(0);
+    const i = g.compiled.stations.findIndex((s, k) => g.compiled.serviced[k] && !s.tk && g.city.nearestWalk(s.x, s.y, 24));
+    if (i < 0) throw Error('No accessible station fixture');
+    const s = g.compiled.stations[i], nearest = g.city.nearestWalk(s.x, s.y, 24);
+    m.net.acc.accessible[i] = 0;
+    for (const daily of [m.stDaily, m.stDailyWk, m.stDailyWe]) daily.inn[i] = daily.out[i] = 0;
+    return { id: s.id, x: nearest.x, y: nearest.y };
+  })()`);
+  const notice = '[data-zero-ridership]';
+  const locate = notice + ' [data-walk-action=locate]';
+  const move = notice + ' [data-walk-action=move]';
+  const center = async sel => {
+    await E('document.querySelector(' + JSON.stringify(sel) + ').scrollIntoView({block:"center"});true');
+    await settle();
+    await tap(sel);
+  };
+  for (const [width, height, language, locateText, moveText] of [
+    [390, 844, 'zh-CN', '定位最近道路', '移动车站'],
+    [568, 320, 'zh-TW', '定位最近道路', '移動車站'],
+    [390, 844, 'en', 'Locate Nearest Road', 'Move Station'],
+  ]) {
+    await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: true });
+    await E('CM.tools.setTool("select");CM.ui.openObj("station",' + JSON.stringify(fixture.id) + ');true');
+    await E('window.walkPanel=CM.ui.rBody.firstElementChild;true');
+    await E('CM.Settings.set("language",' + JSON.stringify(language) + ');true');
+    await until('CM.ui.rBody.firstElementChild!==window.walkPanel&&!!document.querySelector(' + JSON.stringify(locate) + ')?.getClientRects().length');
+    const labels = await E('[' + [locate, move].map(s => 'document.querySelector(' + JSON.stringify(s) + ').textContent.trim()').join(',') + ']');
+    if (labels.join('|').toLowerCase() !== [locateText, moveText].join('|').toLowerCase()) throw Error('Walking actions not localized: ' + labels);
+    await center(locate);
+    if (!await E('CM.R.hl?.kind==="circle"&&Math.hypot(CM.R.hl.x-' + fixture.x + ',CM.R.hl.y-' + fixture.y + ')<1e-6')) throw Error('Did not locate the nearest road');
+    await center(move);
+    if (!await E('CM.tools.tool==="edit"&&CM.ui.selection?.id===' + JSON.stringify(fixture.id))) throw Error('Did not enter edit mode for the station');
+    console.log('PASS walkable road actions and live localization', width, height, language);
+  }
+  await E('CM.ui.openTop("money");window.financePanel=CM.ui.rBody.firstElementChild;CM.Settings.set("language","zh-TW");true');
+  await until('CM.ui.rBody.firstElementChild!==window.financePanel&&CM.ui.topIs(["finance"])&&CM.ui.rTitle.textContent.includes("財政")', 5000);
+  await E('CM.Settings.set("language","en");true');
+  const examples = await E(`[
+    CM.I18n.text('保留甘榜风貌和仄爪哇湿地的生态保护岛（史实）'),
+    CM.I18n.text('湾仔码头'), CM.I18n.text('约 410 万'),
+    CM.I18n.text('1900 年代')
+  ]`);
+  if (!examples[0].includes('Chek Jawa Wetlands') || examples[1] !== 'Wan Chai Ferry Pier' ||
+      examples[2] !== 'About 4.10 million' || examples[3] !== '1900s') throw Error('Shared-map translations: ' + examples);
+  console.log('PASS live finance language switch and shared map translations');
+}

@@ -283,6 +283,9 @@ table.tbl th:first-child, table.tbl td:first-child { text-align: left; }
 .clickable { cursor: pointer; border-radius: 9px; transition: background .15s; }
 .clickable:hover { background: var(--hover); }
 .note { font-size: 12px; color: var(--muted); line-height: 1.6; }
+.walk-actions { flex-wrap: wrap; gap: 6px; }
+.walk-actions:not([hidden]):not(:empty) { margin-top: 6px; }
+.walk-actions[hidden] { display: none; }
 .callout { border-radius: 12px; padding: 9px 11px; font-size: 12px; line-height: 1.55; margin: 8px 0; display: flex; gap: 9px; align-items: flex-start; }
 .callout > .ico { width: 17px; height: 17px; margin-top: 1px; }
 .callout.bad { background: var(--bad-soft); color: var(--bad); }

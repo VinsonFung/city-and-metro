@@ -409,14 +409,18 @@
       grid.append(sIn, sOut, sX, sP);
       el.appendChild(grid);
       // 没有人进出时说明原因（v2.9 玩家反馈：车站进站人数莫名变成 0）
-      const why = h('div', { class: 'callout warn', style: { display: 'none' } });
+      const whyText = h('div'), whyActions = this.noWalkActions(s);
+      whyActions.hidden = true;
+      const why = h('div', { class: 'callout warn', 'data-zero-ridership': '', style: { display: 'none' } }, h('div', null, whyText, whyActions));
       el.appendChild(why);
+      const noWalkReason = '车站周围没有能走进来的道路（四周是快速路、水面或没有街道的地块），乘客到不了。把车站挪到路边，或在附近另设车站。';
+      let shownReason = '';
       const zeroWhy = function () {
         const acc = g.model.net.acc; if (!acc) return '';
         const routes = C.stationRoutes[k];
         const runs = ['wd', 'we'].some(d => g.model.resultsFor(d).per.some(p => routes.some(r => CM.Model.boardFreq(p, g.model.net, r) > 0)));
         if (!runs) return '本站所有交路均停运。恢复列车班次后才能进出站。';
-        if (acc.accessible && !acc.accessible[k]) return '车站周围没有能走进来的道路（四周是快速路、水面或没有街道的地块），乘客到不了。把车站挪到路边，或在附近另设车站。';
+        if (acc.accessible && !acc.accessible[k]) return noWalkReason;
         let listed = false;
         for (let z = 0; z < acc.zl.length && !listed; z++) { const L = acc.zl[z]; if (L) for (const e of L) if (e.s === k) { listed = true; break; } }
         if (!listed) return (acc.catchPop && acc.catchPop[k] >= 50) ? '附近的乘客都有更近、更方便的车站，这座站暂时没人进出。' : '步行 15 分钟内几乎没有居民和岗位（周边还没发展起来或尚未开放），暂时没有乘客。';
@@ -429,8 +433,10 @@
         const sub = function (a, b) { return '工作日 ' + U.fmtPeople(a) + ' · 周末 ' + U.fmtPeople(b); };
         sIn.setV(U.fmtPeople(d2.inn[k]) + ' 人次', sub(dw.inn[k], de.inn[k])); sOut.setV(U.fmtPeople(d2.out[k]) + ' 人次', sub(dw.out[k], de.out[k])); sX.setV(U.fmtPeople(d2.xfer[k]) + ' 人次', sub(dw.xfer[k], de.xfer[k]));
         const zero = d2.inn[k] + d2.out[k] < 1;
-        if (zero) { const t = zeroWhy(); if (why.textContent !== t) why.textContent = t; }
-        why.style.display = zero && why.textContent ? '' : 'none';
+        const reason = zero ? zeroWhy() : '';
+        if (shownReason !== reason) { shownReason = reason; whyText.textContent = reason; }
+        whyActions.hidden = reason !== noWalkReason;
+        why.style.display = reason ? '' : 'none';
         const W = g.model.weights(g.clock.minute);
         const f = g.model.stFlowAt(k, W, 'stIn') + g.model.stFlowAt(k, W, 'stOut') + g.model.stFlowAt(k, W, 'stXfer');
         sP.setV(U.fmtPct(f / cap, 0), U.fmtInt(f) + ' / ' + U.fmtInt(cap) + ' 人次/时', f / cap > 1 ? 'bad' : (f / cap > 0.8 ? 'warn' : 'muted'));
@@ -563,28 +569,38 @@
   // 车站周边没有可步行的道路（v3.1 玩家建议：以前只有一句「暂无覆盖」）：说明原因（附近只有快速路，或还没有街道），
   // 指出最近可步行道路的方向、距离与路名，可在地图上定位它，或直接移动车站
   const DIR8 = ['正东方向', '东南方向', '正南方向', '西南方向', '正西方向', '西北方向', '正北方向', '东北方向'];
+  const WALK_SEARCH_CELLS = 24;
+  UI.prototype.locateNearestWalk = function (s, nw) {
+    nw = nw || this.g().city.nearestWalk(s.x, s.y, WALK_SEARCH_CELLS);
+    if (!nw) { this.toast('车站 ' + U.fmtKm(WALK_SEARCH_CELLS * CFG.CELL_M) + ' 内都没有可步行的道路。', 'warn'); return; }
+    this.fitBox(Math.min(s.x, nw.x) - 2, Math.min(s.y, nw.y) - 2, Math.max(s.x, nw.x) + 2, Math.max(s.y, nw.y) + 2, 26);
+    // 标签避开车站上方的浮动工具条。
+    const cam = this.R.cam, z = (cam.fly && cam.fly.tzm) || cam.zoom, north = s.y - nw.y > 1.5;
+    this.R.setHighlight({ kind: 'circle', x: nw.x, y: nw.y, r: 0.6, lx: nw.x, ly: north ? nw.y - 0.6 : nw.y + 0.6 + 66 / z, label: nw.name || '最近可步行道路' });
+  };
+  UI.prototype.noWalkActions = function (s, nw) {
+    const self = this, station = this.g().net.stations[s.id];
+    return h('div', { class: 'row walk-actions' },
+      nw !== null ? h('button', { class: 'btn sm', 'data-walk-action': 'locate', onclick: function () { self.locateNearestWalk(s, nw); } }, CM.icon('pin', 14), '定位最近道路') : null,
+      station && !station.tk ? h('button', { class: 'btn sm ghost', 'data-walk-action': 'move', onclick: function () { self.tools.setTool('edit'); self.select({ kind: 'station', id: s.id }); } }, '移动车站') : null);
+  };
   UI.prototype.noWalkBlock = function (s) {
-    const self = this, g = this.g(), city = g.city, yr = g.clock.y, R0 = 24;
-    const nw = city.nearestWalk(s.x, s.y, R0);
+    const g = this.g(), city = g.city, yr = g.clock.y;
+    const nw = city.nearestWalk(s.x, s.y, WALK_SEARCH_CELLS);
     const built = function (gr) { return gr.year == null || gr.year <= yr; };
     const cut = city.roadNear(s.x, s.y, 1.5, function (gr) { return gr.cls < 4 && built(gr); }), fast = !cut && city.roadNear(s.x, s.y, 1.5, function (gr) { return gr.cls >= 4 && built(gr); });
     const why = fast ? (fast.name ? '附近只有快速路「' + fast.name + '」，行人不能走。' : '附近只有快速路，行人不能走。')
       : cut ? '附近的道路不通行人（被地面铁路隔断，或在机场、厂区等封闭用地里）。' : '附近还没有街道（空地、农田、公园、山地或机场用地）。';
     // 提示框是横排（图标 + 内容），几段说明和按钮放在同一个竖排的内容块里
     const b = h('div', null, h('div', null, '车站出入口附近没有可步行到达的道路，乘客走不到这座车站，暂无覆盖。', why)), box = this.callout('warn', 'warn', b);
-    if (!nw) { b.appendChild(h('div', { class: 'small', style: { marginTop: '4px' } }, '车站 ' + U.fmtKm(R0 * CFG.CELL_M) + ' 内都没有可步行的道路。')); return box; }
+    if (!nw) {
+      b.append(h('div', { class: 'small', style: { marginTop: '4px' } }, '车站 ' + U.fmtKm(WALK_SEARCH_CELLS * CFG.CELL_M) + ' 内都没有可步行的道路。'), this.noWalkActions(s, null));
+      return box;
+    }
     const k = Math.round(Math.atan2(nw.y - s.y, nw.x - s.x) / (Math.PI / 4) + 8) % 8, dist = U.fmtKm(Math.round(nw.m / 10) * 10);
     b.appendChild(h('div', { class: 'small', style: { marginTop: '4px' } }, nw.name ? '最近的可步行道路在' + DIR8[k] + '约 ' + dist + '：' + nw.name + '。' : '最近的可步行道路在' + DIR8[k] + '约 ' + dist + '。'));
     b.appendChild(h('div', { class: 'tiny muted', style: { marginTop: '2px' } }, '可以把车站移到道路旁，或等周边开发出街道后再接入。'));
-    const label = nw.name || '最近可步行道路';
-    b.appendChild(h('div', { class: 'row', style: { marginTop: '6px', gap: '6px', flexWrap: 'wrap' } },
-      h('button', { class: 'btn sm', onclick: function () {
-        self.fitBox(Math.min(s.x, nw.x) - 2, Math.min(s.y, nw.y) - 2, Math.max(s.x, nw.x) + 2, Math.max(s.y, nw.y) + 2, 26);
-        // 标签默认画在圈上方；选中车站的浮动工具条也在车站上方，道路不在车站北边时标签改放到圈下方，免得被挡住
-        const cam = self.R.cam, z = (cam.fly && cam.fly.tzm) || cam.zoom, north = s.y - nw.y > 1.5;
-        self.R.setHighlight({ kind: 'circle', x: nw.x, y: nw.y, r: 0.6, lx: nw.x, ly: north ? nw.y - 0.6 : nw.y + 0.6 + 66 / z, label: label });
-      } }, CM.icon('pin', 14), '定位最近道路'),
-      s.id && g.net.stations[s.id] ? h('button', { class: 'btn sm ghost', onclick: function () { self.tools.setTool('edit'); self.select({ kind: 'station', id: s.id }); } }, '移动车站') : null));
+    b.appendChild(this.noWalkActions(s, nw));
     return box;
   };
   // 线路早高峰各区段的满载率（v2.8 玩家反馈：任务里的数字查不到来源）：任务、地铁芯和线路详情共用 Tasks.crowdSections，从高到低列出，点一行定位到区段

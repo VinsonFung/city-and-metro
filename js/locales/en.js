@@ -18648,3 +18648,61 @@ Object.assign(window.CM.I18N_EN, {
   "「{a}」移到了「{b}」旁边。": "“{a}” was moved next to “{b}”.",
   "{v0} 在此换乘。": "Transfer between {v0} here."
 });
+
+// Shared-map area descriptions, ferry stops and construction diagnostics.
+Object.assign(window.CM.I18N_EN, {
+  "保留甘榜风貌和仄爪哇湿地的生态保护岛（史实）": "A protected island that preserves traditional kampong settlements and the Chek Jawa Wetlands (Historical)",
+  "度假岛，运营中的景点约 600 m 内可以建地下车站（史实：1972 年更名，此后开发为度假地）": "Resort island. Underground stations can be built within about 600 m of operating attractions (Historical: renamed in 1972 and later developed as a resort)",
+  "1970 年代填海形成，1980 年代起建成酒店和商场（史实）": "Reclaimed in the 1970s, with hotels and shopping centres built from the 1980s (Historical)",
+  "老商业区和牛车水一带（史实）": "The old commercial district and Chinatown (Historical)",
+  "全国最繁华的商业街（史实）": "Singapore's busiest shopping street (Historical)",
+  "集装箱码头所在地，租约 2027 年到期（史实）": "Container terminal site. Its lease ends in 2027 (Historical)",
+  "新加坡第一座卫星镇（史实）": "Singapore's first satellite town (Historical)",
+  "1960 年代建成的组屋新镇（史实）": "A public housing new town built in the 1960s (Historical)",
+  "1980 年代成片开发（史实）": "Developed on a large scale in the 1980s (Historical)",
+  "1973 年起建设的组屋新镇（史实）": "A public housing new town built from 1973 (Historical)",
+  "1970 年代建成的组屋新镇（史实）": "A public housing new town built in the 1970s (Historical)",
+  "建在东海岸填海土地上的住宅区（史实）": "A residential district built on reclaimed land along the East Coast (Historical)",
+  "后来的裕廊湖区和第二中央商务区（史实）": "Later the site of Jurong Lake District and Singapore's second CBD (Historical)",
+  "1960 年代起开发的工业区（史实）": "An industrial district developed from the 1960s (Historical)",
+  "1978 年起建设，后来的东部区域中心（史实）": "Developed from 1978 and later became the eastern regional centre (Historical)",
+  "新加坡动物园所在地（史实）": "Home of Singapore Zoo (Historical)",
+  "北部区域中心，紧邻新柔长堤（史实）": "The northern regional centre, next to the Johor–Singapore Causeway (Historical)",
+  "填海形成的重工业区，西面是大士第二通道（史实）": "A heavy industrial district built on reclaimed land, with the Second Link to the west (Historical)",
+  "1980 年代末起建设的海滨新镇（史实）": "A coastal new town built from the late 1980s (Historical)",
+  "1990 年代末起成片建设（史实）": "Developed on a large scale from the late 1990s (Historical)",
+  "1996 年公布榜鹅 21 计划（史实）": "The Punggol 21 plan was announced in 1996 (Historical)",
+  "2010 年前后成为新的金融和旅游中心（史实）": "Became a new centre for finance and tourism around 2010 (Historical)",
+  "滨海湾花园 2012 年在这里开放（史实）": "Gardens by the Bay opened here in 2012 (Historical)",
+  "实里达航空园（史实）": "Seletar Aerospace Park (Historical)",
+  "七座小岛合并而成的石化工业岛，2000 年 10 月开放（史实）": "A petrochemical industrial island made by joining seven small islands. It opened in October 2000 (Historical)",
+  "2018 年公布的“森林镇”（史实）": "The “Forest Town” announced in 2018 (Historical)",
+  "长期规划中的滨水住宅区（模拟）": "A planned waterfront residential district (Simulated)",
+  "长期规划的新镇（模拟）": "A new town in the long-term plan (Simulated)",
+  "{v0}：接管的既有铁路弯道半径约 {v1} m，小于 {v2} m，列车在这里限速通过": "{v0}: this taken-over railway curve is about {v1} m, below {v2} m; trains slow down here",
+  "{v0}：接管的既有铁路弯道半径约 {v1} m，小于 {v2} m（{v3} km/h 线路），列车在这里限速通过": "{v0}: this taken-over railway curve is about {v1} m, below {v2} m ({v3} km/h line); trains slow down here",
+  "{v0}：{v1}，接管的既有铁路弯道半径约 {v2} m（{v3} m 以下），列车在这里限速通过": "{v0}: {v1}; this taken-over railway curve is about {v2} m (under {v3} m); trains slow down here",
+  "约 410 万": "About 4.10 million"
+});
+Object.assign(window.CM.I18N_EN_MAP.tk, {
+  "砧": "Kinuta",
+  "砧东": "East Kinuta",
+  "砧西": "West Kinuta",
+  "砧南": "South Kinuta",
+  "砧北": "North Kinuta",
+  "芝": "Shiba",
+  "芝东": "East Shiba",
+  "芝西": "West Shiba",
+  "芝南": "South Shiba",
+  "芝北": "North Shiba"
+});
+
+Object.assign(window.CM.I18N_EN, {
+  "建设校验与客流调整": "Construction checks and ridership",
+  "既有轨道沿用原有选址。新建、改线或改建时复核保护区、机场、铁路平交等限制。": "Existing tracks retain their original siting approval. New or altered tracks are checked for protected areas, airports and at-grade rail crossings.",
+  "接管铁路可继续修改运营速度。小半径弯道提示限速，草案可以确认。": "You can change the operating speed of a taken-over railway. Tight curves display a speed restriction and the draft can be confirmed.",
+  "校准广州人口、岗位、片区增长与商圈吸引力。杭州上调岗位比例和重点商圈吸引力。": "Updated Guangzhou's population, jobs, district growth and commercial demand. Raised Hangzhou's jobs ratio and demand at key commercial districts.",
+  "读取旧档时建立升级前备份，广州和杭州的人口、岗位随月度发展逐步调整。": "Loading an older save creates a pre-upgrade backup. Population and jobs in Guangzhou and Hangzhou adjust gradually as the city grows.",
+  "车站缺少步行道路时，可从零客流提示定位最近道路，或进入修改工具移动车站。": "When a station has no walkable road access, use its zero-ridership notice to locate the nearest road or move the station with the Edit tool.",
+  "补齐繁中控件和部分地图与施工提示的英文。切换语言时立即更新已打开的详情和财政。": "Added Traditional Chinese control labels and English map and construction text. Open details and finance panels refresh when you switch languages."
+});

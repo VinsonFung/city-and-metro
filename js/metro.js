@@ -1255,6 +1255,7 @@
     const warn = function (msg, x, y, ref, kind) { res.warnings.push({ msg: msg, x: x, y: y, ref: ref, kind: kind || 'seg' }); };
     const touched = new Set();      // 本次新建或改动的轨道
     const touchedSt = new Set();    // 本次新建或移动的车站
+    const siteWork = new Set();     // 本次实际铺设、改线或改建的物理轨道
     // 既有铁路接管（v3.0）：接管来的车站和轨道沿用原有线位，草案里不能拆除、移动、改建或改线（可以改名、升级规模、接入新线路）
     for (const id in off.stations) {
       const o = off.stations[id]; if (!o.tk) continue; const s = draft.stations[id];
@@ -1447,26 +1448,35 @@
         const gd = M.speedGrade(line);
         if (gd.track > 0) item('construction', '高速线路附加（' + gd.kmh + ' km/h）· ' + lbl, g.lenM / 1000 * C.trackPerKm[s.type] * gd.track * ci, id);
       }
-      // 冲突
+      // 只复查线位或建设方式实际改变的轨道；共线使用和纯线路归属调整保留原选址。
+      const oldPath = offGeom[id]?.pts;
+      const reversed = o && o.a === s.b && o.b === s.a;
+      const changedPath = oldPath && g.pts !== oldPath && (g.pts.length !== oldPath.length || g.pts.some(function (p, i) {
+        const q = oldPath[reversed ? oldPath.length - 1 - i : i];
+        return U.dist(p[0], p[1], q[0], q[1]) > 1e-6;
+      }));
+      const site = o ? o.type !== s.type || changedPath : !shared;
+      if (site) siteWork.add(id);
       const toUnder = { label: '改为地下（隧道）', op: 'segType', seg: id, value: 'underground' };
       const editSeg = { label: '调整线形', op: 'editSeg', seg: id };
-      if (g.outside) conflict({ type: 'outside', kind: 'seg', ref: id, x: A.x, y: A.y, msg: lbl + '：超出地图范围', how: '把转弯点或车站移回地图内。', fixes: [editSeg] });
-      if (g.hillM > 1 && s.type !== 'underground') conflict({ type: 'hill', kind: 'seg', ref: id, x: g.hillHit[0], y: g.hillHit[1], msg: lbl + '：穿过' + g.hillHit[2] + '，风景区禁止地面/高架轨道', how: '风景区内只能以隧道穿越。把这段轨道改为地下即可（会增加山体隧道费用），或调整线形绕开。', fixes: [toUnder, editSeg] });
-      if ((g.herM > 1 || g.guardM > 1) && s.type !== 'underground' && g.herHit && !s.inherited && touched.has(id)) conflict({ type: 'protected', kind: 'seg', ref: id, x: g.herHit[0], y: g.herHit[1], msg: g.herHit[3] === 2 ? lbl + '：地面/高架轨道将穿过「' + g.herHit[2] + '」，这里只能走地下' : lbl + '：地面/高架轨道将穿过历史城区「' + g.herHit[2] + '」，这里只能走地下', how: g.herHit[3] === 2 ? '改为地下线，或绕开保护范围。' : '改为地下线，或绕开历史城区。' });
-      if (g.protM > 1 && s.type !== 'underground') conflict({ type: 'protected', kind: 'seg', ref: id, x: g.protHit[0], y: g.protHit[1], msg: lbl + '：地面/高架轨道将穿过受保护建筑「' + g.protNames.join('、') + '」', how: '历史建筑和重要地标不能拆除。改为地下从下方穿越（需加固费用），或调整线形绕开。', fixes: [toUnder, editSeg] });
+      if (site && g.outside) conflict({ type: 'outside', kind: 'seg', ref: id, x: A.x, y: A.y, msg: lbl + '：超出地图范围', how: '把转弯点或车站移回地图内。', fixes: [editSeg] });
+      if (site && g.hillM > 1 && s.type !== 'underground') conflict({ type: 'hill', kind: 'seg', ref: id, x: g.hillHit[0], y: g.hillHit[1], msg: lbl + '：穿过' + g.hillHit[2] + '，风景区禁止地面/高架轨道', how: '风景区内只能以隧道穿越。把这段轨道改为地下即可（会增加山体隧道费用），或调整线形绕开。', fixes: [toUnder, editSeg] });
+      if (site && (g.herM > 1 || g.guardM > 1) && s.type !== 'underground' && g.herHit) conflict({ type: 'protected', kind: 'seg', ref: id, x: g.herHit[0], y: g.herHit[1], msg: g.herHit[3] === 2 ? lbl + '：地面/高架轨道将穿过「' + g.herHit[2] + '」，这里只能走地下' : lbl + '：地面/高架轨道将穿过历史城区「' + g.herHit[2] + '」，这里只能走地下', how: g.herHit[3] === 2 ? '改为地下线，或绕开保护范围。' : '改为地下线，或绕开历史城区。' });
+      if (site && g.protM > 1 && s.type !== 'underground') conflict({ type: 'protected', kind: 'seg', ref: id, x: g.protHit[0], y: g.protHit[1], msg: lbl + '：地面/高架轨道将穿过受保护建筑「' + g.protNames.join('、') + '」', how: '历史建筑和重要地标不能拆除。改为地下从下方穿越（需加固费用），或调整线形绕开。', fixes: [toUnder, editSeg] });
       // 通往地图外设施接驳口的区段（机场线等）可以穿过尚未开放的区域（区段上不能设站，车站仍须建在已开放区域）；永久不开放的区域除外
       const pEnd = CM.Fac && (CM.Fac.isPortalStation(A) || CM.Fac.isPortalStation(B));
-      for (const lk of g.locked) if (!pEnd || lk.open == null) conflict({ type: 'locked', kind: 'seg', ref: id, x: lk.x, y: lk.y, msg: lbl + '：经过尚未开放的区域「' + lk.name + '」', how: lk.open == null ? '该区域' + U.regionLock(lk) + '，线路不能穿过。用「修改」工具拖动控制点绕开。' : '该区域' + U.regionLock(lk) + '，开放前不能建设。用「修改」工具拖动控制点绕开，或等区域开放后再建。', fixes: [editSeg, { label: '删除该区段', op: 'removeSeg', seg: id }] });
+      if (site) for (const lk of g.locked) if (!pEnd || lk.open == null) conflict({ type: 'locked', kind: 'seg', ref: id, x: lk.x, y: lk.y, msg: lbl + '：经过尚未开放的区域「' + lk.name + '」', how: lk.open == null ? '该区域' + U.regionLock(lk) + '，线路不能穿过。用「修改」工具拖动控制点绕开。' : '该区域' + U.regionLock(lk) + '，开放前不能建设。用「修改」工具拖动控制点绕开，或等区域开放后再建。', fixes: [editSeg, { label: '删除该区段', op: 'removeSeg', seg: id }] });
       // 运营中的机场（台北松山）：跑道与航站区只能地下穿越
-      if (g.airM > 1 && s.type !== 'underground') conflict({ type: 'airport', kind: 'seg', ref: id, x: g.airHit[0], y: g.airHit[1], msg: lbl + '：' + (D.airport.name || '机场') + '照常运营，范围内不能建地面或高架轨道', how: '机场范围内只能以隧道穿越。把这段轨道改为地下，或调整线形绕开机场。', fixes: [toUnder, editSeg] });
+      if (site && g.airM > 1 && s.type !== 'underground') conflict({ type: 'airport', kind: 'seg', ref: id, x: g.airHit[0], y: g.airHit[1], msg: lbl + '：' + (D.airport.name || '机场') + '照常运营，范围内不能建地面或高架轨道', how: '机场范围内只能以隧道穿越。把这段轨道改为地下，或调整线形绕开机场。', fixes: [toUnder, editSeg] });
       // 地面铁路（v1.9）：新建或改动的地面轨道不能与运营中的地面铁路平交；既有的交叉保留
-      if (touched.has(id) && s.type === 'surface' && g.railS > 0) {
+      if (site && s.type === 'surface' && g.railS > 0) {
         const p = g.railSurf[0];
         conflict({ type: 'rail', kind: 'seg', ref: id, x: p[0], y: p[1], msg: lbl + '：地面轨道与铁路平面交叉（' + g.railS + ' 处）', how: '地铁不能与铁路平交。把这段轨道改为高架（上跨铁路）或地下（下穿铁路），每处交叉会增加相应的跨越费用；也可以调整线形，在铁路的高架段下方通过。', fixes: [{ label: '改为高架', op: 'segType', seg: id, value: 'elevated' }, toUnder, editSeg] });
       }
       if ((touched.has(id) || respeed.has(s.line)) && isFinite(g.minRadiusM)) {
         const R = Math.round(g.minRadiusM), p = g.minRxy || [A.x, A.y], minR = M.minRadius(line), warnR = M.warnRadius(line), kmhTxt = M.lineKmh(line) !== 80 ? '（' + M.lineKmh(line) + ' km/h 线路）' : '';
-        if (R < minR) {
+        if (R < minR && o && o.tk) warn(lbl + '：接管的既有铁路弯道半径约 ' + R + ' m，小于 ' + minR + ' m' + kmhTxt + '，列车在这里限速通过', p[0], p[1], id);
+        else if (R < minR) {
           const fixes = [{ label: '自动调顺', op: 'autoFit', seg: id }, editSeg];
           const pts = s.pts || [];
           let nearK = -1, nd = 0.8;
@@ -1476,7 +1486,7 @@
         } else if (R < warnR) warn(lbl + '：转弯半径约 ' + R + ' m，列车需限速通过', p[0], p[1], id);
       }
       // 坡道：地下、地面、高架之间转换需要足够长度
-      if (touched.has(id) || touchedSt.has(s.a) || touchedSt.has(s.b)) {
+      if (!o?.tk && (touched.has(id) || touchedSt.has(s.a) || touchedSt.has(s.b))) {
         // 两端按本线路在该站的站台层计算（天地换乘车站各线路站台层不同）
         // 虚拟节点一端：节点另一侧的建设方式，坡道两侧各做一半、没有站台平段（v3.0）
         const va = M.isVirt(A), vb = M.isVirt(B), tA = M.endType(draft, s, s.a), tB = M.endType(draft, s, s.b);
@@ -1503,6 +1513,7 @@
       byLine.forEach(function (ls, lid) {
         if (ls.length < 2 || M.isVirt(draft.stations[sid])) return;   // 虚拟节点处的弯道由区段线形与半径检查
         if (!touchedSt.has(sid) && !ls.some(function (s) { return touched.has(s.id); })) return;
+        if (ls.every(function (s) { return off.segments[s.id]?.tk; })) return;
         const S = draft.stations[sid];
         const dirs = ls.map(function (s) { const p = M.adjCtrl(draft, s, sid); const dx = p[0] - S.x, dy = p[1] - S.y, l = Math.hypot(dx, dy) || 1; return [dx / l, dy / l]; });
         let worst = 0;
@@ -1527,11 +1538,12 @@
     for (const id in draft.segments) if (draft.segments[id].type === 'surface') surf.push(draft.segments[id]);
     for (let a = 0; a < surf.length; a++) for (let b = a + 1; b < surf.length; b++) {
       const s1 = surf[a], s2 = surf[b];
-      if (!touched.has(s1.id) && !touched.has(s2.id)) continue;
+      const works = siteWork.has(s1.id) ? s1.id : (siteWork.has(s2.id) ? s2.id : null);
+      if (!works) continue;
       const g1 = M.segGeom(draft, s1, city), g2 = M.segGeom(draft, s2, city);
       const hit = polyCross(g1.pts, g2.pts, 0.3);
       if (!hit) continue;
-      conflict({ type: 'level', kind: 'seg', ref: touched.has(s1.id) ? s1.id : s2.id, x: hit[0], y: hit[1], msg: '两条地面轨道平面交叉（' + (draft.lines[s1.line] ? draft.lines[s1.line].name : '') + ' 与 ' + (draft.lines[s2.line] ? draft.lines[s2.line].name : '') + '）', how: '地铁不能平面交叉。把其中一段改为高架或地下形成立体交叉，或在交叉处设换乘站。', fixes: [{ label: '改为高架', op: 'segType', seg: touched.has(s1.id) ? s1.id : s2.id, value: 'elevated' }, { label: '改为地下', op: 'segType', seg: touched.has(s1.id) ? s1.id : s2.id, value: 'underground' }] });
+      conflict({ type: 'level', kind: 'seg', ref: works, x: hit[0], y: hit[1], msg: '两条地面轨道平面交叉（' + (draft.lines[s1.line] ? draft.lines[s1.line].name : '') + ' 与 ' + (draft.lines[s2.line] ? draft.lines[s2.line].name : '') + '）', how: '地铁不能平面交叉。把其中一段改为高架或地下形成立体交叉，或在交叉处设换乘站。', fixes: [{ label: '改为高架', op: 'segType', seg: works, value: 'elevated' }, { label: '改为地下', op: 'segType', seg: works, value: 'underground' }] });
     }
     // 线形调整：与“已付费长度”比较（旧存档没有记录时按已建长度），免费的小幅调整会累计，
     // 多次小改累计超过免费额度时按累计增加的长度收费（与车站“自上次付费选址累计”的规则一致）
@@ -1603,6 +1615,10 @@
             how = '新支线比原线路更顺直时，「' + J.name + '」的站台直线方向会转向支线，既有线路因此改线。点「保持原站台方向」锁定原来的方向（支线从站台末端再转出），或调整新区段的走向。';
           }
           fixes.push({ label: '调整新区段线形', op: 'editSeg', seg: cause.id });
+        }
+        if (off.segments[id]?.tk) {
+          warn(lbl + '：' + msg + '，接管的既有铁路弯道半径约 ' + Math.round(g.minRadiusM) + ' m（' + M.minRadius(draft.lines[s.line]) + ' m 以下），列车在这里限速通过', p[0], p[1], id);
+          continue;
         }
         fixes.push({ label: '自动调顺', op: 'autoFit', seg: id });
         fixes.push({ label: cause ? '调整本区段线形' : '调整线形', op: 'editSeg', seg: id });

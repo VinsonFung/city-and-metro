@@ -179,8 +179,6 @@
       h('span', { class: 'ec-dot' }), h('span', { class: 'tx' }, h('span', { class: 'k' }, '发展阶段'), h('span', { class: 'v' }, '')), h('span', { class: 'ec-prog' }, h('i')));
     this.pills.date.el.insertAdjacentElement('afterend', this.eraChip);
     this.histHost = h('div', { id: 'histHost' }); this.feed.appendChild(this.histHost); this.clearHist();
-    // 阶段背景先整段翻译再分行；切语言时重新构造，避免逐行翻译遗留混排。
-    if (CM.I18n) CM.I18n.on(() => { if (this.topIs(['era'])) this.rerenderPage(); });
   };
   const attach = UI.prototype.attachGame;
   UI.prototype.attachGame = function (g) {
