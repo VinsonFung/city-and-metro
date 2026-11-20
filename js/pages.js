@@ -1127,13 +1127,14 @@
     const f = Fac.byId(id); if (!f) return null;
     const el = h('div');
     const yr = g.year(), k = model.facIndex(id), active = k >= 0;
-    const status = active ? '运营中' : (yr < f.open ? Math.floor(f.open) + ' 年启用' : (f.close != null && yr >= f.close ? '已停用（' + Math.floor(f.close) + ' 年）' : '暂未运营'));
+    const status = active ? '运营中' : (yr < f.open ? Fac.openDate(f) + '启用' : (f.close != null && yr >= f.close ? '已停用（' + Math.floor(f.close) + ' 年）' : '暂未运营'));
     el.appendChild(h('div', { class: 'row', style: { flexWrap: 'wrap', marginBottom: '8px' } },
       h('span', { class: 'tag' }, ic(f.T.icon), ' ', f.ext && f.ext.gate ? '口岸' : f.T.name), f.ext ? h('span', { class: 'tag info' }, f.ext.gate ? (CM.DATA.cityLink ? '城市连接 · 接驳口' : '跨境接驳口') : '地图外 · 边缘接驳口') : null, h('span', { class: 'tag' }, Fac.purposeText(f)), h('span', { class: 'tag ' + (active ? 'good' : 'warn') }, status),
       Fac.sources(f).map(function (s) { return h('span', { class: 'tag ' + s[1] }, s[0]); })));
     el.appendChild(this.kv([
       f.ext ? ['设施位置', Fac.extText(f) + '（图上为接驳点）'] : null,
       f.ext ? ['地铁接通', (function () {
+        if (f.ext.snapWhenOpen && yr < f.open) return '启用后可接通';
         const lk = Fac.extLink(f, g);
         if (f.ext.gate) { if (!lk) return '未接通：把线路修到接驳口（会自动吸附），附近的普通车站不算'; return '已接通 ⇄ 经接驳口车站「' + lk.st.name + '」' + Fac.extText(f) + (CM.DATA.cityLink ? '。附加费和切换城市在地铁芯的「口岸管理」' : ''); }
         if (!lk) return '未接通：把线路修到地图边缘的接驳口（会自动吸附），或在接驳口约 800 m 内建站';
@@ -1141,7 +1142,7 @@
         return '已接通 ⇄ 经' + (lk.portal ? '接驳口车站' : '') + '「' + lk.st.name + '」' + (names ? '（' + names + '）' : '') + '在地图边缘连接地图外' + (lk.portal ? '，全部接驳出行可乘地铁' : '');
       })()] : null,
       ['参考规模（估算）', Fac.sizeText(f, yr)],
-      ['启用', f.open > -1e8 ? (f.lmK >= 0 ? D.landmarks[f.lmK].year + ' 年（地标落成）' : Math.floor(f.open) + ' 年') : '开局前已有'],
+      ['启用', f.open > -1e8 ? (f.lmK >= 0 ? D.landmarks[f.lmK].year + ' 年（地标落成）' : Fac.openDate(f)) : '开局前已有'],
       f.close != null ? ['停用', Math.floor(f.close) + ' 年 ' + Math.round((f.close % 1) * 12 + 1) + ' 月'] : null,
     ]));
     if (f.note) el.appendChild(h('div', { class: 'note', style: { margin: '4px 0 8px' } }, f.note));

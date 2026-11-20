@@ -40,7 +40,7 @@ self.matchMedia = function () { return {matches:false}; };
     }
     if (m.roads) {
       const q = m.roads, groups = [], ways = [];
-      for (let i = 0; i < q.cls.length; i++) groups.push({ cls: q.cls[i], flags: q.flags[i] });
+      for (let i = 0; i < q.cls.length; i++) groups.push({ cls: q.cls[i], flags: q.flags[i], sim: !!q.synthetic[i] });
       for (let i = 0; i < q.wayRoad.length; i++) {
         const k = q.wayRoad[i], rd = k >= 0 ? Geo.roads[k] : null, p = rd ? rd.p : q.extra[-1 - k];
         ways.push({ g: q.wayGroup[i], p: p, bbox: rd ? rd.bbox : Geo.bbox(p) });
@@ -49,7 +49,7 @@ self.matchMedia = function () { return {matches:false}; };
     }
     if (m.terrain) { const t = m.terrain; reclaim = t.reclaim || []; delete t.reclaim; Object.assign(city, t); R.geoPaths = new WeakMap(); R._bankPaths = null; }
     if (m.cells) Object.assign(city, m.cells);
-    if (m.built) city.roadsBuilt = m.built;
+    if (m.built) { city.roadsBuilt = m.built; city.roadVersion = m.roadVersion; }
     if (m.lock) LK = m.lock;
     if (m.facm !== undefined) R._facm = m.facm ? Object.assign(m.facm, { city: city }) : null;
     if (m.mt !== undefined) R._mt = m.mt;

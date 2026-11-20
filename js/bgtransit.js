@@ -77,6 +77,13 @@
       const a = pts[i - 1], b = pts[i], c = pts[i + 1], nx = (a[0] + 2 * b[0] + c[0]) / 4, ny = (a[1] + 2 * b[1] + c[1]) / 4;
       if (water(nx, ny)) { b[0] = nx; b[1] = ny; }
     }
+    for (const atEnd of [false, true]) {
+      const source = atEnd ? raw.at(-1) : raw[0], dock = CM.BgNet.shore(city, source[0], source[1]).dock;
+      const p = atEnd ? pts.at(-1) : pts[0];
+      if (!city.waterAt(...dock)) continue;
+      if (U.dist(p[0], p[1], dock[0], dock[1]) < 0.02) pts[atEnd ? pts.length - 1 : 0] = dock;
+      else if (atEnd) pts.push(dock); else pts.unshift(dock);
+    }
     const cum = U.cumLen(pts);
     return { pts: pts, cum: cum, total: cum[cum.length - 1] };
   }
@@ -89,37 +96,43 @@
   // 年份或地图变化时调整列车与渡轮的数量
   BG.sync = function (g) {
     const D = CM.DATA, y = g.clock.y, taken = CM.Takeover && CM.Takeover.takenRail ? CM.Takeover.takenRail(g.net) : null;
-    const key = (CM.mapId || '') + ':' + y + ':' + g.city.N + ':' + (taken ? taken.sig : '');
-    if (key === BG.key && BG.city === g.city) return;
-    if (BG.city !== g.city) { BG.trains = []; BG.boats = []; }
-    BG.city = g.city;
-    BG.key = key;
-    const rk = rkey(), bg = CM.Eras && CM.Eras.bg ? CM.Eras.bg(g.year()) : null, share = bg ? (bg.road != null ? 0.15 : bg.share) : 0;   // 路面公交（v3.0）不是铁路，图上的列车按普通城市的数量
-    // 线路重排后（跨年、接管区段变化），列车留在原来的路段上；路段被接管剔除的列车消失，由新的列车补上
-    const oldRoutes = BG.routes;
-    BG.routes = railRoutes(y, taken);
-    const idx = new Map(BG.routes.map(function (r, i) { return [r.key, i]; }));
-    BG.trains = BG.trains.filter(function (t) { const o = oldRoutes[t.r], i = o ? idx.get(o.key) : undefined; if (i == null) return false; t.r = i; return true; });
-    // 有背景交通线路的地图（v2.9）：列车数随运营中的铁路线路数，渡轮按线路走向
-    const BN = CM.BgNet && CM.BgNet.lines(), tNow = g.year();
-    const nRail = BN ? BN.filter(function (L) { return L.kind === 'rail' && CM.BgNet.active(L, tNow); }).length : 0;
-    const nT = BG.routes.length ? Math.min(BG.routes.length * 2, BN ? Math.min(40, 4 + nRail * 3) : Math.round(3 + 30 * share)) : 0;
-    while (BG.trains.length < nT) BG.trains.push(newTrain(BG.routes, rk));
-    for (let i = nT; i < BG.trains.length; i++) BG.trains[i].out = true;   // 多出的列车驶到线路尽头后不再出现
+    const key = (CM.mapId || '') + ':' + y + ':' + (taken ? taken.sig : '');
+    const tNow = g.year(), ferryKey = Math.round(tNow * 12) + ':' + g.city.terrainVer;
+    if (BG.city !== g.city) { BG.trains = []; BG.boats = []; BG.ferryKey = null; BG.key = ''; BG.city = g.city; }
+    if (key === BG.key && ferryKey === BG.ferryKey) return;
+    const rk = rkey(), bg = CM.Eras && CM.Eras.bg ? CM.Eras.bg(tNow) : null;
+    const share = bg ? (bg.road != null ? 0.15 : bg.share) : 0, BN = CM.BgNet && CM.BgNet.lines();
+    if (key !== BG.key) {
+      BG.key = key;
+      // 线路重排后（跨年、接管区段变化），列车留在原来的路段上；路段被接管剔除的列车消失，由新的列车补上
+      const oldRoutes = BG.routes;
+      BG.routes = railRoutes(y, taken);
+      const idx = new Map(BG.routes.map(function (r, i) { return [r.key, i]; }));
+      BG.trains = BG.trains.filter(function (t) { const o = oldRoutes[t.r], i = o ? idx.get(o.key) : undefined; if (i == null) return false; t.r = i; return true; });
+      // 有背景交通线路的地图（v2.9）：列车数随运营中的铁路线路数，渡轮按线路走向
+      const nRail = BN ? BN.filter(function (L) { return L.kind === 'rail' && CM.BgNet.active(L, tNow); }).length : 0;
+      const nT = BG.routes.length ? Math.min(BG.routes.length * 2, BN ? Math.min(40, 4 + nRail * 3) : Math.round(3 + 30 * share)) : 0;
+      while (BG.trains.length < nT) BG.trains.push(newTrain(BG.routes, rk));
+      for (let i = nT; i < BG.trains.length; i++) BG.trains[i].out = true;   // 多出的列车驶到线路尽头后不再出现
+    }
+    if (ferryKey === BG.ferryKey) return;
+    BG.ferryKey = ferryKey;
     // 渡轮：航线按年份出现；船数随背景交通比重相对开局时的变化增减（至少一艘）
-    let fv = ((D.bgViz && D.bgViz.ferries) || []).filter(function (f) { return f.piers && (!f.from || y >= f.from) && (!f.to || y <= f.to); });   // 只有标注了码头的航线（v2.9）
+    let fv = ((D.bgViz && D.bgViz.ferries) || []).filter(function (f) { return f.piers && (f.from == null || y >= f.from) && (f.to == null || y <= f.to); });   // 只有标注了码头的航线（v2.9）
     if (BN && !(D.bgViz && D.bgViz.ferries)) fv = BN.filter(function (L) { return L.kind === 'ferry' && CM.BgNet.active(L, tNow); }).map(function (L) {
       const H = CM.BgNet.hubs(), G = H.lineGeo[BN.indexOf(L)];
       return { name: L.name, n: Math.max(1, Math.round(60 / (L.head || 30))), color: '#f4f1e8', pts: G.pts.map(function (p) { return [p[0], p[1]]; }) };
     });
     const s0 = D.bg ? U.interp(D.bg.share, CM.CFG.START.y) : 0, ratio = BN ? 1 : (s0 > 0 ? U.clamp(share / s0, 0.2, 1.2) : 1);
-    BG.ferries = fv.map(function (f) { return { f: f, r: ferryRoute(f, g.city) }; });
+    const previous = BG.ferries;
+    BG.ferries = fv.map(f => ({ f, r: ferryRoute(f, g.city) })).filter(fr => fr.r.total > 0.05);
     const boats = [];
     BG.ferries.forEach(function (fr, i) {
       const n = Math.max(1, Math.round((fr.f.n || 2) * ratio));
       for (let k = 0; k < n; k++) {
-        const old = BG.boats.find(function (b) { return b.ri === i && b.k === k && b.name === fr.f.name; });
-        boats.push(old ? Object.assign(old, { s: U.clamp(old.s, 0, fr.r.total) }) : { ri: i, k: k, name: fr.f.name, s: fr.r.total * (k + 0.5) / n, dir: k % 2 ? -1 : 1, wait: 0, v: 18 / 3.6 / CM.CFG.CELL_M, color: fr.f.color || '#f4f1e8', alpha: 0 });
+        const old = BG.boats.find(b => b.k === k && b.name === fr.f.name);
+        const oldLength = old ? previous[old.ri].r.total : 0;
+        boats.push(old ? { ...old, ri: i, s: U.clamp(old.s / oldLength, 0, 1) * fr.r.total } : { ri: i, k: k, name: fr.f.name, s: fr.r.total * (k + 0.5) / n, dir: k % 2 ? -1 : 1, wait: 0, v: 18 / 3.6 / CM.CFG.CELL_M, color: fr.f.color || '#f4f1e8', alpha: 0 });
       }
     });
     BG.boats = boats;
@@ -136,14 +149,69 @@
       t.alpha = U.clamp(t.alpha + (atEnd ? -1 : 1) * (dtv > 0 ? dt : 0) * 1.5, 0, 1);
       if (atEnd && t.alpha <= 0) { if (t.out) BG.trains.splice(i, 1); else BG.trains[i] = newTrain(BG.routes, rk); }
     }
-    for (const b of BG.boats) {
-      const fr = BG.ferries[b.ri]; if (!fr) continue;
-      b.alpha = Math.min(1, b.alpha + (dtv > 0 ? dt : 0));
-      if (b.wait > 0) { b.wait -= dtv; continue; }
-      b.s += b.dir * b.v * dtv;
-      if (b.s >= fr.r.total || b.s <= 0) { b.s = U.clamp(b.s, 0, fr.r.total); b.dir = -b.dir; b.wait = 90; }   // 靠岸停留约 1.5 分钟（游戏时间）后返航
-    }
+    advanceBoats(dt, dtv, CM.R?.z || CM.R?.cam?.zoom || 30);
   };
+  const BOAT_MAX = 3, BOAT_WIDTH = 9, BOAT_LENGTH = 30;
+  function boatScale(zoom) {
+    return U.clamp(7 / (BOAT_WIDTH / CM.CFG.CELL_M * zoom), 1, BOAT_MAX);
+  }
+  function boatAt(fr, boat, scale, out) {
+    const r = fr.r, a = {}, b = {};
+    U.posAt(r.pts, r.cum, boat.s, out);
+    U.posAt(r.pts, r.cum, Math.max(0, boat.s - 0.06), a);
+    U.posAt(r.pts, r.cum, Math.min(r.total, boat.s + 0.06), b);
+    const x = b.x - a.x, y = b.y - a.y, length = Math.hypot(x, y) || 1;
+    out.dx = boat.dir * x / length; out.dy = boat.dir * y / length;
+    const lane = BOAT_WIDTH * scale * 0.7 / CM.CFG.CELL_M;
+    const offset = lane * U.clamp(Math.min(boat.s, r.total - boat.s) / 0.25, 0, 1);
+    const px = out.x - out.dy * offset, py = out.y + out.dx * offset;
+    if (BG.city.waterAt(px, py) || !BG.city.waterAt(out.x, out.y)) { out.x = px; out.y = py; }
+    return out;
+  }
+
+  function advanceBoats(dt, dtv, zoom) {
+    if (dtv <= 0 || !BG.boats.length) return;
+    const boats = BG.boats, scale = boatScale(zoom), safe = 34 * scale / CM.CFG.CELL_M;
+    const states = boats.map(function (b) {
+      const fr = BG.ferries[b.ri], p = boatAt(fr, b, scale, {});
+      const left = b.dir > 0 ? fr.r.total - b.s : b.s;
+      const berth = b.wait > 0 ? (b.s <= fr.r.total / 2 ? fr.r.pts[0] : fr.r.pts.at(-1))
+        : left < 0.9 ? (b.dir > 0 ? fr.r.pts.at(-1) : fr.r.pts[0]) : null;
+      return { p, left, berth };
+    });
+    const hold = new Uint8Array(boats.length);
+    for (let i = 0; i < boats.length; i++) for (let j = i + 1; j < boats.length; j++) {
+      const a = states[i], b = states[j], A = boats[i], B = boats[j];
+      const aw = A.wait > 0, bw = B.wait > 0;
+      if (a.berth && b.berth && U.dist(a.berth[0], a.berth[1], b.berth[0], b.berth[1]) < 0.45) {
+        if (!aw && (bw || a.left > b.left)) hold[i] = 1;
+        else if (!bw) hold[j] = 1;
+        continue;
+      }
+      if (A.ri === B.ri && A.dir !== B.dir && !aw && !bw) continue;
+      const dx = b.p.x - a.p.x, dy = b.p.y - a.p.y;
+      if (Math.hypot(dx, dy) > safe + dtv * Math.max(A.v, B.v)) continue;
+      const aToward = a.p.dx * dx + a.p.dy * dy > 0;
+      const bToward = b.p.dx * dx + b.p.dy * dy < 0;
+      if (aw || bw) {
+        if (aw && !bw && bToward) hold[j] = 1;
+        if (bw && !aw && aToward) hold[i] = 1;
+      } else if (aToward && !bToward) hold[i] = 1;
+      else if (bToward) hold[j] = 1;
+    }
+    // 相交航线全部互相让行时，给其中一艘优先权，避免永久等待。
+    if (hold.every(Boolean) && boats.every(b => b.wait <= 0)) hold[0] = 0;
+    boats.forEach(function (b, i) {
+      const total = BG.ferries[b.ri].r.total;
+      b.alpha = Math.min(1, b.alpha + dt);
+      if (b.wait > 0) { b.wait -= dtv; return; }
+      if (hold[i]) return;
+      b.s += b.dir * b.v * dtv;
+      if (b.s >= total || b.s <= 0) {
+        b.s = U.clamp(b.s, 0, total); b.dir = -b.dir; b.wait = 90;
+      }
+    });
+  }
   // 列车第 k 节车厢的中心与前后端
   const carAt = function (r, t, k, q, a, b) {
     const sc = t.s - t.dir * (k * (CAR_L + CAR_GAP) + CAR_L / 2);
@@ -170,21 +238,25 @@
       }
     }
     ctx.lineCap = 'round';
+    const scale = boatScale(R.z), half = BOAT_LENGTH * scale / (2 * CM.CFG.CELL_M);
+    const boatWidth = Math.max(0.75, BOAT_WIDTH * scale / CM.CFG.CELL_M * R.z);
     for (const bt of BG.boats) {
       const fr = BG.ferries[bt.ri]; if (!fr || bt.alpha <= 0.01) continue;
-      U.posAt(fr.r.pts, fr.r.cum, bt.s, q);
-      U.posAt(fr.r.pts, fr.r.cum, U.clamp(bt.s - 0.06, 0, fr.r.total), a); U.posAt(fr.r.pts, fr.r.cum, U.clamp(bt.s + 0.06, 0, fr.r.total), b);
-      R.P(a.x, a.y, 0, pa); R.P(b.x, b.y, 0, pb);
+      boatAt(fr, bt, scale, q);
+      R.P(q.x - q.dx * half, q.y - q.dy * half, 0, pa);
+      R.P(q.x + q.dx * half, q.y + q.dy * half, 0, pb);
       if (Math.max(pa.x, pb.x) < -20 || Math.min(pa.x, pb.x) > R.w + 20 || Math.max(pa.y, pb.y) < -20 || Math.min(pa.y, pb.y) > R.h + 20) continue;
       ctx.globalAlpha = bt.alpha * alpha;
       if (bt.wait <= 0) {   // 尾迹
-        const tail = {}; U.posAt(fr.r.pts, fr.r.cum, U.clamp(bt.s - bt.dir * 0.3, 0, fr.r.total), tail); const pt = R.P(tail.x, tail.y, 0, {});
-        const pc = bt.dir > 0 ? pa : pb;
-        ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = w * 0.6; ctx.beginPath(); ctx.moveTo(pt.x, pt.y); ctx.lineTo(pc.x, pc.y); ctx.stroke();
+        const pt = R.P(q.x - q.dx * half * 2.1, q.y - q.dy * half * 2.1, 0, {});
+        ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = boatWidth * 0.45;
+        ctx.beginPath(); ctx.moveTo(pt.x, pt.y); ctx.lineTo(pa.x, pa.y); ctx.stroke();
       }
-      ctx.strokeStyle = 'rgba(30,36,44,0.6)'; ctx.lineWidth = w * 1.5 + 1.6; ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
-      ctx.strokeStyle = bt.color; ctx.lineWidth = w * 1.5; ctx.stroke();
-      ctx.fillStyle = '#2f6b4f'; const mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2; ctx.beginPath(); ctx.arc(mx, my, Math.max(1.2, w * 0.35), 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(30,36,44,0.6)'; ctx.lineWidth = boatWidth + 1; ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
+      ctx.strokeStyle = bt.color; ctx.lineWidth = boatWidth; ctx.stroke();
+      if (boatWidth >= 2) {
+        ctx.fillStyle = '#2f6b4f'; ctx.beginPath(); ctx.arc((pa.x + pb.x) / 2, (pa.y + pb.y) / 2, boatWidth * 0.24, 0, Math.PI * 2); ctx.fill();
+      }
     }
     ctx.restore();
   };

@@ -315,16 +315,50 @@
     linesCache.set(ck, res); return res;
   }
   // 某年运营的渡轮：只有标注了码头的航线（真实线路的车站、或 DATA.bgViz.ferries 的 piers）
-  BgNet.ferries = function (t) {
+  BgNet.ferries = function (t, visual) {
     const D = CM.DATA, ls = BgNet.lines();
     if (ls && !ls.auto) { const H = BgNet.hubs(ls); return ls.map(function (L, i) { return { L: L, i: i }; }).filter(function (e) { return e.L.kind === 'ferry' && BgNet.active(e.L, t); }).map(function (e) { return { name: e.L.name, color: e.L.color, pts: H.lineGeo[e.i].pts, piers: e.L.stops.map(function (s) { return [s[0], s[1], s[2]]; }) }; }); }
-    const snapped = new Map(((CM.BgTransit && CM.BgTransit.ferries) || []).map(function (f) { return [f.f.name, f.r.pts]; }));
-    return ((D.bgViz && D.bgViz.ferries) || []).filter(function (f) { return f.piers && (f.from == null || t >= f.from) && (f.to == null || t <= f.to); }).map(function (f) { const p0 = f.pts[0], p1 = f.pts[f.pts.length - 1]; return { name: f.name, color: f.color && f.color !== '#f4f1e8' && f.color !== '#f2ede0' && f.color !== '#e8eef4' ? f.color : '#2f8fbf', pts: snapped.get(f.name) || f.pts, piers: [[f.piers[0], p0[0], p0[1]], [f.piers[1], p1[0], p1[1]]] }; });
+    const transit = CM.BgTransit, snapped = new Map((transit && transit.city === CM.game?.city ? transit.ferries : []).map(f => [f.f.name, f.r.pts]));
+    // 手写的航线年份包含停运年。只在地图显示时按整年读取，客流接驳沿用原来的口径。
+    const year = visual ? Math.floor(t) : t;
+    return ((D.bgViz && D.bgViz.ferries) || []).filter(function (f) { return f.piers && (f.from == null || year >= f.from) && (f.to == null || year <= f.to); }).map(function (f) { const p0 = f.pts[0], p1 = f.pts[f.pts.length - 1]; return { name: f.name, color: f.color && f.color !== '#f4f1e8' && f.color !== '#f2ede0' && f.color !== '#e8eef4' ? f.color : '#2f8fbf', pts: snapped.get(f.name) || f.pts, piers: [[f.piers[0], p0[0], p0[1]], [f.piers[1], p1[0], p1[1]]] }; });
   };
-  // 某年运营的码头（地图标注用，同名合并）
-  BgNet.piers = function (t) {
-    const out = [];
-    for (const f of BgNet.ferries(t)) for (const p of f.piers) if (!out.some(function (o) { return o.name === p[0] && U.dist(o.x, o.y, p[1], p[2]) < 2.4; })) out.push({ name: p[0], x: p[1], y: p[2] });
+  // 码头标签和地铁换乘取当年的岸上位置，船停在近旁水面。
+  const shoreline = new WeakMap();
+  BgNet.shore = function (city, x, y) {
+    if (!city) return { land: [x, y], dock: [x, y] };
+    let cache = shoreline.get(city);
+    if (!cache || cache.version !== city.terrainVer) {
+      cache = { version: city.terrainVer, points: new Map() };
+      shoreline.set(city, cache);
+    }
+    const key = x + ',' + y, prior = cache.points.get(key);
+    if (prior) return prior;
+    const result = { land: [x, y], dock: [x, y] }, wet = !!city.waterAt(x, y);
+    const max = wet ? 2.5 : 0.6;
+    search: for (let r = 0.04; r <= max; r += 0.04) {
+      for (let i = 0; i < 32; i++) {
+        const a = i * Math.PI / 16, dx = Math.cos(a), dy = Math.sin(a), px = x + dx * r, py = y + dy * r;
+        if (city.cellAt(px, py) < 0 || !!city.waterAt(px, py) === wet) continue;
+        if (wet) result.land = [px, py];
+        const step = wet ? -0.04 : 0.04, bx = px + step * dx, by = py + step * dy;
+        if (city.waterAt(bx, by)) result.dock = [bx, by];
+        else if (!wet) result.dock = [px, py];
+        break search;
+      }
+    }
+    cache.points.set(key, result);
+    return result;
+  };
+  // 某年运营的码头，同名合并。传入城市后取当年的岸上位置。
+  BgNet.piers = function (t, city, visual = !!city) {
+    const out = [], seen = [];
+    for (const f of BgNet.ferries(t, visual)) for (const [name, x, y] of f.piers) {
+      if (seen.some(p => p.name === name && U.dist(p.x, p.y, x, y) < 2.4)) continue;
+      seen.push({ name, x, y });
+      const [px, py] = BgNet.shore(city, x, y).land;
+      out.push({ name, x: px, y: py });
+    }
     return out;
   };
 
@@ -333,20 +367,21 @@
   // 互补：地铁站约 400 m 内有运营中的铁路站或码头时可以换乘，这座地铁站的吸引力更高，更多人来这里坐地铁（接驳的感知步行时间缩短，主要车站更多）。
   const LINK_M = 400;
   BgNet.LINK_M = LINK_M;
-  let stopCache = null;
-  BgNet.stops = function (t) {
-    const D = CM.DATA, key = monthKey(t);
-    if (stopCache && stopCache.key === key && stopCache.src === D) return stopCache.list;
+  const stopCache = new WeakMap();
+  BgNet.stops = function (t, city) {
+    if (city.mapId && city.mapId !== CM.mapId) return [];
+    const D = CM.DATA, key = monthKey(t), cached = stopCache.get(city);
+    if (cached && cached.key === key && cached.src === D && cached.terrain === city.terrainVer) return cached.list;
     // 只有地图上显示的站点：铁路设施、铁路地标和标注的码头。真实线路上其余车站只进入客流模型，不显示、不算接驳
     const out = [];
     for (const s of BgNet.auto(t).stations) out.push({ name: s.name, x: s.x, y: s.y, kind: 'rail', q: 1 });
-    for (const p of BgNet.piers(t)) out.push({ name: p.name, x: p.x, y: p.y, kind: 'ferry', q: 0.6 });
-    stopCache = { key: key, src: D, list: out };
+    for (const p of BgNet.piers(t, city, false)) out.push({ ...p, kind: 'ferry', q: 0.6 });
+    stopCache.set(city, { key: key, src: D, terrain: city.terrainVer, list: out });
     return out;
   };
   // 各地铁站的接驳：bonus 为感知步行时间的减少（分钟）。一座地铁站接最近的一个站点
-  BgNet.links = function (t, C) {
-    const stops = BgNet.stops(t), N = C.stations.length, bonus = new Float32Array(N), list = [], cell = CM.CFG.CELL_M, R = LINK_M / cell;
+  BgNet.links = function (t, C, city) {
+    const stops = BgNet.stops(t, city), N = C.stations.length, bonus = new Float32Array(N), list = [], cell = CM.CFG.CELL_M, R = LINK_M / cell;
     if (!stops.length) return null;
     for (let s = 0; s < N; s++) {
       if (C.serviced && !C.serviced[s]) continue;
@@ -358,15 +393,18 @@
     }
     return { bonus: bonus, list: list };
   };
+  const stopKey = p => p.kind + ':' + p.x + ',' + p.y + ':' + p.name;
   // 图层用的接驳统计：互补带来的上车人次按 Logit 弹性估算（与不接驳相比）
   BgNet.linkStats = function (g, kind) {
-    const m = g.model, acc = m.net && m.net.acc, L = acc && acc.bgLinks, sd = m.stDaily, stops = BgNet.stops(g.year()).filter(function (p) { return p.kind === kind; });
+    const m = g.model, acc = m.net && m.net.acc, L = acc && acc.bgLinks, sd = m.stDaily;
+    const stops = BgNet.stops(g.year(), g.city).filter(p => p.kind === kind), active = new Set(stops.map(stopKey));
     const c = CM.CFG, sh = m.dailyWk && m.dailyWk.metroShare ? m.dailyWk.metroShare : 0.15, th = c.choice.theta, ww = c.choice.walkW;
     const items = [], done = new Set(); let gain = 0;
     if (L && m.net.C && m.net.C.stations.length === L.bonus.length) for (const e of L.list) {
-      if (e.stop.kind !== kind) continue;
+      const key = stopKey(e.stop);
+      if (!active.has(key)) continue;
       const inn = sd && !m.dailyStale && sd.inn ? sd.inn[e.s] || 0 : 0, u = 0.4 * (1 - Math.exp(-th * ww * e.b * (1 - sh))), add = inn * u;   // 0.4：换乘吸引只作用在这座站能到达的出行上，按实测（约为弹性值的两到四成）取偏保守的值
-      items.push({ stop: e.stop, st: e.st, m: e.m, add: add }); gain += add; done.add(e.stop);
+      items.push({ stop: e.stop, st: e.st, m: e.m, add: add }); gain += add; done.add(key);
     }
     items.sort(function (a, b) { return b.add - a.add; });
     return { total: stops.length, linked: done.size, gain: gain, items: items, done: done };
@@ -376,7 +414,7 @@
     const stroke = function (w, col, dash) { ctx.setLineDash(dash || []); ctx.strokeStyle = halo; ctx.lineWidth = w + 3; ctx.stroke(); ctx.strokeStyle = col; ctx.lineWidth = w; ctx.stroke(); ctx.setLineDash([]); };
     ctx.globalAlpha = 0.95;
     if (kind === 'ferry') {
-      for (const f of BgNet.ferries(t)) {
+      for (const f of BgNet.ferries(t, true)) {
         ctx.beginPath(); f.pts.forEach(function (p, i) { const q = P(p[0], p[1]); if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); });
         stroke(2.2 * zw, FERRY_INK, [6, 5]);
       }
@@ -403,10 +441,11 @@
       ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.setLineDash([4, 3]); ctx.lineWidth = 2 * zw; ctx.strokeStyle = G; ctx.stroke(); ctx.setLineDash([]);
       ctx.beginPath(); ctx.arc(b[0], b[1], 5 * zw, 0, Math.PI * 2); ctx.lineWidth = 2; ctx.strokeStyle = G; ctx.stroke();
     }
-    for (const p of BgNet.stops(g.year())) {
+    const stops = kind === 'ferry' ? BgNet.piers(g.year(), g.city).map(p => ({ ...p, kind: 'ferry', q: 0.6 })) : BgNet.stops(g.year(), g.city);
+    for (const p of stops) {
       if (p.kind !== kind) continue;
       const q = P(p.x, p.y); if (q[0] < -20 || q[1] < -20 || q[0] > R.w + 20 || q[1] > R.h + 20) continue;
-      const on = LS.done.has(p), r = (p.q >= 1 ? 4 : 3) * zw;
+      const on = LS.done.has(stopKey(p)), r = (p.q >= 1 ? 4 : 3) * zw;
       ctx.beginPath();
       if (kind === 'ferry') { const d = r * 1.3; ctx.moveTo(q[0], q[1] - d); ctx.lineTo(q[0] + d, q[1]); ctx.lineTo(q[0], q[1] + d); ctx.lineTo(q[0] - d, q[1]); ctx.closePath(); }
       else ctx.rect(q[0] - r, q[1] - r, r * 2, r * 2);
@@ -448,7 +487,11 @@
       const segs = BgNet.segPts(H, s.i);
       for (let j = 0; j < segs.length; j++) {
         const v = s.maxSeg > 0 && g.model.bgDaily ? (g.model.bgDaily[R.layerOpt.bgDt || 'avg'].seg[s.i][j] || 0) : 0, w = Math.min(9, (2 + 7 * Math.sqrt(v / mx)) * zw / 1.6);
-        if (kind === 'ferry') { poly(segs[j], w, FERRY_INK, [Math.max(6, w * 2), Math.max(5, w * 1.6)], 0.95); continue; }
+        if (kind === 'ferry') {
+          const pair = G.along && G.along[j] > G.along[j + 1] ? [s.L.stops[j + 1], s.L.stops[j]] : [s.L.stops[j], s.L.stops[j + 1]];
+          const [a, b] = pair.map(p => BgNet.shore(g.city, p[1], p[2]).dock);
+          poly([a, ...segs[j], b], w, FERRY_INK, [Math.max(6, w * 2), Math.max(5, w * 1.6)], 0.95); continue;
+        }
         if (segs[j].length < 2) continue;
         ctx.globalAlpha = 0.95; ctx.beginPath(); let q = P(segs[j][0][0], segs[j][0][1]); ctx.moveTo(q[0], q[1]);
         for (let i = 1; i < segs[j].length; i++) { q = P(segs[j][i][0], segs[j][i][1]); ctx.lineTo(q[0], q[1]); }

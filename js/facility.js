@@ -61,6 +61,7 @@
     });
     return matches.sort(function (a, b) { return a.d - b.d; });
   };
+  Fac.openDate = function (f) { return Math.floor(f.open) + ' 年' + (f.openMonth ? ' ' + f.openMonth + ' 月' : ''); };
   Fac.shortName = function (f) { return f.name.replace(/（.*）/, ''); };
   // 接驳点或接驳口附近的普通车站（玩家反馈：大兴机场的接驳点周围没有人行道，车站显示已接通却没有旅客）：
   // 直线距离在范围内就算接通，不要求有路。界面（extLink）和客流（sim.js computeAccess）都用这一条。
@@ -118,8 +119,8 @@
     (D.facilities || []).forEach(function (s, i) {
       const T = TYPES[s.t]; if (!T) return;
       const f = { k: out.length, id: s.id || ('f' + i), name: s.n, label: s.label || s.n, t: s.t, T: T, x: 0, y: 0, r: s.r != null ? s.r : T.r, lmK: -1,
-        open: null, close: yrOf(s.y1), w: s.w != null ? curve(s.w) : null, pax: s.pax || null, p: s.p || T.p, we: s.we || null, note: s.note || '', src: s.src || null,
-        ext: s.ext ? { dir: s.ext[0], km: s.ext[1], v: EXT_DIR[s.ext[0]] || [0, 0], gate: !!s.gate, hideBeforeOpen: !!s.hideBeforeOpen, to: s.to || null } : null, rw: s.rw || null, noModel: !!s.noModel, tour: !!s.tour };   // rw：机场自己的跑道（格坐标，v2.2，用于模型选址）；tour：旅游景点（v3.0）
+        open: null, openMonth: Array.isArray(s.y0) ? s.y0[1] : null, close: yrOf(s.y1), w: s.w != null ? curve(s.w) : null, pax: s.pax || null, p: s.p || T.p, we: s.we || null, note: s.note || '', src: s.src || null,
+        ext: s.ext ? { dir: s.ext[0], km: s.ext[1], v: EXT_DIR[s.ext[0]] || [0, 0], gate: !!s.gate, snapWhenOpen: !!s.snapWhenOpen, to: s.to || null } : null, rw: s.rw || null, noModel: !!s.noModel, tour: !!s.tour };   // rw：机场自己的跑道（格坐标，v2.2，用于模型选址）；tour：旅游景点（v3.0）
       if (s.lm) {
         const k = lms.findIndex(function (l) { return l.id === s.lm; });
         if (k < 0) return;

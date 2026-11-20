@@ -1,5 +1,17 @@
 'use strict';
 (function(CM){CM.I18N_EN = {
+  "真实地理 · 1970 年起 · 港币": "Real geography · From 1970 · HKD",
+  "真实地理 · 1900 年起 · 法郎 / 欧元": "Real geography · From 1900 · FRF / EUR",
+  "满分 100": "Out of 100",
+  "没有超龄列车": "No over-age trains",
+  "不属于深圳市的建设范围：线路可以穿过，不能设站": "Outside Shenzhen's construction area: lines can pass through but stations can't be built",
+  "{y} 年 {m} 月": "{y}-{m}",
+  "{y} 年启用": "Opens in {y}",
+  "{y} 年 {m} 月启用": "Opens {y}-{m}",
+  "{y} 年启用 · 地图外 {km}": "Opens in {y} · {km} off map",
+  "{y} 年 {m} 月启用 · 地图外 {km}": "Opens {y}-{m} · {km} off map",
+  "设施{status}，目前不参与出行计算。": "{status}. The facility currently generates no trips.",
+  "启用后可接通": "Connections available after opening",
   "继续绘线": "Continue Drawing",
   "转弯点": "Bend Points",
   "点击地图添加转弯点，再关闭此按钮以连线": "Tap the map to add bend points. Turn this off to connect the track.",
@@ -16625,7 +16637,7 @@ Object.assign(window.CM.I18N_EN, {
   "麦考瑞公园被定为专门的就业中心，可这里还没有地铁。": "Macquarie Park is designated a specialised employment centre, but it has no metro yet.",
   "2005 年的大都市战略把麦考瑞公园定为专门就业中心，之后制药、科技公司的总部陆续迁入；2009 年埃平–查茨伍德铁路在这里设站。": "The 2005 metropolitan strategy made Macquarie Park a specialised employment centre, and pharmaceutical and technology headquarters followed; the Epping–Chatswood rail link opened stations here in 2009.",
   "西悉尼国际机场": "Western Sydney International Airport",
-  "西悉尼国际机场（南希–伯德·沃尔顿）位于地图以西约 20 km 的巴杰里溪，2018 年动工，计划 2026 年底通航；本局按 2026 年 12 月启用模拟。": "Western Sydney International (Nancy-Bird Walton) Airport is at Badgerys Creek, about 20 km west of the map. Construction began in 2018 and it is due to open in late 2026; this game simulates an opening in December 2026.",
+  "西悉尼国际机场（南希–伯德·沃尔顿）位于地图边缘以西约 10 km 的巴杰里溪，2018 年动工，计划 2026 年底通航；本局按 2026 年 12 月启用模拟。": "Western Sydney International (Nancy-Bird Walton) Airport is at Badgerys Creek, about 10 km west of the map edge. Construction began in 2018 and it is due to open in late 2026; this game simulates an opening in December 2026.",
   "重建新南威尔士": "Rebuilding NSW",
   "“重建新南威尔士”计划": "Rebuilding NSW plan",
   "州政府长期出租电网资产筹资，投入地铁、轻轨和道路等大型交通工程。": "The state leases its electricity network to raise funds for major transport projects such as the metro, light rail and roads.",
@@ -18698,6 +18710,13 @@ Object.assign(window.CM.I18N_EN_MAP.tk, {
 });
 
 Object.assign(window.CM.I18N_EN, {
+  "海岸线与经营更新": "Coastlines and operations",
+  "新增后期挑战「不扩张也能减亏」，可通过改善现有线网的经营完成目标。": "The new late-game challenge asks you to reduce losses by improving your existing network.",
+  "海边道路按当年岸线显示，填海成陆后补绘相应路段。": "Coastal roads follow the shoreline of the current year. Road segments appear as land is reclaimed.",
+  "渡轮在水边停靠，地铁换乘按当年的岸上码头位置计算。": "Ferries berth at the waterfront. Metro transfers use the pier’s shore location for the current year.",
+  "山地限制人口、岗位和楼高。旧档的山地开发随月度发展逐步调整。": "Hills limit population, jobs and building heights. Hillside development in existing saves adjusts gradually each month.",
+  "减淡道路拥堵图层和选城海报的蒙版，让底图更清楚。": "Lighter overlays make the basemap and city selection posters easier to see.",
+  "西悉尼机场提前显示启用年月，补齐深圳市外建设说明和部分英文译文。": "Western Sydney Airport shows its opening date in advance. The update also clarifies construction outside Shenzhen and fills gaps in the English UI.",
   "建设校验与客流调整": "Construction checks and ridership",
   "既有轨道沿用原有选址。新建、改线或改建时复核保护区、机场、铁路平交等限制。": "Existing tracks retain their original siting approval. New or altered tracks are checked for protected areas, airports and at-grade rail crossings.",
   "接管铁路可继续修改运营速度。小半径弯道提示限速，草案可以确认。": "You can change the operating speed of a taken-over railway. Tight curves display a speed restriction and the draft can be confirmed.",

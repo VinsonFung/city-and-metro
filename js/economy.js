@@ -1845,6 +1845,18 @@
         title: '疏解「' + L.name + '」最拥挤区段', desc: L.name + ' 的「' + (a ? a.name : '') + '—' + (b ? b.name : '') + '」早高峰满载率已达 ' + U.fmtPct(top.lf, 0) + '，列车已挤不下。不修新线也可以：把它降到 100% 以下并保持 3 个月。',
         tips: ['升级沿线最小的车站，列车就能加长编组', '在拥挤区段两端做换乘，引导乘客换到平行线路', '把支线拆成独立线路或减少共线，空出班次'] });
     }
+    if (g.econ.mode === 'challenge' && free('fiscal')) {
+      const last = g.econ.ledger[g.econ.ledger.length - 1];
+      const recovery = last && last.ops > 0 ? last.fare / last.ops : 1;
+      const km = CM.Milestones ? CM.Milestones.netInfo(g).km : 0;
+      if (recovery < 0.6 && km > 15) {
+        const target = Math.min(0.9, Math.round((recovery + 0.15) * 20) / 20);
+        const kmCap = Math.round(km * 1.05 * 10) / 10;
+        out.push({ type: 'fiscal', target, sustain: 3, kmCap, coolKey: 'opt:fiscal', months: 30, reward: 3 * gm, theme: Tasks.THEME.fiscal,
+          title: '不扩张也能减亏', desc: '票款只够付 ' + U.fmtPct(recovery, 0) + ' 的运营费。在线网不超过 ' + U.fmtNum(kmCap, 1) + ' km 的前提下，把票款覆盖率提高到 ' + U.fmtPct(target, 0) + ' 并保持 3 个月。',
+          tips: ['调整票价：小步上调起步价或每段加价，观察客流', '缩小客流很少的车站规模，节省车站运营费（缩站不退款）', '用换乘和贯通把客流引到已有线路上，而不是再修新线'] });
+      }
+    }
     // 城市扩张后的老线路：与 2–4 年前（线路长度基本不变）相比，每公里客流下降 15% 以上
     const stats = Tasks.lineStats(g), hist = this.lineHist || {};
     for (const lid in hist) {

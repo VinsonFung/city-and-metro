@@ -162,7 +162,7 @@
       { id: 'dapeng', name: '葵涌', streets: ['葵涌街道'], open: 2014, plan: 'res' },
       { id: 'hk', name: '香港（境外）', district: ['元朗區', '北區', '大埔區'], open: null, lockNote: '香港特别行政区，不属于深圳的建设范围' },
     ],
-    defaultRegion: { id: 'outer', name: '东莞·惠州（市外）', open: null, passOnly: true, lockNote: '市外区域，可穿过，不能设站' },
+    defaultRegion: { id: 'outer', name: '东莞·惠州（市外）', open: null, passOnly: true, lockNote: '不属于深圳市的建设范围：线路可以穿过，不能设站' },
     plans: CM.DATA.plans,
     // 2000 年人口与就业中心（估算，人/km²；r 约为影响半径 km）。2000 年全市约 700 万人，超过六成住在关外
     centers: [

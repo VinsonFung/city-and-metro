@@ -81,7 +81,8 @@
     this.activateLandmarks(startYear);
     yield;
 
-    // 1990 年人口与就业（估算）
+    // 开局人口与就业（估算）
+    const hills = this.hillLimits();
     let sumP = 0, sumJ = 0;
     for (let c = 0; c < N; c++) {
       if ((c & 4095) === 4095) yield;
@@ -102,6 +103,7 @@
       jb *= 0.65 + 0.7 * U.hash2(i, j, seed + 5);
       // 林地与未开放区域人口较少
       p *= 1 - 0.6 * this.wood[c]; jb *= 1 - 0.6 * this.wood[c];
+      p *= hills.homes[c]; jb *= hills.jobs[c];
       const urban = (p + jb) * ds > 2600;
       if (urban && L !== LU.LANDMARK) {
         this.lu[c] = this.plan[c];
@@ -1628,7 +1630,40 @@
     return out.length >= 2 ? out : null;
   };
 
+  // 用山地格的累积和，按 5×5 和 7×7 邻域限制住宅及岗位。填海或读档换用新地形时重算。
+  City.prototype.hillLimits = function () {
+    const lu = this.lu, cached = this._hillLimits;
+    if (cached && cached.lu === lu && cached.version === this.terrainVer) return cached;
+    const W = this.W, H = this.H, stride = W + 1, sums = new Uint32Array(stride * (H + 1));
+    const homes = new Float32Array(this.N).fill(1), jobs = new Float32Array(this.N).fill(1);
+    for (let y = 0; y < H; y++) {
+      let row = 0;
+      for (let x = 0; x < W; x++) {
+        row += lu[y * W + x] === LU.HILL ? 1 : 0;
+        sums[(y + 1) * stride + x + 1] = sums[y * stride + x + 1] + row;
+      }
+    }
+    const fraction = function (x, y, r) {
+      const x0 = Math.max(0, x - r), y0 = Math.max(0, y - r);
+      const x1 = Math.min(W, x + r + 1), y1 = Math.min(H, y + r + 1);
+      const n = (x1 - x0) * (y1 - y0) - 1;
+      const count = sums[y1 * stride + x1] - sums[y1 * stride + x0] - sums[y0 * stride + x1] + sums[y0 * stride + x0];
+      return n ? (count - (lu[y * W + x] === LU.HILL ? 1 : 0)) / n : 0;
+    };
+    for (let c = 0; c < this.N; c++) {
+      const x = c % W, y = Math.floor(c / W);
+      homes[c] = U.clamp(1 - (fraction(x, y, 2) - 0.4) / 0.2, 0.05, 1);
+      jobs[c] = U.clamp(1 - (fraction(x, y, 3) - 0.25) / 0.15, 0.05, homes[c]);
+    }
+    return (this._hillLimits = { lu, version: this.terrainVer, homes, jobs });
+  };
+
   // ---------------- 建筑高度 ----------------
+  function hillHeightCap(land, homes, jobs) {
+    const homeCap = homes < 1 ? 10 + 30 * homes : Infinity;
+    return jobs < 1 && (land === LU.COM || land === LU.MIX || land === LU.INST)
+      ? Math.min(homeCap, 15 + 60 * jobs) : homeCap;
+  }
   City.prototype.heightFor = function (c, year) {
     const L = this.lu[c];
     const pd = this.pop[c] / CELL_KM2, jd = this.jobs[c] / CELL_KM2;
@@ -1647,7 +1682,8 @@
     // 历史限高（可选）：区域的 maxHeight 优先，其次地图的 maxHeight（如巴黎 1950 年代以前约 20 m 檐口 + 屋顶、1977 年起市内限高）
     const rg = this.regions[this.region[c]], mh = (rg && rg.maxHeight) || D.maxHeight;
     if (mh) cap = Math.min(cap, U.interp(mh, year));
-    return Math.min(cap, h) * (0.8 + 0.4 * hsh);
+    const hills = this.hillLimits();
+    return Math.min(hillHeightCap(L, hills.homes[c], hills.jobs[c]), Math.min(cap, h) * (0.8 + 0.4 * hsh));
   };
 
   // ---------------- 区域 ----------------
@@ -1718,7 +1754,7 @@
     const goP = GO ? curveAt(GO.pop) : 1, goJ = GO ? (GO.jobs == null ? goP : curveAt(GO.jobs)) : 1;
     const wR = new Float32Array(N), wJ = new Float32Array(N), capR = new Float32Array(N), capJ = new Float32Array(N);
     let sR = 0, sJ = 0;
-    const mi = ctx.monthIndex;
+    const mi = ctx.monthIndex, hills = this.hillLimits();
     for (let c = 0; c < N; c++) {
       const L = this.lu[c];
       if (L === LU.WATER || L === LU.HILL || L === LU.PARK || L === LU.AIRPORT || L === LU.LANDMARK) continue;
@@ -1727,7 +1763,8 @@
       if (lf <= 0.05) continue;
       const P = L === LU.RURAL ? this.plan[c] : L;
       const pf = PL ? PL.field[c] : 0;
-      const cr = resCap(P) * eraMul * lf * (1 + GL.capR * pw * Math.min(1.5, pf)), cj = jobCap(P, this.regions[this.region[c]].plan) * eraMul * lf * (1 + GL.capJ * pw * Math.min(2, pf));
+      const cr = resCap(P) * eraMul * lf * hills.homes[c] * (1 + GL.capR * pw * Math.min(1.5, pf));
+      const cj = jobCap(P, this.regions[this.region[c]].plan) * eraMul * lf * hills.jobs[c] * (1 + GL.capJ * pw * Math.min(2, pf));
       capR[c] = cr; capJ[c] = cj;
       const i = c % W, j = (c / W) | 0;
       let nb = 0;
@@ -1758,6 +1795,7 @@
       }
     }
     const changed = [];
+    let hillChanged = false;
     const add = (arr, cap, w, s, d) => {
       if (d > 0 && s > 0) {
         let left = d;
@@ -1773,14 +1811,40 @@
           left -= used; s = s2;
           if (s <= 0) break;
         }
+        return left;
       } else if (d < 0) {
         let tot2 = 0; for (let c = 0; c < N; c++) tot2 += arr[c];
         const f = 1 + d / Math.max(1, tot2);
         for (let c = 0; c < N; c++) arr[c] *= f;
+        return 0;
+      }
+      return d;
+    };
+    // 每月约 4% 的超容量人口和岗位迁往其他街区。没有接收容量时保留尚未迁出的人口和岗位。
+    const distribute = (arr, cap, w, sum, growth, limits) => {
+      const moves = []; let moved = 0;
+      for (let c = 0; c < N; c++) {
+        if (limits[c] >= 1 || cap[c] <= 0 || arr[c] <= cap[c] + 1) continue;
+        const amount = Math.min(arr[c] - cap[c], (arr[c] - cap[c]) * 0.04 + 1);
+        const before = arr[c]; arr[c] -= amount;
+        const actual = before - arr[c];
+        if (actual > 0) { moves.push([c, actual]); moved += actual; }
+      }
+      const left = add(arr, cap, w, sum, growth + moved);
+      const restore = moved ? U.clamp((left - Math.max(0, growth)) / moved, 0, 1) : 0;
+      for (const [c, amount] of moves) {
+        arr[c] += restore * amount;
+        if (restore < 1) { this.dirty.add(c); hillChanged = true; }
       }
     };
-    add(this.pop, capR, wR, sR, dP);
-    add(this.jobs, capJ, wJ, sJ, dJ);
+    distribute(this.pop, capR, wR, sR, dP, hills.homes);
+    distribute(this.jobs, capJ, wJ, sJ, dJ, hills.jobs);
+    for (let c = 0; c < N; c++) {
+      if (hills.jobs[c] >= 1 || capR[c] <= 0) continue;
+      if (this.bh[c] > hillHeightCap(this.lu[c], hills.homes[c], hills.jobs[c]) + 0.001) {
+        this.bh[c] = this.heightFor(c, year); this.dirty.add(c); hillChanged = true;
+      }
+    }
     let newUrban = 0, streetsChanged = false;
     const seen = new Set();
     // 工地（只用于画面上的塔吊，不参与模拟、不存档）：新城市化或明显加高的街区，记录开工月份
@@ -1797,7 +1861,7 @@
       if (nh > this.bh[c] * 1.12 + 1) { if (nh - this.bh[c] >= 6) sites.set(c, mi); this.bh[c] = nh; this.dirty.add(c); }
     }
     if (streetsChanged) { this.updateStreets(); }
-    if (changed.length) this.version++;
+    if (changed.length || hillChanged) this.version++;
     return { dPop: dP, dJobs: dJ, newUrban: newUrban, streetsChanged: streetsChanged };
   };
   function resCap(L) {

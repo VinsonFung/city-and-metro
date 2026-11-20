@@ -156,21 +156,25 @@
     if (s.roads !== c.roadGroups) {
       // 线程已解码同一份地理数据：道路只发序号与分组（复制全部折线要几百毫秒），新开局第一帧不再卡一下
       const byP = new Map(); CM.Geo.roads.forEach(function (rd, i) { byP.set(rd.p, i); });
-      const nG = c.roadGroups.length, nW = c.roadWays.length, cls = new Uint8Array(nG), flags = new Uint8Array(nG), wayRoad = new Int32Array(nW), wayGroup = new Int32Array(nW), extra = [];
-      for (let i = 0; i < nG; i++) { cls[i] = c.roadGroups[i].cls; flags[i] = c.roadGroups[i].flags; }
+      const nG = c.roadGroups.length, nW = c.roadWays.length, cls = new Uint8Array(nG), flags = new Uint8Array(nG), synthetic = new Uint8Array(nG), wayRoad = new Int32Array(nW), wayGroup = new Int32Array(nW), extra = [];
+      for (let i = 0; i < nG; i++) { cls[i] = c.roadGroups[i].cls; flags[i] = c.roadGroups[i].flags; synthetic[i] = !!c.roadGroups[i].sim; }
       for (let i = 0; i < nW; i++) { const w = c.roadWays[i], k = byP.get(w.p); wayGroup[i] = w.g; if (k !== undefined) wayRoad[i] = k; else { wayRoad[i] = -1 - extra.length; extra.push(w.p); } }
-      msg.roads = { cls: cls, flags: flags, wayRoad: wayRoad, wayGroup: wayGroup, extra: extra };
+      msg.roads = { cls: cls, flags: flags, synthetic: synthetic, wayRoad: wayRoad, wayGroup: wayGroup, extra: extra };
       s.roads = c.roadGroups; any = true;
     }
     if (s.geoVer !== c.geoVer || s.terrainVer !== c.terrainVer) {
       msg.terrain = { wmask: c.wmask, bmask: c.bmask, landFrac: c.landFrac, wood: c.wood, terrainVer: c.terrainVer, terrainYear: c.terrainYear, reclaim: c.reclaimWater ? c.reclaimWater() : [] };
+      if (s.terrainVer !== c.terrainVer) {
+        msg.terrain.wsdf = c.wsdf;
+        msg.terrain.roadReclaimMask = coastalReclaimMask(c);
+      }
       s.geoVer = c.geoVer; s.terrainVer = c.terrainVer; any = true;
     }
     if (s.version !== c.version) {
       msg.cells = { version: c.version, lu: c.lu, street: c.street, taken: c.taken, bh: c.bh, pop: c.pop, jobs: c.jobs, urbanYear: c.urbanYear, protectedId: c.protectedId, landmarkOn: c.landmarkOn };
       s.version = c.version; any = true;
     }
-    if (s.roadVersion !== c.roadVersion) { msg.built = c.roadsBuilt; s.roadVersion = c.roadVersion; any = true; }
+    if (s.roadVersion !== c.roadVersion) { msg.built = c.roadsBuilt; msg.roadVersion = c.roadVersion; s.roadVersion = c.roadVersion; any = true; }
     const LK = c.lockState();
     if (s.lk !== LK) { msg.lock = { mask: LK.mask, info: LK.info.map(function (f) { return { n: f.n, b: f.b }; }) }; s.lk = LK; any = true; }
     const fm = R._facm && R._facm.city === c ? R._facm : null;
@@ -603,6 +607,7 @@
     this._lmc = null; this._lmcCity = null;
     this.lastFrameMs = null; this.detail = { tier: 0, ema: 8, busy: 0, calm: 0 };
     this.roadVer = g ? g.city.roadVersion : -1;
+    this._roadParts = null; this._roadGaps = null;
     // 换城市（含换地图）时清掉按城市版本号缓存的数据，避免不同城市的版本号恰好相同
     this.linkGrid = null; this.linkGridVer = -1; this._cgIdx = null; this._cgRuns = null; this._fa = null; this._fl = null; this._flKey = null;
     this._todL = null; this._rev = null; this._smC = null;
@@ -871,6 +876,108 @@
     return out.length ? out : null;
   };
 
+  // 海边道路按地形裁剪。只用于显示，原始道路几何与通车状态继续供模拟使用。
+  function coastalReclaimMask(city) {
+    if (city.roadReclaimMask !== undefined) return city.roadReclaimMask;
+    return D.reclaim?.length ? city.reclaimGeom().mask : null;
+  }
+  Renderer.prototype.roadParts = function (city, way) {
+    let cache = this._roadParts;
+    if (!cache || cache.city !== city || cache.version !== city.terrainVer) {
+      this._roadParts = cache = { city, version: city.terrainVer, ways: new WeakMap(), reclaim: coastalReclaimMask(city) };
+    }
+    if (cache.ways.has(way)) return cache.ways.get(way);
+    const p = way.p, spans = [], mask = cache.reclaim;
+    const waterKind = function (x, y) {
+      const depth = city.waterDistAt(x, y);
+      if (depth >= -0.06) return 0;
+      if (mask) {
+        const i = Math.floor(x * city.FS), j = Math.floor(y * city.FS);
+        if (i >= 0 && i < city.FW && j >= 0 && j < city.FH) {
+          const reclaimed = mask[j * city.FW + i] - 60001;
+          if (reclaimed >= 0 && D.reclaim[reclaimed]?.year > city.terrainYear) return 2;
+        }
+      }
+      return depth < -0.12 ? 1 : 0;
+    };
+    // 匝道按地面规则处理，已通车的桥梁和隧道直接保留原线形。
+    if (!(city.roadGroups[way.g].flags & 3) && city.wsdf) {
+      let span = null;
+      for (let k = 0; k + 3 < p.length; k += 2) {
+        const x = p[k], y = p[k + 1], dx = p[k + 2] - x, dy = p[k + 3] - y;
+        const len = Math.hypot(dx, dy);
+        if (!len) continue;
+        const n = Math.ceil(len / 0.05);
+        for (let i = 0; i < n; i++) {
+          const mid = (i + 0.5) / n, kind = waterKind(x + dx * mid, y + dy * mid);
+          if (!span || kind !== span.kind) {
+            const t = i / n, a = x + dx * t, b = y + dy * t;
+            if (span && i) span.pts.push(a, b);
+            span = { kind, pts: [a, b], length: 0 }; spans.push(span);
+          }
+          span.length += len / n;
+        }
+        span.pts.push(p[k + 2], p[k + 3]);
+      }
+    }
+    const hide = part => part.kind === 2 || (part.kind === 1 && part.length >= 0.15);
+    let result = [way];
+    if (spans.some(hide)) {
+      result = [];
+      let points = null;
+      for (const part of spans) {
+        if (hide(part)) { points = null; continue; }
+        if (points) for (let i = 2; i < part.pts.length; i++) points.push(part.pts[i]);
+        else { points = part.pts; result.push({ g: way.g, p: points }); }
+      }
+      for (const part of result) part.bbox = CM.Geo.bbox(part.p);
+    }
+    cache.ways.set(way, result);
+    return result;
+  };
+
+  // 两端都接上已通车道路、总长不足 150 m 的断口可先铺在底图上。
+  Renderer.prototype.roadGaps = function (city) {
+    const previous = this._roadGaps;
+    if (previous && previous.city === city && previous.road === city.roadVersion && previous.terrain === city.terrainVer) return previous.groups;
+    const groups = new Set(), endpoints = new Map(), pending = new Map();
+    const key = (x, y) => Math.floor(x / 0.08) + ',' + Math.floor(y / 0.08);
+    const put = function (x, y) {
+      const k = key(x, y);
+      if (!endpoints.has(k)) endpoints.set(k, []);
+      endpoints.get(k).push([x, y]);
+    };
+    for (const way of city.roadWays) {
+      const p = way.p, group = city.roadGroups[way.g];
+      if (p.length < 4) continue;
+      if (city.roadsBuilt[way.g]) {
+        put(p[0], p[1]); put(p[p.length - 2], p[p.length - 1]);
+      } else if (!(group.flags & 3) && !group.sim) {
+        const entry = pending.get(way.g);
+        if (entry) entry.push(way); else pending.set(way.g, [way]);
+      }
+    }
+    const near = function (x, y) {
+      const cx = Math.floor(x / 0.08), cy = Math.floor(y / 0.08);
+      for (let j = cy - 1; j <= cy + 1; j++) for (let i = cx - 1; i <= cx + 1; i++) {
+        for (const p of endpoints.get(i + ',' + j) || []) if (Math.hypot(p[0] - x, p[1] - y) < 0.08) return true;
+      }
+      return false;
+    };
+    for (const [id, ways] of pending) {
+      let len = 0;
+      const joined = ways.every(way => {
+        const p = way.p;
+        if (!near(p[0], p[1]) || !near(p[p.length - 2], p[p.length - 1])) return false;
+        for (let k = 2; k < p.length; k += 2) len += Math.hypot(p[k] - p[k - 2], p[k + 1] - p[k - 1]);
+        return len < 0.6 && this.roadParts(city, way)[0] === way;
+      });
+      if (joined) groups.add(id);
+    }
+    this._roadGaps = { city, road: city.roadVersion, terrain: city.terrainVer, groups };
+    return groups;
+  };
+
   Renderer.prototype.drawGround = function (ctx, X0, Y0, X1, Y1, lvl) {
     const g = this.game, city = g.city, W = city.W, H = city.H, Geo = CM.Geo;
     const i0 = Math.max(0, Math.floor(X0)), j0 = Math.max(0, Math.floor(Y0)), i1 = Math.min(W, Math.ceil(X1)), j1 = Math.min(H, Math.ceil(Y1));
@@ -1087,6 +1194,8 @@
       ctx.strokeStyle = TH.night ? '#3f3a33' : '#8f8573'; ctx.lineWidth = Math.max(0.09, px * 4.2); ctx.stroke(path);
       ctx.strokeStyle = TH.night ? '#6a6252' : '#cfc4ad'; ctx.lineWidth = Math.max(0.055, px * 2.6); ctx.stroke(path);
     }
+    // 填海前先盖回水面，再绘制已经通车的桥梁、隧道与可见的普通道路。
+    if (anyRc) { ctx.fillStyle = GROUND.water; ctx.fill(rpth, 'nonzero'); }
     // 支路：只在已开发的街区显示
     const streets = Geo.streetBk && lvl >= 16 ? Geo.query(Geo.streetBk, X0 - 0.5, Y0 - 0.5, X1 + 0.5, Y1 + 0.5) : [];
     const st = new Path2D();
@@ -1095,17 +1204,19 @@
       for (let q = 0; q + 3 < p.length; q += 2) {
         const c = city.cellAt((p[q] + p[q + 2]) / 2, (p[q + 1] + p[q + 3]) / 2);
         if (c < 0 || !city.street[c] || city.lu[c] === LU.PARK) continue;
+        if (city.wsdf && city.waterDistAt((p[q] + p[q + 2]) / 2, (p[q + 1] + p[q + 3]) / 2) < -0.12) continue;
         st.moveTo(p[q], p[q + 1]); st.lineTo(p[q + 2], p[q + 3]);
       }
     }
     // 主要道路（已通车）
     const ways = city.roadWayBk ? Geo.query(city.roadWayBk, X0 - 0.5, Y0 - 0.5, X1 + 0.5, Y1 + 0.5) : [];
     const lay = { 2: [], 3: [], 4: [] }, links = [], tunnels = [];
+    const gaps = ways.length ? this.roadGaps(city) : null;
     for (const k of ways) {
       const w = city.roadWays[k];
-      if (!city.roadsBuilt[w.g]) continue;
-      const gr = city.roadGroups[w.g];
-      if (gr.flags & 2) tunnels.push(w); else if (gr.flags & 4) links.push(w); else lay[gr.cls].push(w);
+      if (!city.roadsBuilt[w.g] && !gaps.has(w.g)) continue;
+      const gr = city.roadGroups[w.g], list = gr.flags & 2 ? tunnels : gr.flags & 4 ? links : lay[gr.cls];
+      for (const part of this.roadParts(city, w)) list.push(part);
     }
     const path = (arr) => { const p = new Path2D(); for (const w of arr) p.addPath(this.featurePath(w, false)); return p; };
     const bridgePath = (arr) => { const p = new Path2D(); for (const w of arr) if (city.roadGroups[w.g].flags & 1) p.addPath(this.featurePath(w, false)); return p; };
@@ -1128,8 +1239,6 @@
     ctx.lineWidth = Math.max(0.12, px * 3); ctx.stroke(P4);
     if (tunnels.length) { ctx.strokeStyle = RD.tunnel; ctx.lineWidth = Math.max(0.05, px * 1.6); ctx.setLineDash([0.12, 0.08]); ctx.stroke(PT); ctx.setLineDash([]); }
     if (lvl >= 32 && lay[4].length) { ctx.strokeStyle = RD.expLine; ctx.lineWidth = px; ctx.stroke(P4); }
-    // 尚未填海成陆的区域盖回水面：伸向新土地的道路、桥梁与铁路在成陆前不显示
-    if (anyRc) { ctx.fillStyle = GROUND.water; ctx.fill(rpth, 'nonzero'); }
     // 地标占地（2D）
     for (let k = 0; k < D.landmarks.length; k++) {
       if (!city.landmarkOn[k]) continue;
@@ -2919,8 +3028,10 @@
     const detailScale = z >= 28 ? 1 : (this.detail.tier === 2 ? 0.68 : this.detail.tier === 1 ? 0.85 : 1);
     const eff = z * Math.min(dpr, 1.5) * (1 - 0.28 * t) * detailScale;
     const queue = [];
+    if (this.layer !== 'none') this._lastLayer = this.layer;
+    const congestion = this._lastLayer === 'cong';
     const lvl = this.rasterLevel(eff, { x0: wx0, y0: wy0, x1: wx1, y1: wy1 }, queue,
-      t >= 0.999 && cam.view === 1 && under < 0.99 && (this.layerFade || 0) < 0.99);
+      t >= 0.999 && cam.view === 1 && under < 0.99 && (congestion || (this.layerFade || 0) < 0.99));
     setWorld();
     if (this.overviewJob) queue.push({ kind: 'o', d: 1 });
     if (this.overview) {
@@ -2974,15 +3085,15 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     // 分析图层开启时：地面加一层浅色蒙版，隐藏建筑与车辆，让图层本身清楚可读（渐变过渡）
     this.layerFade = U.clamp((this.layerFade || 0) + (layerOn ? dt : -dt) / 0.25, 0, 1);
-    if (this.layerFade > 0.01 && (this.layer === 'cong' || this.layer === 'station' || this.layer === 'tod' || !layerOn)) {
-      ctx.fillStyle = U.rgb(TH.fog || TH.bg, 0.5 * this.layerFade); ctx.fillRect(0, 0, this.w, this.h);
+    if (this.layerFade > 0.01 && (congestion || this.layer === 'station' || this.layer === 'tod' || !layerOn)) {
+      ctx.fillStyle = U.rgb(TH.fog || TH.bg, (congestion ? 0.2 : 0.5) * this.layerFade); ctx.fillRect(0, 0, this.w, this.h);
     }
     // 经纬网格（视图工具）：画在地面上、建筑之下，保持低调
     if (CM.Grid) CM.Grid.draw(ctx, this);
     // ---- 建筑与动态对象 ----
     const agents = this.agentsOn && this.layerFade < 0.5 ? CM.agents : null;
     if (t >= 0.999 && cam.view === 1) this.bFade = Math.min(1, this.bFade + dt / 0.3); else this.bFade = Math.max(0, this.bFade - dt / 0.15);
-    const bAlpha = this.bFade * (1 - under) * (1 - this.layerFade);
+    const bAlpha = this.bFade * (1 - under) * (1 - (congestion ? 0.7 : 1) * this.layerFade);
     const agentAlpha = (1 - under) * (1 - this.layerFade);
     if (bAlpha > 0.01 && lvl) {
       const ilvl = lvl;
@@ -3081,7 +3192,7 @@
     else if (pending) budget = Math.max(2, Math.min(g.preview ? 4 : CFG.perf.sharpBudgetMs, 16 - (performance.now() - tStart)));
     else {
       budget = this.detail.ema < 14 && !(this.cam.fly) ? Math.min(CFG.perf.prefetchMs, Math.max(0, 14 - (performance.now() - tStart))) : 0;
-      if (budget > 0.5) this.prefetch(queue, lvl, { x0: wx0, y0: wy0, x1: wx1, y1: wy1 }, t >= 0.999 && cam.view === 1 && under < 0.99 && this.layerFade < 0.99);
+      if (budget > 0.5) this.prefetch(queue, lvl, { x0: wx0, y0: wy0, x1: wx1, y1: wy1 }, t >= 0.999 && cam.view === 1 && under < 0.99 && (congestion || this.layerFade < 0.99));
       else budget = 0;
     }
     // 镜头移动中（拖动、滚轮缩放、键盘平移）：每帧补块的预算收紧，保证移动流畅；停下后再用完整预算补齐
@@ -3825,31 +3936,33 @@
   Renderer.DIFF_COLS = function () { return AX.enabled() ? DIFF_COLS_AX : DIFF_COLS; };
   Renderer.prototype.congIndex = function () {
     const city = this.game.city, car = city.car;
-    if (this._cgIdx && this._cgIdx.city === city && this._cgIdx.ver === city.roadVersion) return this._cgIdx;
+    if (this._cgIdx && this._cgIdx.city === city && this._cgIdx.ver === city.roadVersion && this._cgIdx.terrain === city.terrainVer) return this._cgIdx;
     const byName = new Map();
     for (const L of car.links) { if (L.cls < 3 || !L.name) continue; let a = byName.get(L.name); if (!a) { a = []; byName.set(L.name, a); } a.push(L); }
     const ways = [], STEP = 0.4;
-    for (const w of city.roadWays) {
-      const gr = city.roadGroups[w.g];
-      if (gr.cls < 3 || (gr.flags & 4)) continue;   // 快速路、主干道（匝道不画）
-      const p = w.p, xs = [], ys = [], vt = [];
-      for (let k = 0; k + 3 < p.length; k += 2) {
-        const ax = p[k], ay = p[k + 1], bx = p[k + 2], by = p[k + 3], n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / STEP));
-        for (let q = k === 0 ? 0 : 1; q <= n; q++) { xs.push(ax + (bx - ax) * q / n); ys.push(ay + (by - ay) * q / n); vt.push(q === 0 || q === n ? 1 : 0); }
-      }
-      const near = byName.get(w.g + 1) || [], lk = new Int32Array(xs.length);
-      for (let i = 0; i < xs.length; i++) {
-        let best = -1, bd = 1.0;
-        for (const L of near) {
-          const b = L.bbox; if (xs[i] < b[0] - 1 || xs[i] > b[2] + 1 || ys[i] < b[1] - 1 || ys[i] > b[3] + 1) continue;
-          const d = U.distToPoly(xs[i], ys[i], L.pts); if (d < bd) { bd = d; best = L.id; }
+    for (const way of city.roadWays) {
+      const gr = city.roadGroups[way.g];
+      if (!city.roadsBuilt[way.g] || gr.cls < 3 || (gr.flags & 4)) continue;
+      for (const w of this.roadParts(city, way)) {   // 快速路、主干道（匝道不画）
+        const p = w.p, xs = [], ys = [], vt = [];
+        for (let k = 0; k + 3 < p.length; k += 2) {
+          const ax = p[k], ay = p[k + 1], bx = p[k + 2], by = p[k + 3], n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / STEP));
+          for (let q = k === 0 ? 0 : 1; q <= n; q++) { xs.push(ax + (bx - ax) * q / n); ys.push(ay + (by - ay) * q / n); vt.push(q === 0 || q === n ? 1 : 0); }
         }
-        if (best < 0) { const L = this.pickLink(xs[i], ys[i], 0.6); if (L && L.cls >= 2) best = L.id; }
-        lk[i] = best;
+        const near = byName.get(w.g + 1) || [], lk = new Int32Array(xs.length);
+        for (let i = 0; i < xs.length; i++) {
+          let best = -1, bd = 1.0;
+          for (const L of near) {
+            const b = L.bbox; if (xs[i] < b[0] - 1 || xs[i] > b[2] + 1 || ys[i] < b[1] - 1 || ys[i] > b[3] + 1) continue;
+            const d = U.distToPoly(xs[i], ys[i], L.pts); if (d < bd) { bd = d; best = L.id; }
+          }
+          if (best < 0) { const L = this.pickLink(xs[i], ys[i], 0.6); if (L && L.cls >= 2) best = L.id; }
+          lk[i] = best;
+        }
+        ways.push({ g: w.g, cls: gr.cls, bbox: w.bbox, xs: Float32Array.from(xs), ys: Float32Array.from(ys), vt: Uint8Array.from(vt), lk: lk });
       }
-      ways.push({ g: w.g, cls: gr.cls, bbox: w.bbox, xs: Float32Array.from(xs), ys: Float32Array.from(ys), vt: Uint8Array.from(vt), lk: lk });
     }
-    this._cgIdx = { city: city, ver: city.roadVersion, ways: ways };
+    this._cgIdx = { city: city, ver: city.roadVersion, terrain: city.terrainVer, ways: ways };
     this._cgRuns = null;
     return this._cgIdx;
   };
@@ -3859,7 +3972,7 @@
     let basis=this.layerOpt.cong||'now';
     const ref = (basis === 'build' || basis === 'year') && g.congRefFor ? g.congRefFor(basis) : null, diff = !!ref;
     if ((basis === 'build' || basis === 'year') && !ref) basis = 'am';   // 还没有对比基准：按早高峰拥堵程度显示
-    const key = model.version + ':' + basis + ':' + (ref ? ref.ym + ':' + (ref.label || '') : '') + ':' + Math.floor(g.clock.minute / 5) + ':' + city.roadVersion;
+    const key = model.version + ':' + basis + ':' + (ref ? ref.ym + ':' + (ref.label || '') : '') + ':' + Math.floor(g.clock.minute / 5) + ':' + city.roadVersion + ':' + city.terrainVer;
     if (this._cgRuns && this._cgRunsKey === key) return this._cgRuns;
     const W = model.weights(g.clock.minute), sat = new Map();
     const satOf = function (id) {
@@ -4632,7 +4745,7 @@
     for (const f of Fac.list()) {
       if (!f.ext) continue;
       const gate = f.ext.gate;
-      if ((gate || f.ext.hideBeforeOpen) && !Fac.active(f, yr, g.city)) continue;
+      if (gate && !Fac.active(f, yr, g.city)) continue;
       const opacity = gate && building ? 1 : alpha;
       if (opacity <= 0.02) continue;
       const G = this.gateGeom(f), e = G.e, n = G.n;
@@ -4643,7 +4756,7 @@
       const L = lk ? net.lines[lk.lines[0]] : null, col = L ? AX.line(L) : (active ? accent : grey);
       const km = f.ext.km + ' km', labels = z >= 6 && this.labelsOn;
       const sub = f.ext.gate ? (lk ? '已接通 ⇄ ' + (f.ext.to || '对岸') : '线路修到这里即接通' + (f.ext.to ? ' ' + f.ext.to : ''))
-        : !active ? (f.open > yr ? Math.floor(f.open) + ' 年启用 · 地图外 ' + km : '已停用') : lk ? '已接通 ⇄ ' + (lk.portal ? '接驳口' : '经「' + lk.st.name + '」') : '地图外 ' + km + ' · 线路修到边缘即接通';
+        : !active ? (f.open > yr ? Fac.openDate(f) + '启用 · 地图外 ' + km : '已停用') : lk ? '已接通 ⇄ ' + (lk.portal ? '接驳口' : '经「' + lk.st.name + '」') : '地图外 ' + km + ' · 线路修到边缘即接通';
       const card = this.gateCard(ctx, G, gr, labels ? Fac.shortName(f) : '', labels ? sub : '');
       card.gate = f.ext.gate;
       this._portals.push({ f: f, sx: e.x, sy: e.y, card: card });
@@ -5378,6 +5491,7 @@
       for (const f of facilities) if (f.T.hub && CM.Fac.active(f, yr, city) && f.lmK >= 0) hubs.add(f.lmK);
       for (const it of this.extraModels()) if (it.lm && (it.fac || it.id.charAt(0) === 'h')) models.set(it.fac || it.id.slice(1), it.lm);
       for (let k = 0; k < D.landmarks.length; k++) if (city.landmarkOn[k] && (z >= 13 || hubs.has(k))) { const lm = D.landmarks[k]; mapLabels.push({ x: lm.x, y: lm.y, h: lm.bridge ? lm.bridge.deck || 0 : lm.h || 54, name: lm.name, hub: hubs.has(k) }); }
+      if (CM.BgNet && z >= 13) for (const p of CM.BgNet.piers(yr, city)) mapLabels.push({ x: p.x, y: p.y, h: 0, name: p.name, hub: false });
       for (const f of facilities) {
         if (f.ext || f.lmK >= 0 || f.gen || !CM.Fac.active(f, yr, city) || (!f.T.hub && z < 18)) continue;
         const model = models.get(f.id);
@@ -5456,25 +5570,28 @@
     if (z >= 22 && this.layer === 'none' && mapOn) {
       const seen = new Set();
       for (const k of CM.Geo.query(city.roadWayBk, v.x0, v.y0, v.x1, v.y1)) {
-        const w = city.roadWays[k], gr = city.roadGroups[w.g];
-        if (gr.cls < 3 || !gr.name || (gr.flags & 6) || !city.roadsBuilt[w.g] || seen.has(gr.name)) continue;
-        const p = w.p;
-        let geom = this.roadLabelGeom.get(w);
-        if (!geom) {
-          let len = 0;
-          for (let q = 2; q < p.length; q += 2) len += Math.hypot(p[q] - p[q - 2], p[q + 1] - p[q - 1]);
-          let acc = 0, mx = p[0], my = p[1];
-          for (let q = 2; q < p.length; q += 2) { const d = Math.hypot(p[q] - p[q - 2], p[q + 1] - p[q - 1]); if (acc + d >= len / 2) { const t = (len / 2 - acc) / (d || 1); mx = p[q - 2] + (p[q] - p[q - 2]) * t; my = p[q - 1] + (p[q + 1] - p[q - 1]) * t; break; } acc += d; }
-          geom = { len: len, x: mx, y: my }; this.roadLabelGeom.set(w, geom);
+        const way = city.roadWays[k], gr = city.roadGroups[way.g];
+        if (gr.cls < 3 || !gr.name || (gr.flags & 6) || !city.roadsBuilt[way.g] || seen.has(gr.name)) continue;
+        for (const w of this.roadParts(city, way)) {
+          const p = w.p;
+          let geom = this.roadLabelGeom.get(w);
+          if (!geom) {
+            let len = 0;
+            for (let q = 2; q < p.length; q += 2) len += Math.hypot(p[q] - p[q - 2], p[q + 1] - p[q - 1]);
+            let acc = 0, mx = p[0], my = p[1];
+            for (let q = 2; q < p.length; q += 2) { const d = Math.hypot(p[q] - p[q - 2], p[q + 1] - p[q - 1]); if (acc + d >= len / 2) { const t = (len / 2 - acc) / (d || 1); mx = p[q - 2] + (p[q] - p[q - 2]) * t; my = p[q - 1] + (p[q + 1] - p[q - 1]) * t; break; } acc += d; }
+            geom = { len: len, x: mx, y: my }; this.roadLabelGeom.set(w, geom);
+          }
+          const len = geom.len;
+          if (len < 2.4) continue;
+          const pt = this.P(geom.x, geom.y, 0, tmp), px = pt.x, py = pt.y;
+          if (px < 0 || py < 0 || px > this.w || py > this.h) continue;
+          const text = gr.name, tw = this.textW(TYPE.road, text);
+          if (!fits(px - tw / 2, py - 7, px + tw / 2, py + 7)) continue;
+          seen.add(gr.name);
+          put(text, px, py, TYPE.road, TH.roadInk, true, 1, 1, -1, geom.x, geom.y, 0);
+          break;
         }
-        const len = geom.len;
-        if (len < 2.4) continue;
-        const pt = this.P(geom.x, geom.y, 0, tmp), px = pt.x, py = pt.y;
-        if (px < 0 || py < 0 || px > this.w || py > this.h) continue;
-        const text = gr.name, tw = this.textW(TYPE.road, text);
-        if (!fits(px - tw / 2, py - 7, px + tw / 2, py + 7)) continue;
-        seen.add(gr.name);
-        put(text, px, py, TYPE.road, TH.roadInk, true, 1, 1, -1, geom.x, geom.y, 0);
       }
     }
     // 区名

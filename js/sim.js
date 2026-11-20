@@ -1413,7 +1413,7 @@
     }
     yield;
     // 背景交通接驳（v2.9）：车站旁有运营中的铁路站或码头时吸引力更高，感知步行时间缩短，更多人来这里坐地铁（见 BgNet.links）
-    const bgLinks = CM.BgNet ? CM.BgNet.links(this.year, C) : null, wOf = function (w, s) { return bgLinks ? Math.max(0.2, w - bgLinks.bonus[s]) : w; };
+    const bgLinks = CM.BgNet ? CM.BgNet.links(this.year, C, city) : null, wOf = function (w, s) { return bgLinks ? Math.max(0.2, w - bgLinks.bonus[s]) : w; };
     // 小区接驳表（下标 0…Z−1 为小区，Z…Z+F−1 为重要设施）
     const zl = new Array(NZ).fill(null), zCov = new Float32Array(NZ), zWalk = new Float32Array(NZ), zTot = new Float64Array(Z);
     for (let z = 0; z < Z; z++) {

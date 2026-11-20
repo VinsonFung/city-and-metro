@@ -235,11 +235,12 @@
   // 落点自动吸附到接驳口；该处已有接驳口车站时改为选中 / 连接那座车站。返回 { f, x, y, sid }
   Tools.prototype.portalPick = function (sx, sy, pickedStation) {
     if (this.tool !== 'station' && this.tool !== 'line') return null;
-    const R = this.R, list = R._portals || [], net = this.net(), game = this.game();
+    const R = this.R, list = R._portals || [], net = this.net(), game = this.game(), yr = game.year();
     let best = null, bd = Math.max(30, Math.min(48, R.z * 1.2));
     for (const p of list) {
       const gate = p.f.ext.gate;
-      if ((gate || p.f.ext.hideBeforeOpen) && !CM.Fac.active(p.f, game.year(), game.city)) continue;
+      if (gate && !CM.Fac.active(p.f, yr, game.city)) continue;
+      if (p.f.ext.snapWhenOpen && (yr < p.f.open || (p.f.close != null && yr >= p.f.close))) continue;
       let d = Math.hypot(sx - p.sx, sy - p.sy);
       const c = p.card;
       const onCard = c && sx >= c.x && sx <= c.x + c.w && sy >= c.y && sy <= c.y + c.h;

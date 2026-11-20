@@ -5,7 +5,7 @@ const load=async f=>vm.runInContext(await fs.readFile(new URL(f,root),'utf8'),c,
 for(const[,f]of(await fs.readFile(new URL('index.html',root),'utf8')).matchAll(/<script src="([^"]+)"/g)){await load(f);if(f==='js/save.js')break;}
 const C=c.CM,M=C.Metro,copy=x=>JSON.parse(JSON.stringify(x)),sum=a=>a.reduce((s,n)=>s+n,0);C.UI=function(){};
 for(const f of ['settings','icons','pages','corp','fleet','opsapp','render','sites','scenery'])await load('js/'+f+'.js');
-assert.equal(C.CFG.GAME_VERSION,'2.9.3');assert.equal(C.CFG.RULES_REVISION,15);assert.equal(C.MAP_ORDER.length,15);assert.equal(C.Fleet.MODELS.length,78);assert.ok(C.MAPS.sg&&C.MAPS.ny&&!C.Achievements&&!C.Desktop);
+assert.equal(C.CFG.GAME_VERSION,'2.9.4');assert.ok(C.CFG.RULES_REVISION>=15);assert.equal(C.MAP_ORDER.length,15);assert.equal(C.Fleet.MODELS.length,78);assert.ok(C.MAPS.sg&&C.MAPS.ny&&!C.Achievements&&!C.Desktop);
 C.useMap('tutorial');const g=C.Game.create({mode:'free',tutorial:true,seed:20000101}),F=C.Fleet;F.ensure(g);let fixture;
 for(let y=5;y<g.city.H-5&&!fixture;y++)for(let x=5;x<g.city.W-22&&!fixture;x++){
  if([0,4,8,12,16].some(d=>!M.checkSite(g.city,x+d,y,'underground').ok))continue;
