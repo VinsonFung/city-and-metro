@@ -17320,13 +17320,6 @@ Object.assign(window.CM.I18N_EN, {
   "自由建造选项": "Free-build options",
   "2016 年底前，步行 15 分钟可到达地铁站的人口不低于全市人口的 26%，而且汉口、汉阳、武昌三镇都要覆盖到，不能只顾一处。": "By the end of 2016, at least 26% of residents must live within a 15-minute walk of the metro, with coverage across Hankou, Hanyang and Wuchang.",
   "回归前，步行 15 分钟可到达地铁站的人口不低于全市人口的 47%，经营也要站得住：票款加车站商业连续 3 个月达到运营费用的 75%。": "Before the handover, cover 47% of residents within a 15-minute walk of the metro. Fares plus station retail must cover 75% of operating costs for three consecutive months.",
-  "月结修复与绘线改进": "Monthly settlement fixes and track drawing improvements",
-  "修复缺车时的月结中断。推进 3 个月或 1 年会到达所选日期，政府拨款逐月入账。": "Train shortages no longer interrupt monthly settlement. Three-month and one-year skips reach the chosen date, with government grants paid each month.",
-  "读档时补发可确认漏发的当月拨款。经营挑战可按上月票款与运营费的缺口获得运营补贴。": "Loading a save restores a verified unpaid grant for the current month. Financial challenges may receive an operating subsidy based on the previous month's fare shortfall.",
-  "地点任务按线网距离和周边人口、岗位发布。暂时够不着的历史事件任务可等到条件满足再发布。": "Location-based tasks consider distance from your network and nearby residents and jobs. Historical event tasks can wait until their locations become viable.",
-  "新版线路示意图保留站距比例，改善线路和岸线布局，回放和 PNG 导出也使用新版排线。": "The new schematic preserves relative station spacing and improves route and shoreline placement. Replays and PNG exports use the same layout.",
-  "绘线可分别放置转弯点和虚拟节点，并从未完工的虚拟端点继续。手机工具栏也可操作。": "Place bend points and virtual nodes separately, and resume from an unfinished virtual endpoint. The phone toolbar supports both tools.",
-  "校正武汉武广商圈的位置，调整广州新塘开发任务的发布条件。": "Wuhan's Wuguang business district has been repositioned and the requirements for Guangzhou's Xintang development task have been adjusted.",
   "悉尼、城铁与渡轮": "Sydney, suburban rail and ferries",
   "新增 2000 年开局的悉尼，带来 3 款本地车型和 13 项历史任务，可用澳元经营。": "Sydney starts in 2000 with three local train models and 13 historical tasks. Manage your system in Australian dollars.",
   "悉尼城铁与渡轮按历史年月开通、停运。在铁路站或码头附近建地铁站，可以吸引换乘。": "Sydney's suburban rail and ferries open and close on their historical dates. Build near stations or wharves to attract transfers.",
@@ -18707,21 +18700,4 @@ Object.assign(window.CM.I18N_EN_MAP.tk, {
   "芝西": "West Shiba",
   "芝南": "South Shiba",
   "芝北": "North Shiba"
-});
-
-Object.assign(window.CM.I18N_EN, {
-  "海岸线与经营更新": "Coastlines and operations",
-  "新增后期挑战「不扩张也能减亏」，可通过改善现有线网的经营完成目标。": "The new late-game challenge asks you to reduce losses by improving your existing network.",
-  "海边道路按当年岸线显示，填海成陆后补绘相应路段。": "Coastal roads follow the shoreline of the current year. Road segments appear as land is reclaimed.",
-  "渡轮在水边停靠，地铁换乘按当年的岸上码头位置计算。": "Ferries berth at the waterfront. Metro transfers use the pier’s shore location for the current year.",
-  "山地限制人口、岗位和楼高。旧档的山地开发随月度发展逐步调整。": "Hills limit population, jobs and building heights. Hillside development in existing saves adjusts gradually each month.",
-  "减淡道路拥堵图层和选城海报的蒙版，让底图更清楚。": "Lighter overlays make the basemap and city selection posters easier to see.",
-  "西悉尼机场提前显示启用年月，补齐深圳市外建设说明和部分英文译文。": "Western Sydney Airport shows its opening date in advance. The update also clarifies construction outside Shenzhen and fills gaps in the English UI.",
-  "建设校验与客流调整": "Construction checks and ridership",
-  "既有轨道沿用原有选址。新建、改线或改建时复核保护区、机场、铁路平交等限制。": "Existing tracks retain their original siting approval. New or altered tracks are checked for protected areas, airports and at-grade rail crossings.",
-  "接管铁路可继续修改运营速度。小半径弯道提示限速，草案可以确认。": "You can change the operating speed of a taken-over railway. Tight curves display a speed restriction and the draft can be confirmed.",
-  "校准广州人口、岗位、片区增长与商圈吸引力。杭州上调岗位比例和重点商圈吸引力。": "Updated Guangzhou's population, jobs, district growth and commercial demand. Raised Hangzhou's jobs ratio and demand at key commercial districts.",
-  "读取旧档时建立升级前备份，广州和杭州的人口、岗位随月度发展逐步调整。": "Loading an older save creates a pre-upgrade backup. Population and jobs in Guangzhou and Hangzhou adjust gradually as the city grows.",
-  "车站缺少步行道路时，可从零客流提示定位最近道路，或进入修改工具移动车站。": "When a station has no walkable road access, use its zero-ridership notice to locate the nearest road or move the station with the Edit tool.",
-  "补齐繁中控件和部分地图与施工提示的英文。切换语言时立即更新已打开的详情和财政。": "Added Traditional Chinese control labels and English map and construction text. Open details and finance panels refresh when you switch languages."
 });

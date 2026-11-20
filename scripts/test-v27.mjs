@@ -17,7 +17,7 @@ assert.equal(C.MAP_ORDER.length,15);assert.equal(F.MODELS.length,78);
 assert.equal(F.MODELS.filter(m=>m.maps?.includes('ld')).length,11);
 assert.equal(F.MODELS.filter(m=>m.maps?.includes('sz')).length,2);
 for(const mp of Object.values(C.MAPS))assert.equal(JSON.stringify(C.Traits.validate(mp)),'[]',mp.id);
-assert.deepEqual(Array.from(C.NEWS.slice(0,7), n=>n.v),['2.9.4','2.9.3','2.9.2','2.9','2.8','2.7','2.6']);
+assert.deepEqual(Array.from(C.NEWS.slice(0,4), n=>n.v),['2.9','2.8','2.7','2.6']);
 assert.ok(C.NetReplay&&!C.Desktop&&!C.Achievements);
 console.log('PASS 15 maps, 78 models, all city mechanisms and separate announcements');
 

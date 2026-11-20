@@ -12,12 +12,12 @@ C.UI=function(){};for(const src of ['settings','corp','fleet','screens'])await l
 const F=C.Fleet;
 assert.equal(C.CFG.GAME_VERSION,'2.9.4');assert.ok(C.CFG.RULES_REVISION>=15);
 assert.equal(C.MAP_ORDER.length,15);assert.equal(F.MODELS.length,78);assert.ok(C.MAPS.ld&&C.Traits);
-assert.equal(C.NEWS[0].v,C.CFG.GAME_VERSION);
-memory.set('cm1.newsSeen','2.9.4');assert.equal(C.UI.prototype.newsUnread(),false);
-memory.set('cm1.newsSeen','2.9.3');assert.equal(C.UI.prototype.newsUnread(),true);
-memory.set('cm1.newsSeen','2.9.2');assert.equal(C.UI.prototype.newsUnread(),true);
-memory.set('cm1.newsSeen','2.9.1');assert.equal(C.UI.prototype.newsUnread(),true);
-memory.set('cm1.newsSeen','2.9');assert.equal(C.UI.prototype.newsUnread(),true);
+assert.equal(C.NEWS[0].v,'2.9');
+assert.equal(C.UI.prototype.newsUnread(),true);
+for(const seen of ['2.9','2.9.2','2.9.3','2.9.4']){
+  memory.set('cm1.newsSeen',seen);
+  assert.equal(C.UI.prototype.newsUnread(),false,seen);
+}
 memory.set('cm1.newsSeen','2.8.0');assert.equal(C.UI.prototype.newsUnread(),true);
 memory.set('cm1.newsSeen','2.4.0');assert.equal(C.UI.prototype.newsUnread(),true);
 assert.ok(!C.NEWS.some(n=>n.v==='2.7.1'),'Patch release has no new announcement');
