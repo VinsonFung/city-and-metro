@@ -43,8 +43,8 @@
   City.prototype.generateGen = function* (seed, startYear, opts) {
     const W = this.W, H = this.H, N = this.N, ds = (opts && opts.densityScale) || 1;
     this.seed = seed;
-    this.regions = D.regions.concat([D.defaultRegion]);
-    for (const r of this.regions) if (r.plan0) r.plan = r.plan0;   // 上一局改变过的片区规划（applyReplan）恢复原样
+    // 各局独立持有随年代变化的片区规划。
+    this.regions = D.regions.concat([D.defaultRegion]).map(r => ({ ...r }));
     this.regionOpen = new Uint8Array(this.regions.length);
     this.regionOpenDate = this.regions.map(function () { return null; });
     for (let k = 0; k < this.regions.length; k++) {
@@ -209,7 +209,7 @@
       if (done[i] || year < e.year) return;
       done[i] = 1;
       const k = this.regions.findIndex(function (r) { return r.id === e.region; }); if (k < 0) return;
-      const rg = this.regions[k]; if (!rg.plan0) rg.plan0 = rg.plan;
+      const rg = this.regions[k];
       rg.plan = e.plan; if (e.maxHeight) rg.maxHeight = e.maxHeight;
       out.push(e);
       if (keepLu) return;
@@ -1887,6 +1887,21 @@
   };
 
   // ---------------- 存档 ----------------
+  // 月结内原地更新的数组需要保留副本，路网和水域等整块替换的数据只保留旧引用。
+  City.prototype.monthCheckpoint = function (year) {
+    const state = { ...this, dirty: new Set(this.dirty), sites: this.sites && new Map(this.sites),
+      regions: this.regions.map(r => ({ ...r })), _replan: this._replan && { ...this._replan } };
+    const fields = ['pop', 'jobs', 'bh', 'lu', 'plan', 'street', 'urbanYear', 'regionOpen', 'regionOpenDate',
+      'protectedId', 'landmarkOn', 'eCls', 'eRail', 'eRailDet'];
+    const reclaim = (D.reclaim || []).some(r => r.year > this.terrainYear && r.year <= year);
+    if (reclaim || this.roadGroups.some((r, i) => !this.roadsBuilt[i] && r.year <= year)) {
+      fields.push('bmask', 'roadsBuilt', 'eArt', 'eName');
+    }
+    if (reclaim) fields.push('eBlock', 'isPark');
+    for (const key of fields) if (this[key]) state[key] = this[key].slice();
+    return state;
+  };
+
   City.prototype.serialize = function () {
     const out = {
       seed: this.seed,

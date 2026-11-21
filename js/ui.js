@@ -543,7 +543,7 @@
     }, { passive: true });
   };
   UI.prototype.blocking = function () {
-    return !this.screen.classList.contains('hidden') || !this.statsEl.classList.contains('hidden') || !!this.voApp || !!this.opsApp || !!(CM.NetMap && CM.NetMap.isOpen()) || !!(this.g() && this.g().jumping);
+    return !this.screen.classList.contains('hidden') || !this.statsEl.classList.contains('hidden') || !!this.voApp || !!this.opsApp || !!(CM.NetMap && CM.NetMap.isOpen()) || !!(this.g() && (this.g().jumping || this.g().pending));
   };
   // App 是模态窗口；Tab 不进入背景 HUD，内层对话框先处理键盘。
   UI.prototype.appKey = function (e, app, close) {
@@ -600,14 +600,24 @@
     g.on('failed', function (f) { snd('fail'); if (!g.jumping) self.showFailure(f); });
     g.on('settlementError', function () {
       clearTimeout(self._autoT);
-      self._jp = null;
       self.markUnsaved();
+      self.scheduleAutosave();
       snd('error');
       self.showSettlementError();
     });
     g.on('jump', function () { snd('whoosh'); self.showJump(); });
     g.on('jumpProgress', function (p) { self.updateJump(p); });
-    g.on('jumpDone', function (r) { snd('chime'); self.rerenderPage(); self.showJumpResult(r); self.scheduleAutosave(); if (r.failed) self.showFailure(r.failed); });
+    g.on('settlementRollback', function () { self.R.setGame(g); CM.agents.reset(); });
+    g.on('jumpDone', function (r) {
+      self.closeScreen();
+      self.scheduleAutosave();
+      snd('chime');
+      if (r.failed) {
+        if (r.after) self.lastReport = r;
+        self.showFailure(r.failed);
+      } else if (r.after) self.showJumpResult(r);
+      else self.toast('时间推进完成', 'good');
+    });
     g.on('speed', function () { self.renderToolbar(); });
     // 里程碑：消息提示；重大节点弹出庆祝横幅（跳月 / 跳年期间只记录）
     // 乘客之声：每月结算与建设效果更新后重新生成反馈（结果按月份与线网缓存）
@@ -3005,7 +3015,7 @@
         self.showLoadError(e, slotId);
       });
     };
-    if (g && !g.settlementError && (!this.isSaved() || g.draft?.liveSnap || g.draft && g.draftEval().changed)) {
+    if (g && (!this.isSaved() || g.draft?.liveSnap || g.draft && g.draftEval().changed)) {
       this.confirm('载入存档？', '载入后会舍弃未保存的进度和未确认的建设草案。', '放弃改动并载入', load, true, 'folder');
     } else load();
   };
@@ -3021,7 +3031,7 @@
     const g = this.g();
     // 回主菜单（v2.3）：开始界面整体淡入，标题与按钮不再逐个重新弹出
     const go = function () { CM.endGame(); if (typeof after === 'function') after(); else self.showStart(null, true); };
-    if (!g || g.settlementError) { go(); return; }
+    if (!g) { go(); return; }
     const leave = function () {
       if (g.speed > 0) self.setSpeed(0);   // 先暂停，保证保存的就是离开时的状态
       if (self.isSaved()) { go(); return; }
@@ -3060,7 +3070,7 @@
   UI.prototype.markSaved = function (g, at, snap) { this.save = Object.assign({ state: 'saved', at: at, msg: '' }, snap || this.saveSnap(g)); };
   UI.prototype.scheduleAutosave = function () {
     const self = this;
-    if (!CM.Settings.get('autosave') || this.g()?.settlementError) return;
+    if (!CM.Settings.get('autosave')) return;
     clearTimeout(this._autoT);
     this._autoT = setTimeout(function () { const g = self.g(); if (g && !g.jumping && !g.pending) self.doAutosave(); else if (g) self.scheduleAutosave(); }, 700);
   };
@@ -3068,7 +3078,6 @@
   UI.prototype.doAutosave = function (force) {
     if (CM.isLoading && CM.isLoading()) return Promise.resolve({ ok: false, error: '正在载入游戏，请稍后保存' });
     const g = this.g(); if (!g) return Promise.resolve({ ok: true });
-    if (g.settlementError) return Promise.resolve({ ok: false, error: CM.Game.SETTLEMENT_ERROR });
     this.lastAuto = performance.now();
     const self = this;
     // 旧存档升级但升级前备份未能建立：暂停自动保存，避免自动存档轮换覆盖原存档（手动保存为新存档不受影响）
@@ -3091,7 +3100,6 @@
   UI.prototype.manualSave = function (slotId, label) {
     if (CM.isLoading && CM.isLoading()) return Promise.resolve({ ok: false, error: '正在载入游戏，请稍后保存' });
     const g = this.g(); if (!g) return Promise.resolve();
-    if (g.settlementError) { this.showSettlementError(); return Promise.resolve({ ok: false, error: CM.Game.SETTLEMENT_ERROR }); }
     if (g.pending || g.jumping) { this.toast('正在进行月度结算，请稍候再保存', 'info'); return Promise.resolve({ ok: false, error: '正在结算' }); }
     const self = this, snap = this.saveSnap(g);
     const pending = CM.Save.save(g, 'manual', { slotId: slotId, label: label || ('手动存档 ' + g.clock.y + '年' + g.clock.m + '月') }).then(function (r) {
@@ -3217,12 +3225,16 @@
     this.openScreen(card, function () { self.closeScreen(); });
   };
   UI.prototype.showSettlementError = function () {
-    const self = this;
-    this.openScreen(h('div', { class: 'card' }, this.cardHead('error', 'b-red', '结算中断'),
-      this.callout('bad', 'error', CM.Game.SETTLEMENT_ERROR),
+    const g = this.g(), self = this;
+    const close = function () {
+      g.settlementError = g.settlementRetry = null;
+      self.closeScreen();
+    };
+    this.openScreen(h('div', { class: 'card' }, this.cardHead('warn', 'b-teal', '当前进度已保留'),
+      this.callout('info', 'info', '暂时无法推进日期。可以重试，也可以返回游戏并保存当前进度。'),
       h('div', { class: 'modal-actions' },
-        h('button', { class: 'btn', onclick: function () { self.backToMenu(); } }, ic('home'), '主菜单'),
-        h('button', { class: 'btn primary', onclick: function () { self.showSaveManager(true); } }, ic('folder'), '读取存档'))));
+        h('button', { class: 'btn', onclick: close }, '返回游戏'),
+        h('button', { class: 'btn primary', onclick: function () { self.closeScreen(); g.retrySettlement(); } }, ic('redo'), '重试推进'))), close);
   };
   UI.prototype.showFailure = function (f) {
     const g = this.g(), self = this;

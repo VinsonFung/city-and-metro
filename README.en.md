@@ -8,7 +8,7 @@ City & Metro is a single-player metro planning and city management game for your
 
 **[Play online](https://city-and-metro.pages.dev)** · [Source repository](https://github.com/VinsonFung/city-and-metro) · [License](./LICENSE.txt)
 
-The current web edition is **v2.9.5**.
+The current web edition is **v2.9.6**.
 
 v2.9 adds Sydney (2000) with three local train models and 13 historical tasks. Suburban rail and ferries follow their historical opening and closure dates. Build across Sydney Harbour, serve the Olympics, and reach development areas early. Kingsford Smith Airport is on the map, and Western Sydney International Airport opens its western gateway in December 2026.
 

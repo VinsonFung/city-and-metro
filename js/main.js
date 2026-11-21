@@ -359,6 +359,14 @@
     fpsAcc += dt; fpsN++;
     if (fpsAcc > 1) { R.stats.fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
   }
+  // 月结可能跨多帧。阻止修改存档状态的界面操作插入尚未提交的账目。
+  for (const ev of ['click', 'input', 'change', 'submit', 'keydown']) {
+    document.addEventListener(ev, function (event) {
+      if (!CM.game?.pending || loading) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, true);
+  }
   window.addEventListener('beforeunload', function () { if (!loading && CM.game && !ui.isSaved()) ui.doAutosave(); });
   window.addEventListener('resize', function () { R.resize(); });
 

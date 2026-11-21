@@ -1,3 +1,109 @@
+async function runSettlementRecoveryChecks({ E, until, close, tap }) {
+  const js = fn => E('(' + fn.toString() + ')()');
+  const expect = (ok, message) => { if (!ok) throw Error(message); };
+  const idle = '!CM.game.jumping && !CM.game.pending';
+  await close();
+  const start = await js(() => {
+    const g = CM.game;
+    window.settlementFixture = { game: g, month: g.monthGen, day: g.endDay, errors: console.error };
+    console.error = (...args) => {
+      if (!args.some(arg => /Test settlement|游戏事件处理失败：month/.test(String(arg)))) window.settlementFixture.errors(...args);
+    };
+    const snapshot = window.settlementFixture;
+    let dailyFault = true, monthlyFault = true;
+    const y = g.clock.y + (g.clock.m === 12 ? 1 : 0), m = g.clock.m % 12 + 1;
+    g.econ.bonds.push({ id: 'B-test', kind: 'local', amount: 100, rate: 0.1, term: 1, issued: [y - 1, m],
+      ym0: CM.U.ymIndex(y - 1, m), paidYears: 0 });
+    g.endDay = function () {
+      const value = snapshot.day.call(this);
+      if (!value && dailyFault) { dailyFault = false; throw Error('Test settlement day after charging'); }
+      return value;
+    };
+    g.monthGen = function* () {
+      const result = yield* snapshot.month.call(this);
+      if (monthlyFault) { monthlyFault = false; throw Error('Test settlement month after grants and debts'); }
+      return result;
+    };
+    g.on('month', () => { throw Error('Test settlement UI subscriber'); });
+    g.on('month', () => { snapshot.months = (snapshot.months || 0) + 1; });
+    g.on('jumpDone', () => { snapshot.completed = (snapshot.completed || 0) + 1; });
+    return { ym: g.ym(), day: g.clock.d, ledger: g.econ.ledger.length };
+  });
+
+  await E('CM.ui.toggleTimeOptions("jump",true);true');
+  await tap('[data-act="jumpQuarter"]');
+  await until(idle, 300000);
+  const recovered = await js(() => {
+    const g = CM.game, state = window.settlementFixture;
+    const rows = g.econ.ledger.slice(-3);
+    return { sameGame: g === state.game, error: !!g.settlementError, ym: g.ym(), day: g.clock.d, ledger: g.econ.ledger.length,
+      months: state.months, completed: state.completed,
+      validRows: rows.every(r => r.closed && r.grant > 0 && r.days === CM.U.daysInMonth(r.y, r.m) &&
+        r.wdDays + r.weDays === r.days) && g.econ.cur.grant > 0,
+      paidOnce: rows[1]?.interest === 10 && rows[1]?.principal === 100 &&
+        rows.reduce((n, r) => n + r.principal, 0) === 100 && g.econ.bonds.find(b => b.id === 'B-test')?.paidYears === 1 };
+  });
+  expect(recovered.sameGame && !recovered.error && recovered.ym === start.ym + 3 && recovered.day === start.day &&
+    recovered.ledger === start.ledger + 3 && recovered.months === 3 && recovered.completed === 1 && recovered.validRows && recovered.paidOnce,
+    'Transient faults should retry exactly once without losing or duplicating a billing day: ' + JSON.stringify(recovered));
+  await close();
+
+  const faultStart = await js(() => {
+    const g = CM.game, fixture = window.settlementFixture;
+    g.endDay = fixture.day;
+    g.edit(net => { const line = Object.values(net.lines)[0]; if (line) line.name += ' draft'; });
+    fixture.draft = g.draft;
+    fixture.writesBlocked = 0;
+    fixture.population = g.city.pop[0];
+    g.monthGen = function* () {
+      this.econ.openMonth(this.clock.y, this.clock.m);
+      this.econ.income('reward', 1234);
+      this.city.pop[0] += 123456;
+      this.logEvent({ tag: '测试', title: 'Test settlement partial' });
+      try { this.serialize(); } catch { fixture.writesBlocked++; }
+      yield;
+      throw Error('Test settlement persistent');
+    };
+    return { started: g.startJump(3), ym: g.ym(), day: g.clock.d, ledger: g.econ.ledger.length };
+  });
+  expect(faultStart.started, 'Unable to start fault fixture');
+  await until(idle + ' && !!CM.game.settlementError', 300000);
+  const rolledBack = await js(async () => {
+    const g = CM.game, fixture = window.settlementFixture;
+    const dialog = document.querySelector('#screen').textContent;
+    CM.Settings.set('language', 'en'); CM.ui.showSettlementError();
+    const en = document.querySelector('#screen').textContent;
+    CM.Settings.set('language', 'zh-TW'); CM.ui.showSettlementError();
+    const tw = document.querySelector('#screen').textContent;
+    CM.Settings.set('language', 'zh-CN'); CM.ui.showSettlementError();
+    const [direct, manual, auto] = await Promise.all([CM.Save.save(g, 'manual'), CM.ui.manualSave(), CM.ui.doAutosave(true)]);
+    const saved = direct.ok ? await CM.Save.load(direct.slotId) : null;
+    return { ym: g.ym(), day: g.clock.d, monthEnd: CM.U.daysInMonth(g.clock.y, g.clock.m), ledger: g.econ.ledger.length,
+      safe: !g.econ.cur.closed && g.econ.cur.days === g.clock.d - 1 && !g.events.some(e => e.title === 'Test settlement partial') &&
+        g.city.pop[0] === fixture.population && g.draft === fixture.draft,
+      writesBlocked: fixture.writesBlocked, saves: [direct.ok, manual.ok, auto.ok],
+      persisted: saved?.clock.d === g.clock.d && saved.econ.funds === g.econ.funds && saved.econ.cur.days === g.econ.cur.days,
+      localized: dialog.includes('当前进度已保留') && en.includes('Your progress is intact') &&
+        (tw.includes('目前進度已保留') || tw.includes('當前進度已保留')) };
+  });
+  expect(rolledBack.ym === faultStart.ym && rolledBack.day === rolledBack.monthEnd && rolledBack.ledger === faultStart.ledger &&
+    rolledBack.safe && rolledBack.writesBlocked === 2 && rolledBack.saves.every(Boolean) && rolledBack.persisted && rolledBack.localized,
+    'Persistent faults must restore a saveable state and preserve the draft: ' + JSON.stringify(rolledBack));
+  await js(() => { CM.game.monthGen = window.settlementFixture.month; return true; });
+  await tap('#screen .modal-actions button.primary');
+  await until(idle, 300000);
+  const retried = await js(() => {
+    const g = CM.game, fixture = window.settlementFixture;
+    console.error = fixture.errors;
+    return { ym: g.ym(), day: g.clock.d, ledger: g.econ.ledger.length, error: !!g.settlementError, completed: fixture.completed };
+  });
+  expect(retried.ym === faultStart.ym + 3 && retried.day === faultStart.day && retried.ledger === faultStart.ledger + 3 &&
+    !retried.error && retried.completed === 2, 'Retry must finish at the original destination: ' + JSON.stringify(retried));
+  await close();
+  console.log('PASS daily and monthly retry, UI fault isolation, three-language recovery, IndexedDB saves and original jump target');
+  return { recovered, rolledBack, retried };
+}
+
 // Real game, UI controls and IndexedDB in the launcher's isolated profile.
 export async function runSettlementChecks({ E, until, fs, path, task, close, tap }) {
   const map = process.env.CM_SETTLEMENT_MAP || 'bj';
@@ -32,6 +138,12 @@ export async function runSettlementChecks({ E, until, fs, path, task, close, tap
     throw Error('No affordable operating line for the settlement fixture');
   });
   await until('CM.game.model.trafficReady()', 180000);
+
+  if (process.env.CM_SETTLEMENT_RECOVERY_ONLY) {
+    report.recovery = await runSettlementRecoveryChecks({ E, until, close, tap });
+    await fs.writeFile(path.join(task, 'report.json'), JSON.stringify(report));
+    return;
+  }
 
   const advance = async (months, click = false) => {
     const from = await E('CM.game.ym()');
@@ -131,85 +243,25 @@ export async function runSettlementChecks({ E, until, fs, path, task, close, tap
   report.accounts = accounts;
 
   const totalsMatch = await js(() => {
-    const g = CM.game, E = g.econ, before = g.snapshotMetrics(), ym = g.ym(), old = E.ledger;
-    const next = ym + 1;
+    const g = CM.game, before = g.snapshotMetrics(), next = g.ym() + 1;
     const from = [g.clock.y, g.clock.m, 1], to = [Math.floor(next / 12), next % 12 + 1, 1];
-    E.ledger = [{ y: from[0], m: from[1], grant: 100, fare: 20, reward: 3, commerce: 7, ppp: 9, fleetSale: 11,
+    const ledger = [{ y: from[0], m: from[1], grant: 100, fare: 20, reward: 3, commerce: 7, ppp: 9, fleetSale: 11,
       ops: 5, todCost: 2, pppOut: 4, opsSub: 30, crossFee: 8, bond: 50 }];
+    const finance = CM.Economy.prototype.summarizeAdvance.call({ ledger }, from, to);
+    const money = CM.moneyAt(CM.MAPS[g.mapId], to[0], to[1]);
+    const formatted = amount => CM.U.fmtMoney(amount, undefined, money);
     try {
-      CM.ui.showReport({ from, to, before, after: before });
+      CM.ui.showReport({ from, to, before, after: before, finance, money });
       const rows = new Map([...document.querySelectorAll('.jr-fin>div')].map(row => [row.querySelector('small').textContent, row.querySelector('b').textContent]));
-      return rows.get('财政收入') === '+' + CM.U.fmtMoney(150) &&
-        rows.get('运营成本') === '−' + CM.U.fmtMoney(7) &&
-        rows.get('合同支出') === '−' + CM.U.fmtMoney(4);
-    } finally { E.ledger = old; CM.ui.closeScreen(); }
+      return rows.get('财政收入') === '+' + formatted(150) &&
+        rows.get('运营成本') === '−' + formatted(7) &&
+        rows.get('合同支出') === '−' + formatted(4);
+    } finally { CM.ui.closeScreen(); }
   });
   check(totalsMatch, 'The jump report omitted or double-counted a financial category');
   console.log('PASS 42 months of daily ledgers, early reward, revenues and jump report');
 
-  const interruption = await js(async () => {
-    const live = CM.game;
-    const last = await CM.Save.save(live, 'manual');
-    window.settlementRecoverySlot = last.slotId;
-    window.settlementInterruptedGame = live;
-    const create = () => {
-      const g = Object.assign(new CM.Game(), live);
-      g._h = {};
-      g.clock = { ...live.clock };
-      g.econ = CM.Economy.restore(JSON.parse(JSON.stringify(live.econ.serialize())));
-      g.model = Object.assign(Object.create(CM.Model.prototype), live.model);
-      return g;
-    };
-    const inject = function* () {
-      this.econ.openMonth(this.clock.y, this.clock.m);
-      throw new Error('Injected settlement interruption');
-    };
-    const old = console.error;
-    console.error = error => {
-      if (!/Injected settlement interruption|时间推进未到达目标日期/.test(String(error))) old.call(console, error);
-    };
-    try {
-      const normal = create();
-      normal.pending = inject.call(normal);
-      normal.update(0);
-      const premature = create();
-      premature.jumpGen = function* () {};
-      premature.startJump(12);
-      premature.stepJump();
-      const loss = create();
-      let failures = 0;
-      loss.on('jumpDone', function (r) { if (r.failed) failures++; });
-      loss.startJump(12);
-      loss.econ.failed = { reasons: ['Legitimate game over'] };
-      loss.stepJump();
-      const start = live.ym();
-      let completed = 0;
-      live.on('jumpDone', function () { completed++; });
-      live.monthGen = inject;
-      live.startJump(12);
-      while (live.jumping) live.stepJump();
-      const [direct, manual, auto] = await Promise.all([CM.Save.save(live, 'manual'), CM.ui.manualSave(), CM.ui.doAutosave(true)]);
-      live.setSpeed(1);
-      const dialog = document.querySelector('#screen').textContent;
-      CM.Settings.set('language', 'en'); CM.ui.showSettlementError();
-      const en = document.querySelector('#screen').textContent;
-      CM.Settings.set('language', 'zh-TW'); CM.ui.showSettlementError();
-      const tw = document.querySelector('#screen').textContent;
-      CM.Settings.set('language', 'zh-CN');
-      return { normal: !!normal.settlementError, premature: !!premature.settlementError, genuineLoss: failures === 1 && !loss.settlementError,
-        stopped: live.ym() - start === 1 && live.speed === 0 && !live.startJump(1), completed, savesBlocked: !direct.ok && !manual.ok && !auto.ok,
-        localized: dialog.includes('结算中断') && en.includes('Settlement Interrupted') && tw.includes('結算中斷') };
-    } finally { console.error = old; }
-  });
-  check(interruption.normal && interruption.premature && interruption.genuineLoss && interruption.stopped && !interruption.completed &&
-    interruption.savesBlocked && interruption.localized, 'An incomplete settlement could be reported as complete or saved: ' + JSON.stringify(interruption));
-  report.interruption = interruption;
-  await E('CM.ui.loadSlot(window.settlementRecoverySlot);true');
-  await until(gameReady + ' && CM.game !== window.settlementInterruptedGame', 180000);
-  check(await E('!CM.game.settlementError && CM.game.econ.ledger.length === 42'), 'The good save could not be recovered');
-  await close();
-  await advance(1);
-  console.log('PASS settlement interruption, genuine failure, three languages, save protection and recovery');
+  report.recovery = await runSettlementRecoveryChecks({ E, until, close, tap });
 
   await fs.writeFile(path.join(task, 'report.json'), JSON.stringify(report));
 }

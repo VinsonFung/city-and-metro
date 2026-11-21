@@ -18,6 +18,13 @@
   Game.prototype = Object.create(U.Emitter.prototype);
   CM.Game = Game;
   Game.prototype.touch = function () { this.rev++; };
+  Game.prototype.emit = function (event, data) {
+    if (this._settlementEvents) { this._settlementEvents.push([event, data]); return; }
+    // 界面监听器失败不影响模拟或同一事件的其他监听器。
+    for (const fn of (this._h[event] || []).slice()) {
+      try { fn(data); } catch (error) { console.error('游戏事件处理失败：' + event, error); }
+    }
+  };
 
   // 开局与无有效缓存的读档完成四轮交通求解：createGen / restoreGen 交给工作线程流水线（等待时让出 CM.SIM_WAIT），
   // 由载入界面驱动、不阻塞页面；create / restore 为同步版本（主线程求解，结果逐位相同）
@@ -241,16 +248,130 @@
 
   // ---------------- 时钟 ----------------
   Game.prototype.setSpeed = function (s) { this.speed = this.settlementError ? 0 : s; this.emit('speed', this.speed); };
-  // 生成器抛错后已经关闭；再次 next() 得到的 done 并不代表结算成功。
-  Game.SETTLEMENT_ERROR = '本次结算未完成，请读取之前的存档后继续。';
+  // 重试保留快进的原目标与收支报告起点，避免从中途又多跳一整段。
   Game.prototype.failSettlement = function (error) {
-    const j = this.jumping;
-    if (j && CM.CarPool && CM.CarPool.onReq === j.resume) CM.CarPool.onReq = null;
+    const jump = this.jumping;
+    if (jump) {
+      clearTimeout(jump.waitTimer);
+      if (CM.CarPool && CM.CarPool.onReq === jump.resume) CM.CarPool.onReq = null;
+    }
+    this.settlementRetry = { jump: jump, speed: this.speed };
     this.jumping = this.pending = null;
     this.settlementError = error;
     this.setSpeed(0);
     console.error(error);
     this.emit('settlementError', error);
+  };
+  Game.prototype.retrySettlement = function () {
+    const retry = this.settlementRetry;
+    this.settlementError = this.settlementRetry = null;
+    if (!retry) return;
+    const jump = retry.jump;
+    if (!jump) { this.setSpeed(retry.speed || 1); return; }
+    this.jumping = { ...jump, waiting: false, next: false, resume: null,
+      gen: this.jumpGen(...jump.target, jump.total) };
+    this.emit('jump', this.jumping);
+  };
+
+  Game.prototype.settlementCheckpoint = function (monthEnd) {
+    const { clock, econ, rev } = this;
+    const lastDay = { clock: { ...clock }, rev, speed: this.speed, cur: { ...econ.cur }, funds: econ.funds, lastDay: econ.lastDay };
+    if (!monthEnd) return lastDay;
+
+    const { ledger, flow, ...accounts } = econ;
+    lastDay.accounts = { ...accounts, ...M.clone(accounts), revIdx: econ.revIdx, ledger: ledger.slice(), flow: flow.slice() };
+    lastDay.city = this.city.monthCheckpoint(clock.y + (clock.m === 12 ? 1 : 0));
+    lastDay.trafficYear = this.model.year;
+    const state = lastDay.state = {
+      compiled: this.compiled, events: this.events.slice(), history: this.history.slice(),
+      congRef: this.congRef && { ...this.congRef }, eraBase: this.eraBase, xlNoted: this.xlNoted,
+      _graphsDirty: this._graphsDirty, _compKey: this._compKey, _demandRef: this._demandRef,
+      _seenNet: this._seenNet, _seenFare: this._seenFare, _seenFleet: this._seenFleet,
+      trafficChangedYm: this.trafficChangedYm, taskRecheckYM: this.taskRecheckYM,
+    };
+    state.tasks = Object.assign(new CM.Tasks(), this.tasks, M.clone(this.tasks));
+    for (const key of ['firedEvents', 'foresight', 'macro', 'corp', 'fleet', 'milestones', 'bgBase', 'eraLog']) {
+      state[key] = this[key] && M.clone(this[key]);
+    }
+    return lastDay;
+  };
+  Game.prototype.restoreSettlementCheckpoint = function* (lastDay) {
+    this.clock = lastDay.clock;
+    this.rev = lastDay.rev;
+    this.speed = lastDay.speed;
+    if (!lastDay.city) {
+      Object.assign(this.econ, { cur: lastDay.cur, funds: lastDay.funds, lastDay: lastDay.lastDay });
+      this.model.setDayType(this.dayType());
+      return;
+    }
+    Object.assign(this, lastDay.state);
+    for (const [target, state] of [[this.econ, lastDay.accounts], [this.city, lastDay.city]]) {
+      for (const key of Object.keys(target)) if (!Object.hasOwn(state, key)) delete target[key];
+      Object.assign(target, state);
+    }
+    this.city.foresight = this.foresight;
+    if (CM.Macro && this.macro) CM.Macro.sync(this);
+    if (CM.applyMoneyEra) CM.applyMoneyEra(this.clock.y, this.clock.m);
+    yield* this.rebuildSettlementTraffic(lastDay.trafficYear);
+  };
+  Game.prototype.rebuildSettlementTraffic = function* (year) {
+    // 作废半途修改过的交通计算，从最近的有效线网与城市状态重建。
+    this.model.retired = true;
+    const model = this.model = new CM.Model(this.city, { deferDemand: true });
+    model.habitAge = Game.habitAge(this);
+    model.fare = this.econ.fare;
+    model.crossFee = this.econ.cross;
+    if (this.fleet && CM.Fleet) model.fleetSource = net => CM.Fleet.plan(this, net);
+    model.setYear(year);
+    model.setDayType(this.dayType());
+    this._trafficCacheTarget = null;
+    if (this.draft) {
+      this.draft.compVer = this.draft.evalVer = -1;
+      this.invalidatePrediction();
+    }
+    this.emit('settlementRollback');
+    model.syncSolve = true;
+    try {
+      yield* model.refreshCityGen(this.compiled);
+      yield* model.solveGen(1);
+    } finally { model.syncSolve = false; }
+  };
+  // 普通时钟与快进共用同一提交点。仅在完整的一天和必要的月初结算成功后发布事件。
+  Game.prototype.settleDay = function* (resetMinute) {
+    for (let attempt = 0; ; attempt++) {
+      const { y, m, d } = this.clock;
+      const monthEnd = d === U.daysInMonth(y, m);
+      const lastDay = this.settlementCheckpoint(monthEnd);
+      const notices = this._settlementEvents = [];
+      const model = this.model, previousSync = model.syncSolve;
+      if (attempt) model.syncSolve = true;
+      let committed = false, error;
+      try {
+        if (resetMinute) this.clock.minute = 0;
+        const crossed = this.endDay();
+        if (crossed !== monthEnd) throw new Error('日结日期未正确推进');
+        if (crossed) {
+          if (!(yield* this.monthGen())) throw new Error('月度账目未完成');
+          const cur = this.econ.cur, previous = this.econ.ledger[this.econ.ledger.length - 1];
+          if (cur.y !== this.clock.y || cur.m !== this.clock.m || cur.closed || !previous?.closed ||
+              previous.y !== y || previous.m !== m) throw new Error('月度账目未完成');
+        }
+        if (!Number.isFinite(this.econ.funds) || !Number.isFinite(this.econ.capex)) throw new Error('结算余额无效');
+        committed = true;
+      } catch (e) { error = e; }
+      finally {
+        this._settlementEvents = null;
+        model.syncSolve = previousSync;
+      }
+
+      if (committed) {
+        for (const [event, value] of notices) this.emit(event, value);
+        return;
+      }
+      yield* this.restoreSettlementCheckpoint(lastDay);
+      if (attempt) throw error || new Error('时间推进失败');
+      console.warn('重新结算当前日期', error);
+    }
   };
   Game.validImpact = function (r) {
     return !!r && r.status === 'done' && Array.isArray(r.at) && r.at.length === 2 && r.at.every(Number.isFinite) &&
@@ -293,15 +414,23 @@
         if (r.done) this.pending = null;
         else if (r.value === CM.SIM_WAIT) break;
       }
-      this.model.step(moving ? 1 : 2);
       return;
     }
-    if (this.speed > 0 && !this.econ.failed && this.model.trafficReady()) {
+    if (this.speed > 0 && !this.econ.failed && !this.draft?.liveSnap && this.model.trafficReady()) {
       try { this.advanceClock(dt); }
       catch (error) { this.failSettlement(error); return; }
+      if (this.pending) return;
     }
     const ts = performance.now();
-    this.model.step(budget);
+    try { this.model.step(budget); }
+    catch (error) {
+      console.warn('恢复交通计算', error);
+      if (this.model.predJob) {
+        this.model.cancelPredict();
+        this.invalidatePrediction();
+      } else this.pending = this.rebuildSettlementTraffic(this.model.year);
+      return;
+    }
     this._solveMs = performance.now() - ts;
     if(CM.TrafficCache)CM.TrafficCache.tick(this);
     if(this.model.trafficReady()&&this.tasks.active.some(t=>t.type==='zoneCong'&&!t.metric))this.tasks.rebaseCongestion(this);
@@ -483,6 +612,7 @@
       const majorTrafficChange = bigChange || model.fn.key !== oldFacKey;
       // 跳月 / 跳年时只算两轮，下一次刷新接着收敛（v2.6）；结束后实时求解继续补足
       yield* model.solveGen(majorTrafficChange ? (this.jumping ? 2 : 4) : 1);
+      yield* this.ensureSettlementTraffic();
       this._demandRef = CM.Eras ? CM.Eras.demand(yr) : null;
     }
     if (CM.BgNet && model.bgDaily) CM.BgNet.noteBase(this);   // 背景交通线路的对比基准（v2.9）
@@ -510,6 +640,7 @@
       this.invalidatePrediction('城市状态已更新（' + y + '年' + m + '月），请重新计算预测');
     }
     this.emit('month', { y: y, m: m });
+    return true;
   };
 
   // ---------------- 债券融资（经营挑战） ----------------
@@ -540,7 +671,7 @@
 
   // ---------------- 跳月 / 跳年 ----------------
   Game.prototype.startJump = function (months) {
-    if (this.settlementError || this.jumping || this.pending) return false;
+    if (!Number.isInteger(months) || months <= 0 || this.settlementError || this.jumping || this.pending || this.draft?.liveSnap) return false;
     if (this.draft) this.invalidatePrediction();
     const t = U.ymIndex(this.clock.y, this.clock.m) + months;
     const ty = Math.floor(t / 12), tm = t % 12 + 1;
@@ -555,24 +686,30 @@
     return true;
   };
   Game.prototype.jumpGen = function* (ty, tm, td, total) {
-    let n = 0;
+    let n = Math.max(0, Math.round(this.jumping.progress * total));
     const tgt = U.ymIndex(ty, tm) * 32 + td;
     while (U.ymIndex(this.clock.y, this.clock.m) * 32 + this.clock.d < tgt && !this.econ.failed) {
       // 建设、调价或配车刚变更时，先算本线网的客流，再开始结算。
-      if (!this.model.trafficReady()) {
-        yield* this.model.solveGen(1);
-        if (!this.model.trafficReady()) throw new Error('客流数据未准备好，无法结算票款和运营费用。');
-      }
-      const crossed = this.endDay();
-      n++;
-      this.jumping.progress = Math.min(0.98, n / total);
-      if (crossed) {
-        yield* this.monthGen();
-        // monthGen 已发布本月的两类日期结果，避免重复求解。
-      }
+      yield* this.ensureSettlementTraffic();
+      yield* this.settleDay(false);
+      this.jumping.progress = Math.min(0.98, ++n / total);
       if ((n & 7) === 0) yield;
     }
-    if (!this.econ.failed && !this.model.trafficReady()) yield* this.model.solveGen(1);
+    if (!this.econ.failed) yield* this.ensureSettlementTraffic();
+  };
+  Game.prototype.ensureSettlementTraffic = function* () {
+    const model = this.model;
+    if (model.trafficReady()) return;
+    try {
+      yield* model.solveGen(1);
+      if (model.trafficReady()) return;
+    } catch (error) { console.warn('客流计算改用主线程重试', error); }
+
+    const wasSync = model.syncSolve;
+    model.syncSolve = true;
+    try { yield* model.solveGen(1); }
+    finally { model.syncSolve = wasSync; }
+    if (!model.trafficReady()) throw new Error('客流数据未准备好，无法结算票款和运营费用。');
   };
   // 跳转时求解在等工作线程（v2.1）：本次先返回、不空转，分配一完成（CarPool.onReq）就立即继续，不必等下一帧
   // 时间推进卡片覆盖地图期间（v2.3）：地图降频重绘（见 main.js），只改调度、不改结算结果
@@ -586,6 +723,7 @@
   Game.prototype.stepJump = function () {
     const j = this.jumping, t0 = performance.now();
     if (!j || this.model.retired) return;
+    clearTimeout(j.waitTimer);
     j.waiting = false;
     while (performance.now() - t0 < CFG.perf.jumpSliceMs) {
       let r;
@@ -596,6 +734,7 @@
         const self = this;
         if (!j.resume) j.resume = function () { if (self.jumping === j && j.waiting && !self.model.retired) self.stepJump(); };
         if (CM.CarPool) CM.CarPool.onReq = j.resume;
+        j.waitTimer = setTimeout(j.resume, 250);
         break;
       }
       if (r.done) {
@@ -608,10 +747,13 @@
         this.jumping = null;
         this.speed = 0;
         const to = [this.clock.y, this.clock.m, this.clock.d];
-        const finance = j.ledgerStart ? this.econ.summarizeAdvance(j.from, to, j.ledgerStart) : null;
-        const money = finance ? CM.moneyAt(CM.MAPS[this.mapId], to[0], to[1]) : null;
-        const res = { from: j.from, to: to, before: j.snap, after: this.snapshotMetrics(), finance: finance, money: money, failed: this.econ.failed };
-        this.emit('jumpDone', res);
+        let report;
+        try {
+          const finance = j.ledgerStart ? this.econ.summarizeAdvance(j.from, to, j.ledgerStart) : null;
+          const money = finance ? CM.moneyAt(CM.MAPS[this.mapId], to[0], to[1]) : null;
+          report = { from: j.from, to: to, before: j.snap, after: this.snapshotMetrics(), finance, money, failed: this.econ.failed };
+        } catch (error) { console.error('推进报告生成失败', error); }
+        this.emit('jumpDone', report || { to, failed: this.econ.failed });
         return;
       }
     }
@@ -955,7 +1097,6 @@
 
   // ---------------- 存档 ----------------
   Game.prototype.serialize = function () {
-    if (this.settlementError) throw new Error(Game.SETTLEMENT_ERROR);
     if (this.pending || this.jumping) throw new Error('正在进行月度结算，请稍候再保存');
     return {
       meta: { gameId: this.id, name: this.name, mode: this.mode, seed: this.seed, createdAt: this.createdAt, gameVersion: CFG.GAME_VERSION, map: this.mapId || 'gz', mapVersion: (CM.MAPS[this.mapId || 'gz'] || {}).mapVersion || 1, scenario: (CM.MAPS[this.mapId || 'gz'] || {}).scenario || '', mapFp: (CM.MAPS[this.mapId || 'gz'] || {}).fp || '' },
@@ -1178,10 +1319,11 @@
       const perSec = rate / CFG.time.secPerHour * 60, need = (edge - m) / perSec;
       if (left < need) { this.clock.minute = m + left * perSec; return; }
       left -= need;
-      this.clock.minute = edge;
+      this.clock.minute = Math.min(edge, 1440 - 1e-6);
       if (edge >= 1440) {
-        this.clock.minute = 0;
-        if (this.endDay()) { this.pending = this.monthGen(); return; }
+        this.pending = this.settleDay(true);
+        if (!this.pending.next().done) return;
+        this.pending = null;
       }
     }
   };

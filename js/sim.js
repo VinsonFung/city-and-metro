@@ -25,6 +25,17 @@
   const CAR_BLOCKS = 32;
   // 求解生成器在等待工作线程时让出的值：外层循环（实时求解、跳月、预测）见到它就不再空转，让工作线程的结果消息先进来
   const WAIT = CM.SIM_WAIT = Object.freeze({ wait: true });
+  // Worker 异常退出不一定触发 error。只对没有完成任何分块的等待计时，保留原有主线程补算路径。
+  function* waitForWorker(pool, req, remaining) {
+    let left = remaining(), lastProgress = performance.now();
+    while (left > 0 && !req.failed) {
+      yield WAIT;
+      const now = performance.now(), current = remaining();
+      if (current !== left) lastProgress = now;
+      else if (!req.failed && now - lastProgress >= 30000) pool.fail('工作线程长时间未返回结果');
+      left = current;
+    }
+  }
   // 同时交错执行的时段数（v2.1）：一个时段等汽车分配时，主线程先算其他时段的地铁路径与方式选择。
   // v2.3：12 个逻辑核心以上交错 4 个时段（方式选择线程随之增至 4 个），跳月 / 跳年少等工作线程；各时段互不依赖，结果与宽度无关
   const PIPE_W = 2;
@@ -320,7 +331,10 @@
     fail: function (why) {
       if (this.off) return;
       this.off = true; this.why = why;
-      for (const s of this.list || []) { if (s.req) { s.req.failed = true; s.req.K = null; } s.w.terminate(); }
+      for (const s of this.list || []) {
+        if (s.req) { s.req.failed = true; s.req.K = null; }
+        try { s.w.terminate(); } catch (e) { /* 已结束 */ }
+      }
       for (const r of this.queue) { r.failed = true; r.K = null; }
       this.list = null; this.queue = [];
       if (typeof console !== 'undefined') console.warn('方式选择改为主线程计算：' + why);
@@ -1815,7 +1829,7 @@
     if (!this.syncSolve && N >= 48 && SkimPool.ready()) {
       const reuse = store.parts; store.parts = null;
       const req = SkimPool.submit(net, cost.slice(), tAct.slice(), prm.xpen, reuse);
-      while (!req.done && !req.failed) yield WAIT;
+      yield* waitForWorker(SkimPool, req, () => req.left);
       if (!req.failed) {
         for (const r of req.parts) {
           const a = r.store, s0 = r.s0;
@@ -1962,7 +1976,7 @@
     if (!this.syncSolve && OdPool.ready()) {
       const self = this, isPred = !!opts.pred || buf === this.predBuf, ep = isPred ? this.predEpoch : this.epoch;
       const req = OdPool.submit(this, K, od, fn, function () { return !self.retired && (isPred ? self.predEpoch === ep : self.epoch === ep); });
-      while (!req.done && !req.failed) yield WAIT;
+      yield* waitForWorker(OdPool, req, () => req.done ? 0 : 1);
       odDone = !req.failed;
       // 行程时间表在线程手里时出了错：重新算一遍，再在主线程做方式选择
       if (!odDone && store && !(store.gt.length === N * N)) {
@@ -1988,7 +2002,7 @@
       if (store.parts && !this.syncSolve && SkimPool.ready()) {
         const parts = store.parts; store.parts = null; store.valid = false;
         const req = SkimPool.submitLoad(net, parts, store.D, N);
-        while (!req.done && !req.failed) yield WAIT;
+        yield* waitForWorker(SkimPool, req, () => req.left);
         if (!req.failed) {
           for (let b = 0; b < req.parts.length; b++) {
             const r = req.parts[b], pl = r.load, a = r.stIn, c = r.stOut;
@@ -2104,7 +2118,7 @@
         blocks.push({ origins: os, tStart: tStart, tDest: tDest, dem: dem });
       }
       const req = CarPool.submit(G, time, blocks, function () { return !self.retired && (isPred ? self.predEpoch === ep : self.epoch === ep); });
-      while (req.remaining > 0 && !req.failed) yield WAIT;
+      yield* waitForWorker(CarPool, req, () => req.remaining);
       res = req.res;
     }
     // 按块顺序合并：行程时间表逐个小区对写回，路段流量逐块相加；缺少的块（工作线程失败）在主线程补算。
