@@ -265,22 +265,26 @@
   CM.UI.prototype.openVoicesApp = function (view) {
     const g = this.g(); if (!g) return;
     if (this.voApp) { if (view) this.voApp.show(view); else this.voApp.close(); return; }
-    const self = this, st = { f: this._voF || 'all', q: '', view: view || 'feed' }, I18 = function (el) { if (CM.I18n) CM.I18n.localize(el); return el; };
+    const self = this, st = { f: this._voF || 'all', q: '', topic: '', view: view || 'feed' }, I18 = function (el) { if (CM.I18n) CM.I18n.localize(el); return el; };
     const liked = this._voLiked || (this._voLiked = new Set()), shared = this._voShared || (this._voShared = new Set());
     const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     // 英文界面：头像上的字取翻译后名字的首字母（单个汉字没法翻译）；分句之间补空格
-    const en = !!CM.I18n && CM.I18n.get() === 'en', sp = en ? ' ' : '';
-    const AV = function (who) { if (!en) return who.ch; const t = CM.I18n.text(who.nick).replace(/[^A-Za-z]/g, ''); return (t.charAt(0) || '·').toUpperCase(); };
+    const isEnglish = function () { return CM.I18n && CM.I18n.get() === 'en'; };
+    const topicText = function (tag) { return CM.I18n ? CM.I18n.text(tag) : tag; };
+    const AV = function (who) {
+      const glyph = isEnglish() ? (CM.I18n.text(who.nick).match(/[A-Za-z]/)?.[0] || '·').toUpperCase() : topicText(who.ch);
+      return h('span', { 'data-no-i18n': '' }, glyph);
+    };
     let closing = false, list = [];
     const back = h('div', { class: 'vx-back', onclick: function () { close(); } });
     const app = h('div', { class: 'vx-app', role: 'dialog', 'aria-modal': 'true', 'aria-label': '地铁圈 · 乘客之声', tabindex: '-1' });
     const search = h('input', { type: 'search', class: 'vx-q', placeholder: '搜索动态、地点或 #话题', 'aria-label': '搜索动态', autocomplete: 'off' });
-    search.addEventListener('input', function () { st.q = search.value.trim(); drawFeed(); });
+    search.addEventListener('input', function () { st.topic = ''; st.q = search.value.trim(); drawFeed(); });
     const tl = h('main', { class: 'vx-tl' }), head = h('div', { class: 'vx-head' }), feed = h('div', { class: 'vx-feed' }), side = h('aside', { class: 'vx-side' });
     tl.append(head, feed);
     // 关闭 App 后再执行（定位、打开详情），地图不被窗口挡住
     const then = function (fn) { return function () { close(fn); }; };
-    const setQ = function (q) { st.q = q; search.value = q; app.classList.remove('side-open'); if (st.view !== 'feed') setView('feed'); else drawFeed(); tl.scrollTop = 0; };
+    const setQ = function (tag) { st.topic = tag; st.q = search.value = topicText(tag); app.classList.remove('side-open'); if (st.view !== 'feed') setView('feed'); else drawFeed(); tl.scrollTop = 0; };
     // 视图：feed 时间线、following 关注的市民、sat 居民满意度（原指标详情页，融入 App），以及从中打开的 post 帖子与评论区、user 市民主页；
     // 打开帖子或主页时记下来处，左上角的返回箭头回到原来的视图和滚动位置
     st.root = st.view; st.hist = [];
@@ -299,7 +303,7 @@
     const when = function (p) { return p.ym && p.ym < g.ym() ? ymText(p.ym) : p.ago + '天'; };
     const nav = function (icon, label, fn, on) { return h('button', { class: 'vx-nav' + (on ? ' on' : ''), 'aria-label': label, onclick: fn }, ic(icon, 22), h('span', null, label)); };
     const navs = {
-      home: nav('home', '首页', function () { st.f = 'all'; st.q = ''; search.value = ''; setView('feed'); }, st.view === 'feed'),
+      home: nav('home', '首页', function () { st.f = 'all'; st.topic = ''; st.q = ''; search.value = ''; setView('feed'); }, st.view === 'feed'),
       fol: nav('people', '关注的人', function () { setView('following'); }, st.view === 'following'),
       sat: nav('smile', '满意度', function () { setView('sat'); }, st.view === 'sat'),
     };
@@ -356,6 +360,7 @@
     const toggle = function (set, p, el, base) { if (set.has(p.id)) set.delete(p.id); else set.add(p.id); const on = set.has(p.id); sfx(on ? (set === liked ? 'like' : 'repost') : 'tap'); el.classList.toggle('on', on); el.querySelector('.vx-n').textContent = num(base + (on ? 1 : 0)); if (on) el.classList.add('pop'); setTimeout(function () { el.classList.remove('pop'); }, 400); };
     // 运营方置顶：本月满意度、最认可与最需改进的方面，以及由满意度推算的投票结果
     const official = function () {
+      const sp = isEnglish() ? ' ' : '';
       const sat = g.econ.sat, hist = g.history, prev = hist.length > 1 ? hist[hist.length - 2].sat : null, sf = g.econ.satFactors, fs = sf ? sf.factors : [];
       const pos = fs.filter(function (f) { return f.v > 0.3; }).sort(function (a, b) { return b.v - a.v; })[0], neg = fs.filter(function (f) { return f.v < -0.3; }).sort(function (a, b) { return a.v - b.v; })[0];
       // 分句各成一段文字（英文界面按整句翻译）
@@ -383,7 +388,7 @@
       return h('article', { class: 'vx-post k-' + p.kind + ' clickable' + (isNew ? ' new' : ''), onclick: function (e) { if (!e.target.closest('button')) openPost(p); } },
         h('button', { class: 'vx-ava', style: { background: p.who.color }, 'aria-label': '查看主页', onclick: user }, AV(p.who)),
         h('div', { class: 'vx-body' },
-          h('div', { class: 'vx-who' }, h('button', { class: 'vx-nick', onclick: user }, p.who.nick), CM.Voices.isFollowed(g, p.who.handle) ? h('span', { class: 'vx-fol', 'data-tip': '已关注' }, ic('people', 12)) : null, h('span', { class: 'vx-hd' }, p.who.handle + ' · ' + when(p)), isNew ? h('span', { class: 'vx-newtag' }, en ? 'New' : '新') : null, h('span', { class: 'grow' }), h('span', { class: 'vx-kind' }, KIND[p.kind])),
+          h('div', { class: 'vx-who' }, h('button', { class: 'vx-nick', onclick: user }, p.who.nick), CM.Voices.isFollowed(g, p.who.handle) ? h('span', { class: 'vx-fol', 'data-tip': '已关注' }, ic('people', 12)) : null, h('span', { class: 'vx-hd' }, p.who.handle + ' · ' + when(p)), isNew ? h('span', { class: 'vx-newtag' }, '新') : null, h('span', { class: 'grow' }), h('span', { class: 'vx-kind' }, KIND[p.kind])),
           h('p', { class: 'vx-text' }, p.text + ' ', p.tags.map(function (t) { return h('button', { class: 'vx-tag', onclick: function () { setQ('#' + t); } }, '#' + t); })),
           p.pic && CM.Sketch && CM.Sketch.doodle ? h('div', { class: 'vx-media', html: CM.Sketch.doodle(p.pic[0], p.id, p.pic[1]) }) : null,
           h('div', { class: 'vx-acts' },
@@ -395,9 +400,15 @@
     const match = function (p) {
       if (st.f !== 'all' && p.kind !== st.f) return false;
       if (!st.q) return true;
-      if (st.q.charAt(0) === '#') return p.tags.indexOf(st.q.slice(1)) >= 0;
+      if (st.topic) return p.tags.includes(st.topic.slice(1));
       const q = st.q.toLowerCase();
-      return (p.text + ' ' + p.who.nick + ' ' + p.place + ' ' + p.tags.join(' ')).toLowerCase().indexOf(q) >= 0;
+      if (q.startsWith('#')) return p.tags.some(function (tag) {
+        return q === ('#' + tag).toLowerCase() || q === topicText('#' + tag).toLowerCase();
+      });
+      return [p.text, p.who.nick, p.place, ...p.tags].some(function (value) {
+        const haystack = CM.I18n ? CM.I18n.search(value || '') : String(value || '').toLowerCase();
+        return haystack.includes(q);
+      });
     };
     const drawFeed = function () {
       const shown = list.filter(match), nodes = [];
@@ -516,6 +527,7 @@
       I18(head); I18(feed);
     };
     const draw = function () {
+      if (st.topic) st.q = search.value = topicText(st.topic);
       list = CM.Voices.generate(g);
       const counts = { all: list.length, bad: 0, good: 0, idea: 0 }; for (const p of list) counts[p.kind]++;
       if (st.view === 'feed') head.replaceChildren(

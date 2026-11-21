@@ -59,7 +59,7 @@
     if (cur.name === name) return { same: true };
     for (const n of nets) for (const sid in n.stations) if (sid !== id && n.stations[sid].name === name) return { error: '已有同名车站「' + name + '」，请换一个名称' };
     const old = cur.name;
-    patchDisplay(g, 'stations', id, { name: name });
+    patchDisplay(g, 'stations', id, { name: name, customName: true });
     if (g.draft) { g.draft.evalVer = -1; this.renderDraftbar(); }   // 草案说明里的站名随之更新（不改变草案内容与预测）
     const R = this.R; R.labelImage = null; R.metroOrder = null;
     this.refreshStationLayers();
@@ -1134,8 +1134,8 @@
     el.appendChild(this.kv([
       f.ext ? ['设施位置', Fac.extText(f) + '（图上为接驳点）'] : null,
       f.ext ? ['地铁接通', (function () {
-        if (f.ext.snapWhenOpen && yr < f.open) return '启用后可接通';
         const lk = Fac.extLink(f, g);
+        if (!f.ext.gate && yr < f.open) return lk ? '接驳已建成，启用后开始产生客流' : '可提前修到地图边缘的接驳口，启用后开始产生客流';
         if (f.ext.gate) { if (!lk) return '未接通：把线路修到接驳口（会自动吸附），附近的普通车站不算'; return '已接通 ⇄ 经接驳口车站「' + lk.st.name + '」' + Fac.extText(f) + (CM.DATA.cityLink ? '。附加费和切换城市在地铁芯的「口岸管理」' : ''); }
         if (!lk) return '未接通：把线路修到地图边缘的接驳口（会自动吸附），或在接驳口约 800 m 内建站';
         const names = lk.lines.map(function (lid) { const L = g.net.lines[lid]; return L ? L.name : ''; }).filter(Boolean).join('、');
@@ -2199,20 +2199,35 @@
       }
       return null;
     };
+    // 任务卡片的类别（v3.2 重新设计：每类有自己的颜色、纹样与题头）
+    const KIND = { hist: ['历史参考', 'book'], event: ['事件引发', 'megaphone'], city: ['本城任务', 'building'], dyn: ['动态任务', 'sparkle'], opt: ['可选挑战', 'trophy'], puzzle: ['城市难题', 'flag'] };
+    const kindKey = function (t) { return t.kind === 'hist' ? 'hist' : (t.kind === 'opt' || t.kind === 'offer') ? (t.scenario ? 'puzzle' : 'opt') : t.cause ? 'event' : t.cityId ? 'city' : 'dyn'; };
+    const ribbon = function (t, left) {
+      const k = KIND[kindKey(t)];
+      return h('div', { class: 'tk-ribbon' }, CM.icon(k[1], 13), h('span', null, k[0]), t.optional ? h('em', null, '可选') : null, h('span', { class: 'grow' }),
+        left != null ? h('span', { class: 'tk-due' }, CM.icon('hourglass', 12), left > 0 ? '剩 ' + left + ' 个月' : '本月到期') : null);
+    };
     const card = function (t) {
       const ev = t.progress || T.evaluate(t, g);
       const dl = U.ymIndex(t.deadline[0], t.deadline[1]), st0 = t.issuedAt ? U.ymIndex(t.issuedAt[0], t.issuedAt[1]) : dl - 24;
       const left = dl - ym, span = Math.max(1, dl - st0), used = U.clamp((ym - st0) / span, 0, 1);
       const urg = left <= 3 ? 'hot' : (left <= 12 ? 'warm' : '');
       const ty = typeOf(t);
-      const c = h('div', { class: 'tk-card ' + urg + (ev.ok ? ' ok' : '') });
+      const c = h('div', { class: 'tk-card tk-paced k-' + kindKey(t) + ' ' + urg + (ev.ok ? ' ok' : '') });
+      c.appendChild(ribbon(t, left));
       c.appendChild(h('div', { class: 'tk-top' },
         h('span', { class: 'badge ' + (t.kind === 'hist' ? 'b-orange' : (t.kind === 'opt' ? 'b-teal' : 'b-violet')) }, CM.icon(ty[0])),
-        h('div', { class: 'grow' }, h('div', { class: 'tk-meta' }, kindTag(t), h('span', { class: 'tiny muted' }, ty[1])), h('b', { class: 'tk-title' }, metricText(t, t.title))),
+        h('div', { class: 'grow' }, h('div', { class: 'tk-meta' }, h('span', { class: 'tiny muted' }, ty[1])), h('b', { class: 'tk-title' }, metricText(t, t.title))),
         this.taskRing(ev.value, ev.ok ? 'ok' : '')));
       const th = themeRow(t); if (th) c.appendChild(th);
       if (t.optional) c.appendChild(h('div', { class: 'tk-basis tiny' }, CM.icon('tree', 12), '这项任务要把地铁修进「' + (t.scenicName || '风景区') + '」，可做可不做：完成照常有奖励，未完成不扣拨款和满意度。'));
       c.appendChild(h('div', { class: 'tk-desc' }, metricText(t, t.desc)));
+      if (t.delayNote) c.appendChild(h('div', { class: 'tk-basis tiny muted' }, CM.icon('hourglass', 12), t.delayNote));
+      if (ev.ok && !t.graced) {
+        const months = (t.sustain || 1) - (t.streak || 0);
+        c.appendChild(h('div', { class: 'tk-met' }, CM.icon('check', 14), h('b', null, '已达标'),
+          h('span', null, months > 1 ? '还要再保持 ' + months + ' 个月，下月初起计' : '下月初结算即完成')));
+      }
       const tb = tipsBox(t); if (tb) c.appendChild(tb);
       // 目标与当前值；连接任务列出每个站点区域是否已有车站
       const combo = t.type === 'combo';
@@ -2333,9 +2348,10 @@
     // 待选的可选挑战（v2.3）：说明为什么、怎么想，玩家决定接受或忽略；接受后才开始计时
     const offerCard = function (o) {
       const ty = typeOf(o), left = o.expiresYM - ym;
-      return h('div', { class: 'tk-card tk-offer' },
+      return h('div', { class: 'tk-card tk-paced tk-offer k-' + kindKey(o) },
+        ribbon(o, null),
         h('div', { class: 'tk-top' }, h('span', { class: 'badge b-teal' }, CM.icon(ty[0])),
-          h('div', { class: 'grow' }, h('div', { class: 'tk-meta' }, kindTag(o), h('span', { class: 'tiny muted' }, ty[1])), h('b', { class: 'tk-title' }, o.title))),
+          h('div', { class: 'grow' }, h('div', { class: 'tk-meta' }, h('span', { class: 'tiny muted' }, ty[1])), h('b', { class: 'tk-title' }, o.title))),
         themeRow(o), h('div', { class: 'tk-desc' }, o.desc), o.type === 'combo' ? self.taskParts(o, T.evaluate(o, g)) : null, tipsBox(o),
         h('div', { class: 'tk-basis tiny muted' }, CM.icon('hourglass', 12), '接受后 ' + o.months + ' 个月内完成 · ' + (left > 0 ? left + ' 个月内可以接受' : '本月可以接受')),
         ch ? h('div', { class: 'tk-stakes' }, h('span', { class: 'tk-chip good' }, CM.icon('gift', 13), '奖励 ' + U.fmtMoney(o.reward)), h('span', { class: 'tk-chip' }, CM.icon('warn', 13), '未完成：满意度 −2，拨款不受影响')) : null,

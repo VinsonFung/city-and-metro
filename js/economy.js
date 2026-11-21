@@ -189,6 +189,26 @@
   };
   Economy.prototype.startMonth = function (y, m) { this.openMonth(y, m); this.payGrant(y, m); };
   // 封账：记录期末并归档；之后的收支一律记入下一个月
+  // 推进报告：扣除开始时的当月已入账金额，并计入到达月已发生的收支。
+  Economy.prototype.summarizeAdvance = function (from, to, startingMonth) {
+    const first = U.ymIndex(from[0], from[1]), last = U.ymIndex(to[0], to[1]);
+    const totals = { income: 0, ops: 0, build: 0, debt: 0, bond: 0, contractOut: 0, capexUse: 0 };
+    const add = function (r, sign) {
+      totals.income += sign * Economy.incomeOf(r);
+      totals.ops += sign * Economy.opsOf(r);
+      totals.build += sign * BUILD_KINDS.reduce(function (sum, k) { return sum + (r[k] || 0); }, 0);
+      totals.debt += sign * ((r.interest || 0) + (r.principal || 0) + (r.penalty || 0));
+      totals.bond += sign * (r.bond || 0);
+      totals.contractOut += sign * (r.pppOut || 0);
+      totals.capexUse += sign * (r.capexUse || 0);
+    };
+    const inPeriod = function (r) { const ym = U.ymIndex(r.y, r.m); return ym >= first && ym <= last; };
+    for (const r of this.ledger) if (inPeriod(r)) add(r, 1);
+    if (this.cur && !this.cur.closed && inPeriod(this.cur)) add(this.cur, 1);
+    if (startingMonth && inPeriod(startingMonth)) add(startingMonth, -1);
+    return totals;
+  };
+
   Economy.prototype.closeMonth = function () {
     this.cur.end = this.funds;
     this.cur.capexEnd = this.capex;
@@ -1436,17 +1456,45 @@
     }
   };
 
+  // 任务节奏（v3.2 玩家反馈：任务期限太长、任务栏里同时五六个任务、任务出现时要建的地方还没开放、一上来就太难）：
+  //  · 同时进行的任务（不含玩家自己接受的可选挑战）最多 maxActive 个，多出来的历史与事件任务排队，轮到时再发；
+  //  · 历史参考任务最早在截止前 histWindow 个月出现（截止年份仍按史实；以前开局就挂出、七八年甚至十年才到期），期限至少 minLeft 个月；
+  //    地点还没开放时等开放再发（截止相应顺延）；
+  //  · 动态任务期限按 dynScale 缩短（不少于 dynMin 个月）；
+  //  · 上手阶段（Tasks.ramp：开局头 rampYears 年、线网不到 rampStations 座车站）动态任务的目标降低，不出拥堵与收支类任务
+  Tasks.PACE = { maxActive: 3, histWindow: 36, minLeft: 12, histLate: 24, dynScale: 0.75, dynMin: 12, rampYears: 8, rampStations: 16 };
+  Tasks.mainCount = function (T) { return T.active.filter(function (t) { return t.kind !== 'opt'; }).length; };
+  Tasks.ramp = function (g, T) {
+    const P = Tasks.PACE, C = g.compiled; let st = 0;
+    if (C && C.stations) C.stations.forEach(function (s, i) { if (C.serviced[i]) st++; });
+    const y0 = T && T.startYM != null ? T.startYM : g.ym();
+    return U.clamp(Math.max((g.ym() - y0) / (12 * P.rampYears), st / P.rampStations), 0, 1);
+  };
+  // 任务涉及的全部锚点（含复合任务各分项）
+  const anchorsOf = function (t) { let a = (t.anchors || []).slice(); for (const p of t.parts || []) a = a.concat(p.anchors || []); return a; };
   Tasks.prototype.monthly = function (g) {
-    const y = g.clock.y, m = g.clock.m, ym = U.ymIndex(y, m);
+    const y = g.clock.y, m = g.clock.m, ym = U.ymIndex(y, m), P = Tasks.PACE;
     const out = [];
     const challenge = g.econ.mode === 'challenge';
-    // 发布历史参考任务
+    if (this.startYM == null) this.startYM = U.ymIndex(g.startYear || CFG.START.y, 1);
+    // 发布历史参考任务（节奏见 Tasks.PACE）。等待中的记在 issued['hw:id']（开始等待的月份，随存档保存）
     for (const h of D.histTasks) {
       if (this.issued[h.id]) continue;
-      if (ym < U.ymIndex(h.appear[0], h.appear[1])) continue;
-      this.issued[h.id] = 1;
-      if (ym > U.ymIndex(h.deadline[0], h.deadline[1])) continue;
-      const t = Object.assign({ kind: 'hist', status: 'active', issuedAt: [y, m], streak: 0 }, JSON.parse(JSON.stringify(Tasks.withPlan(g, h))));
+      const ap = U.ymIndex(h.appear[0], h.appear[1]), dl0 = U.ymIndex(h.deadline[0], h.deadline[1]), waited = this.issued['hw:' + h.id];
+      if (ym < ap) continue;
+      if (ym > (waited == null ? dl0 : dl0 + P.histLate)) {
+        this.issued[h.id] = 1; delete this.issued['hw:' + h.id]; continue;
+      }   // 旧存档：截止已过、也没在排队的不补发
+      if (waited == null && ym < dl0 - P.histWindow) continue;               // 离截止还很远：先不出现
+      const tp = Tasks.withPlan(g, h);
+      const ready = Tasks.mainCount(this) < P.maxActive && Tasks.anchorsOpenBy(g, anchorsOf(tp), ym + 12);   // 名额已满或地点还没开放：排队
+      if (!ready) {
+        if (waited == null) this.issued['hw:' + h.id] = ym;
+        continue;
+      }
+      this.issued[h.id] = 1; delete this.issued['hw:' + h.id];
+      const t = Object.assign({ kind: 'hist', status: 'active', issuedAt: [y, m], streak: 0 }, JSON.parse(JSON.stringify(tp)));
+      if (dl0 < ym + P.minLeft) { t.deadline = ymPair(ym + P.minLeft); t.delayNote = '排队或等地点开放后才发布，期限顺延到 ' + t.deadline[0] + ' 年 ' + t.deadline[1] + ' 月（原为 ' + h.deadline[0] + ' 年 ' + h.deadline[1] + ' 月）'; }
       t.reward = t.reward * g.econ.costIndex(y);
       Tasks.prepare(t, g);
       this.active.push(t);
@@ -1465,13 +1513,13 @@
         if (ym - ey > 2) { this.issued['ev:' + sp.id] = 1; continue; }
         this.issued['evw:' + sp.id] = ey;
       }
-      const tp = Tasks.withPlan(g, sp), dl = ym + (sp.months || 36);
+      const tp = Tasks.withPlan(g, sp), dl = ym + Math.max(P.dynMin, Math.round((sp.months || 36) * P.dynScale));
       if (ym - ey >= (sp.months || 36)) {
         this.issued['ev:' + sp.id] = 1;
         delete this.issued['evw:' + sp.id];
         continue;
       }
-      if (!(G || (G = Tasks.gate(g))).check(tp).ok) continue;
+      if (Tasks.mainCount(this) >= P.maxActive || !(G || (G = Tasks.gate(g))).check(tp).ok) continue;
       this.issued['ev:' + sp.id] = 1; delete this.issued['evw:' + sp.id];
       const t = Object.assign({ kind: 'dyn', status: 'active', issuedAt: [y, m], streak: 0, coolKey: 'ev:' + sp.id, cityId: sp.id, cause: e.title }, JSON.parse(JSON.stringify(tp)));
       // 锚点可写 [地名, 半径]：按地名表与其他任务的同名锚点定位，找不到地名的不发布
@@ -1487,9 +1535,9 @@
       this.active.push(t);
       out.push({ type: 'issued', task: t });
     }
-    // 动态任务（开局一年后开始）
-    if (!this.nextDyn) this.nextDyn = ym + 12;
-    if (!D.noDynTasks && ym >= this.nextDyn && this.active.filter(function (t) { return t.kind === 'dyn'; }).length < 2 && g.compiled.stations.length >= 0) {
+    // 开局当月尝试发布上手任务，名额空出后再发新任务。
+    if (!this.nextDyn) this.nextDyn = ym;
+    if (!D.noDynTasks && ym >= this.nextDyn && Tasks.mainCount(this) < P.maxActive && this.active.filter(function (t) { return t.kind === 'dyn'; }).length < 2) {
       const t = this.generate(g);
       if (t) { this.active.push(t); out.push({ type: 'issued', task: t }); }
       this.nextDyn = ym + 6;
@@ -1580,17 +1628,13 @@
       if (!complete && transit && ym >= U.ymIndex(t.deadline[0], t.deadline[1])) {
         const nd = ym + 1; t.deadline = [Math.floor(nd / 12), nd % 12 + 1]; t.graced = '交通模型升级过渡：期限顺延 1 个月';
       }
-      if (t.kind === 'dyn' && (complete || ym >= U.ymIndex(t.deadline[0], t.deadline[1]))) {
+      if (t.kind === 'dyn' && !complete && ym >= U.ymIndex(t.deadline[0], t.deadline[1])) {
         this.cool = this.cool || {};
-        this.cool[t.coolKey || t.type] = ym + (complete ? 24 : 36);
-        this.cool['type:' + t.type] = ym + (complete ? 6 : 18);
+        this.cool[t.coolKey || t.type] = ym + 36;
+        this.cool['type:' + t.type] = ym + 18;
       }
       if (complete) {
-        t.status = 'done'; t.closedAt = [y, m];
-        this.active.splice(this.active.indexOf(t), 1); this.done.push(t);
-        if (challenge) { g.econ.income('reward', t.reward); g.econ.log('reward', t.reward, 'gen', '任务奖励：' + t.title, { y: y, m: m, d: 1 }); g.econ.mods.push({ kind: 'sat', delta: 4, until: ym + 5, reason: '完成任务「' + t.title + '」' }); }
-        if (t.kind === 'opt' && t.coolKey) { this.cool = this.cool || {}; this.cool[t.coolKey] = ym + 36; }
-        out.push({ type: 'done', task: t });
+        out.push(this.complete(t, g, ev, 1));
       } else if (t.type === 'combo' && ev.coreOk && !ev.dead && ym >= U.ymIndex(t.deadline[0], t.deadline[1])) {
         // 部分完成：主体目标已达成、其余未达成。按比例给奖励，不扣拨款
         t.status = 'done'; t.partial = true; t.closedAt = [y, m]; t.reward *= Tasks.PARTIAL;
@@ -1623,6 +1667,40 @@
     return out;
   };
 
+  Tasks.prototype.complete = function (t, g, result, day) {
+    const y = g.clock.y, m = g.clock.m, ym = U.ymIndex(y, m);
+    t.progress = result; t.status = 'done'; t.closedAt = [y, m]; t.evaluatedYM = ym;
+    this.active.splice(this.active.indexOf(t), 1);
+    this.done.push(t);
+    if (this.done.length > 60) this.done.shift();
+    this.cool = this.cool || {};
+    if (t.kind === 'dyn') {
+      this.cool[t.coolKey || t.type] = ym + 24;
+      this.cool['type:' + t.type] = ym + 6;
+    }
+    if (t.kind === 'opt' && t.coolKey) this.cool[t.coolKey] = ym + 36;
+    if (g.econ.mode === 'challenge') {
+      g.econ.income('reward', t.reward);
+      g.econ.log('reward', t.reward, 'gen', '任务奖励：' + t.title, { y: y, m: m, d: day });
+      g.econ.mods.push({ kind: 'sat', delta: 4, until: ym + 5, reason: '完成任务「' + t.title + '」' });
+    }
+    return { type: 'done', task: t };
+  };
+
+  // 只即时结算不依赖客流与连续月份的连通任务。
+  Tasks.prototype.quickCheck = function (g) {
+    const out = [];
+    if (g.tutorial) return out;
+    for (const t of this.active.slice()) {
+      if (t.sustain || (t.type !== 'connect' && t.type !== 'budgetConnect')) continue;
+      let ev;
+      try { ev = this.evaluate(t, g); }
+      catch (error) { console.error('连通任务即时评估失败', error); continue; }
+      if (ev.ok && !ev.cheap) out.push(this.complete(t, g, ev, g.clock.d));
+    }
+    return out;
+  };
+
   // 金额目标使用两位有效数字，最大取整单位为千。早期伦敦币值较小，需要保留低于千的造价目标与合同估价。
   Tasks.roundMoney = function (v) {
     if (!(v > 0)) return 0;
@@ -1641,7 +1719,7 @@
     const free = function (key, type) { return !(cool[key] > ym) && !(cool['type:' + type] > ym) && !active.some(function (t) { return (t.coolKey || t.type) === key; }); };
     // 线路、车站拥挤类任务（v2.5 玩家反馈：太多）：明显过载才发布，全局冷却 3 年且同时只有一个；日常的过载由地铁芯提醒处理
     const crowdFree = !(cool.crowd > ym) && !active.some(function (t) { return t.type === 'stationCrowd' || t.type === 'lineCrowd'; });
-    const cands = [], G = Tasks.gate(g);
+    const cands = [], G = Tasks.gate(g), rp = Tasks.ramp(g, this), ease = 0.6 + 0.4 * rp;
     // 可替代需求不足、尚未有可用地铁服务的片区优先发布覆盖任务。
 
     // 拥堵热点（排除近期出过任务的片区）
@@ -1653,9 +1731,9 @@
       const v=model.zoneTraffic(z),potential=model.zoneOpportunity(z)/Math.max(1,v.trips);
       if(v.trips>100&&potential>=.06&&potential>bestPotential){worst=z;bestPotential=potential;}
     }
-    if(worst>=0){
+    if(worst>=0 && rp>=0.5){
       // v2.4 平衡：降幅按可替代的出行估算、更温和（一两处车站或一段延伸就能做到），票价低于发布时的月份不计
-      const v=model.zoneTraffic(worst),drop=U.clamp(bestPotential*.12,.008,.03),target=Math.max(0,v.carShare-drop);
+      const v=model.zoneTraffic(worst),drop=U.clamp(bestPotential*.12,.008,.03)*ease,target=Math.max(0,v.carShare-drop);
       cands.push({type:'zoneCong',metric:'carShare',coolKey:'cong:'+worst,zone:worst,start:v.carShare,target,sustain:3,samples:[],fare0:Tasks.fareLevel(g.econ.fare),title:'减少「'+g.zoneName(worst)+'」高峰汽车出行',desc:'让工作日早高峰汽车出行占比降低 '+(drop*100).toFixed(1)+' 个百分点（近 3 个月平均，降价月份不计）。',months:30,reward:90000*ci});   // v3.0：高难任务提高奖励
     }
     // 覆盖空白：在人口足够且可达的片区中，优先选择人口多、离线网近的片区。
@@ -1668,7 +1746,8 @@
         if (ck.ok && s > bs) { bs = s; bp = p; best = z; }
       }
       if (best >= 0) {
-        cands.push({ type: 'zoneCov', coolKey: 'cov:' + best, zone: best, target: 0.5, title: '为「' + g.zoneName(best) + '」提供地铁服务', desc: '该片区人口约 ' + U.fmtPeople(bp) + '，尚无地铁覆盖。使片区 50% 以上的居民与岗位步行 15 分钟可达车站。', months: 30, reward: 50000 * ci });
+        const target = Math.round((0.35 + 0.15 * rp) * 20) / 20;
+        cands.push({ type: 'zoneCov', coolKey: 'cov:' + best, zone: best, target: target, title: '为「' + g.zoneName(best) + '」提供地铁服务', desc: '该片区人口约 ' + U.fmtPeople(bp) + '，尚无地铁覆盖。使片区 ' + Math.round(target * 100) + '% 以上的居民与岗位步行 15 分钟可达车站。', months: 30, reward: 50000 * ci });
       }
     }
     // 车站拥挤
@@ -1687,12 +1766,12 @@
     }
     // 客流增长（v2.3 平衡）：线网越成熟（分担率越高）增幅要求越低——成熟线网两年再涨两成很难做到
     if (model.daily && model.daily.metro > 20000 && free('ridership', 'ridership')) {
-      const sh = model.daily.metroShare || 0, gr = sh < 0.08 ? 0.2 : (sh < 0.15 ? 0.12 : 0.08);
+      const sh = model.daily.metroShare || 0, gr = Math.round((sh < 0.08 ? 0.2 : (sh < 0.15 ? 0.12 : 0.08)) * ease * 100) / 100;
       cands.push({ type: 'ridership', basis: 'avg', target: Math.round(model.daily.metro * (1 + gr) / 1000) * 1000, title: '提升地铁客运量', desc: '在期限内使日均地铁客运量较当前提高 ' + Math.round(gr * 100) + '%（可通过新线、延长线、换乘或调整票价实现）。统计口径：周平均（5 个工作日 + 2 个周末日）。', months: 24, reward: 40000 * ci });
     }
     // 经营：票款覆盖（v2.3 平衡）：目标按近 3 个月的实际覆盖率提高一截（最高 70%），不再一律要求 70%——
     // 大线网的运营费用随物价上涨，票价长期不变时覆盖率很低，固定目标几乎必然失败、反复扣减拨款
-    if (g.econ.mode === 'challenge' && model.daily && model.daily.metro > 50000 && free('recovery', 'recovery')) {
+    if (g.econ.mode === 'challenge' && rp >= 0.5 && model.daily && model.daily.metro > 50000 && free('recovery', 'recovery')) {
       const L3 = g.econ.ledger.slice(-3), cur = L3.length ? L3.reduce(function (a, r) { return a + Tasks.recoveryOf(r); }, 0) / L3.length : 0;
       if (cur >= 0.15 && cur < 0.66) {
         const tg = Math.min(0.7, Math.ceil((cur + Math.max(0.06, cur * 0.25)) * 20) / 20);
@@ -1723,7 +1802,7 @@
       } else if (best) {
         // 目标（v2.4 平衡）：比现在高 6 个百分点，并争取达到「全市分担率 + 5 个百分点」（上限 16%）；离线网 2 km 以上的只要求高 5 个百分点
         const cs = (model.daily && model.daily.metroShare) || 0;
-        const f = best.f, raw = best.dNet > 8 ? best.r.share + 0.05 : Math.max(best.r.share + 0.06, Math.min(0.16, cs + 0.05)), target = Math.round(raw * 100) / 100;
+        const f = best.f, raw = best.dNet > 8 ? best.r.share + 0.05 : Math.max(best.r.share + 0.06, Math.min(0.16, cs + 0.05)), target = Math.round((best.r.share + (raw - best.r.share) * ease) * 100) / 100;
         const what = f.T.hub ? '接驳出行' : '到访出行';
         cands.push({ type: 'facShare', coolKey: 'fac:' + f.id, fac: f.id, basis: best.basis, start: best.r.share, target: target, fare0: Tasks.fareLevel(g.econ.fare), title: '地铁服务「' + f.name + '」',
           desc: f.name + '每天约 ' + U.fmtPeople(best.r.vol) + ' 人次' + what + '，乘地铁只有 ' + U.fmtPct(best.r.share, 0) + '，目标 ' + U.fmtPct(target, 0) + '（降价月份不计）。',
@@ -1750,7 +1829,7 @@
     delete c.w;
     if (c.cityId) self.issued['dyn:' + c.cityId] = 1;
     if (c.type === 'stationCrowd') cool.crowd = ym + 36;
-    const t = Object.assign({ id: 'd' + (this.seq++), kind: 'dyn', status: 'active', issuedAt: [y, m], deadline: dl(c.months), streak: 0 }, c);
+    const t = Object.assign({ id: 'd' + (this.seq++), kind: 'dyn', status: 'active', issuedAt: [y, m], deadline: dl(Math.max(Tasks.PACE.dynMin, Math.round((c.months || 24) * Tasks.PACE.dynScale))), streak: 0 }, c);
     return Tasks.prepare(t, g);
   };
 
@@ -1923,7 +2002,7 @@
     const o = this.offers.splice(k, 1)[0]; this.cool = this.cool || {}; this.cool[o.coolKey] = g.ym() + 24;
   };
 
-  Tasks.prototype.serialize = function () { return { active: this.active, done: this.done, failed: this.failed, issued: this.issued, nextDyn: this.nextDyn, seq: this.seq, cool: this.cool || {}, adjusted:this.adjusted||[], offers: this.offers || [], nextOffer: this.nextOffer || 0, lineHist: this.lineHist || {} }; };
+  Tasks.prototype.serialize = function () { return { active: this.active, done: this.done, failed: this.failed, issued: this.issued, nextDyn: this.nextDyn, seq: this.seq, cool: this.cool || {}, adjusted:this.adjusted||[], offers: this.offers || [], nextOffer: this.nextOffer || 0, lineHist: this.lineHist || {}, startYM: this.startYM }; };
   Tasks.restore = function (s) {
     const t = Object.assign(new Tasks(), s);
     if (Array.isArray(t.offers)) t.offers = t.offers.filter(function (o) { return o.type !== 'lineCars'; });

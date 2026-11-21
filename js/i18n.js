@@ -1,7 +1,7 @@
 'use strict';
 // Display-only localization: model strings, save files, IDs and editable values remain canonical.
 (function(CM){
-  const allowed=['zh-CN','zh-TW','en'],hasHan=s=>/[\u3400-\u9fff]/.test(s),cache=new Map(),sources=new WeakMap(),attrs=new WeakMap(),listeners=new Set();
+  const allowed=['zh-CN','zh-TW','en'],hasHan=s=>/\p{Script=Han}/u.test(s),cache=new Map(),sources=new WeakMap(),attrs=new WeakMap(),listeners=new Set();
   let language='zh-CN',traditional=null,namesReady=false,trie=null,templates=null;
   try{const s=JSON.parse(localStorage.getItem('cm1.settings')||'null');if(s&&allowed.includes(s.language))language=s.language;}catch(e){/* settings unavailable */}
   const en=CM.I18N_EN||Object.create(null),names=new Map(),nameLengths=new Map(),missing=new Set();
@@ -9,12 +9,20 @@
   // 南岸 London's South Bank), so on a map with its own list the current map's spelling wins, whole or inside a sentence.
   const enMaps=CM.I18N_EN_MAP||Object.create(null),mapTries=new Map();
   function mapNames(){const id=CM.mapId;return language==='en'&&id&&enMaps[id]||null;}
-  function mapTrie(){const id=CM.mapId;let t=mapTries.get(id);if(!t){t=new Map();for(const [source,target]of Object.entries(enMaps[id])){let n=t;for(const c of source){if(!n.has(c))n.set(c,new Map());n=n.get(c);}n.out=target;}mapTries.set(id,t);}return t;}
+  function mapTrie(){const id=CM.mapId;let t=mapTries.get(id);if(!t){t=new Map();for(const [source,target]of Object.entries(enMaps[id])){addToTrie(t,source,target);}mapTries.set(id,t);}return t;}
   const twControls=new Map([
     ['设置','設定'], ['设置分类','設定分類'], ['恢复默认','恢復預設'], ['全屏','全螢幕'],
     ['搜索车站','搜尋車站'], ['搜索车站、线路、道路、区域','搜尋車站、線路、道路、區域'],
     ['已保存','已儲存'], ['保存中…','儲存中…'], ['移动车站','移動車站'],
+    ['载入后会舍弃未保存的进度和未确认的建设草案。','載入後會捨棄未儲存的進度和未確認的建設草案。'],
   ]);
+  // 东京地铁繁中线网与小田急站名使用「台」，并保留运营方地名拼写。
+  const twStationNames = {
+    tk: [
+      [/地下鐵赤[冢塚]/g, '地鐵赤塚'], [/地下鐵成增/g, '地鐵成增'],
+      [/(冰川|平和|白金|五月)臺/g, '$1台'], [/雜司之谷/g, '雜司谷'],
+    ],
+  };
   const compactFormat=new Intl.NumberFormat('en',{notation:'compact',maximumFractionDigits:2});
   function sanitize(s){return s.replace(/笕桥机场(?:[（(]军用[）)])?/g,'城东片区').replace(/王家墩机场(?:[（(]军用[）)])?/g,'王家墩片区').replace(/军用机场[^，。；\n]*/g,'未开发用地');}
   function nameEnglish(s){
@@ -36,9 +44,12 @@
       }
     }
   }
+  function addToTrie(root,source,target){
+    let n=root;for(let i=0;i<source.length;i++){const c=source[i];if(!n.has(c))n.set(c,new Map());n=n.get(c);}n.out=target;
+  }
   function initTrie(){
     if(trie)return;trie=new Map();
-    for(const [source,target]of Object.entries(en)){if(!source||!hasHan(source))continue;let n=trie;for(const c of source){if(!n.has(c))n.set(c,new Map());n=n.get(c);}n.out=target;}
+    for(const [source,target]of Object.entries(en)){if(!source||!hasHan(source))continue;addToTrie(trie,source,target);}
   }
   function english(s){
     const own=mapNames();if(own&&own[s]!==undefined)return own[s];
@@ -80,18 +91,20 @@
       if(end>=0){out+=' '+value+' ';i=end;}else{const n=/[0-9-]/.test(s[i])?numbered(s.slice(i)):null;if(n){out+=' '+n[1]+' ';i+=n[0];}else out+=s[i++];}
     }
     if(hasHan(out)&&missing.size<128)missing.add(s);
-    const result=out.replace(/，/g,', ').replace(/、/g,', ').replace(/。/g,'. ').replace(/：/g,': ').replace(/；/g,'; ').replace(/[「『]/g,'“').replace(/[」』]/g,'”').replace(/（/g,' (').replace(/）/g,') ').replace(/[ \t]+/g,' ').replace(/\s+([.,:;!?%)\]”])/g,'$1').replace(/([([“])\s+/g,'$1').trim();
+    const result=out.replace(/，/g,', ').replace(/、/g,', ').replace(/。/g,'. ').replace(/：/g,': ').replace(/；/g,'; ').replace(/[「『]/g,'“').replace(/[」』]/g,'”').replace(/（/g,' (').replace(/）/g,') ').replace(/[ \t]+/g,' ').replace(/\s+([.,:;!?%)\]”])/g,'$1').replace(/([([“#])\s+/g,'$1').trim();
     return (/^\s/.test(s)?' ':'')+result+(/\s$/.test(s)?' ':'');
   }
   function text(value){
     if(typeof value!=='string'||!hasHan(value))return value;
-    const key=language==='en'?(CM.mapId||'gz')+'\0'+value:value;let result=cache.get(key);if(result!==undefined)return result;
+    const twNames = language==='zh-TW' && twStationNames[CM.mapId];
+    const key=language==='en'||twNames?(CM.mapId||'gz')+'\0'+value:value;let result=cache.get(key);if(result!==undefined)return result;
     // Paths and URLs are data. Preserve them byte-for-byte, including Chinese directory names.
     const protectedParts=[];
     const source=sanitize(value.replace(/(?:[A-Za-z]:[\\/]|\\\\)[^\r\n<>"|]*|https?:\/\/[^\s<>"）)]+/g,p=>{const token='\uE000'+protectedParts.length+'\uE001';protectedParts.push(p);return token;}));
     const restore=s=>s.replace(/\uE000(\d+)\uE001/g,(_,i)=>protectedParts[+i]);
     if(language==='zh-CN'||!hasHan(source))return restore(source);
     if(language==='zh-TW'){if(!traditional)traditional=window.OpenCC.Converter({from:'cn',to:'tw'});result=twControls.get(source)||traditional(traditional(source));}else result=english(source);
+    if(twNames) for(const [pattern,name] of twNames) result=result.replace(pattern,name);
     result=restore(result);
     if(cache.size>12000)cache.delete(cache.keys().next().value);cache.set(key,result);return result;
   }

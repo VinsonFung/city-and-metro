@@ -211,6 +211,10 @@ window.CM = window.CM || {};
   };
 
   // ---------- 格式化 ----------
+  U.fileDate = function (y, m) {
+    if (CM.I18n && CM.I18n.get() === 'en') return String(y) + (m == null ? '' : '-' + U.pad2(m));
+    return y + '年' + (m == null ? '' : m + '月');
+  };
   U.pad2 = function (n) { return (n < 10 ? '0' : '') + n; };
   // 未开放区域的说明：按参考年份开放，或长期不开放（如军用机场，见区域的 lockNote）
   U.regionLock = function (rg) { return rg.open != null ? '参考 ' + rg.open + ' 年开放' : (rg.lockNote || '不开放'); };

@@ -341,6 +341,7 @@
     ],
     lineColorsNice: ['#00ab4e', '#ed1d24', '#0075c2', '#7d499d', '#f38b00', '#5eb6e4', '#9a3b26', '#bac429', '#00888a', '#e777cb', '#a35200', '#6d6e71'],
     // v2.7 向北扩大后：新增范围里的深圳一侧不收地名（边界线取近似）
+    stationNameCorrections: { '洪天路紧急月台': null },
     places: (G.places || []).filter(function (p) { return !(p[2] < 24 && inSz(p[1], p[2])); }).map(function (p) { return [p[0], p[1], p[2], p[3]]; }),
   };
 

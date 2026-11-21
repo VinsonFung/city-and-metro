@@ -186,13 +186,13 @@
     this.econ = new CM.Economy(this.mode, this.clock.y, this.clock.m);
     model.fare = this.econ.fare; model.crossFee = this.econ.cross;
     if (this.macro && CM.Macro) CM.Macro.sync(this);
+    this.startYear = this.clock.y;
     this.tasks = new CM.Tasks();
     this.events = this.events.filter(function (e) { return e.tag !== '任务'; });
     this.econ.startMonth(this.clock.y, this.clock.m);
     this.tasks.monthly(this).forEach((o) => this.logTask(o));
     this.history = [];
     this.recordHistory();
-    this.startYear = this.clock.y;
     this.name = this.name.replace(/\d{4}$/, String(this.clock.y));
     this.logEvent({ tag: '自由建造', title: '从 ' + this.clock.y + ' 年开始规划', desc: CFG.START.y + '–' + (this.clock.y - 1) + ' 年的城市发展按历史资料与发展规则推演，开局时' + (this.mapInit && this.mapInit.metro ? '只有既有地铁' : '尚无地铁') + '。' });
   };
@@ -547,7 +547,8 @@
     const td = Math.min(this.clock.d, U.daysInMonth(ty, tm));
     const snap = this.snapshotMetrics();
     const total = Math.max(1, months * 30);
-    this.jumping = { months: months, target: [ty, tm, td], from: [this.clock.y, this.clock.m, this.clock.d], snap: snap, progress: 0, total: total, gen: this.jumpGen(ty, tm, td, total) };
+    this.jumping = { months: months, target: [ty, tm, td], from: [this.clock.y, this.clock.m, this.clock.d], snap: snap,
+      ledgerStart: this.econ.isFree() ? null : Object.assign({}, this.econ.cur), progress: 0, total: total, gen: this.jumpGen(ty, tm, td, total) };
     this.prevSpeed = this.speed;
     this.speed = 0;
     this.emit('jump', this.jumping);
@@ -606,7 +607,10 @@
         if (CM.CarPool && CM.CarPool.onReq === j.resume) CM.CarPool.onReq = null;
         this.jumping = null;
         this.speed = 0;
-        const res = { from: j.from, to: [this.clock.y, this.clock.m, this.clock.d], before: j.snap, after: this.snapshotMetrics(), failed: this.econ.failed };
+        const to = [this.clock.y, this.clock.m, this.clock.d];
+        const finance = j.ledgerStart ? this.econ.summarizeAdvance(j.from, to, j.ledgerStart) : null;
+        const money = finance ? CM.moneyAt(CM.MAPS[this.mapId], to[0], to[1]) : null;
+        const res = { from: j.from, to: to, before: j.snap, after: this.snapshotMetrics(), finance: finance, money: money, failed: this.econ.failed };
         this.emit('jumpDone', res);
         return;
       }
@@ -721,7 +725,12 @@
     // 新建、改建与搬迁后的位置成为新的“付费选址”，之后的免费微调以此为基准
     for (const id in d.net.stations) { const s = d.net.stations[id], o = this.net.stations[id]; if (o && !s.site) s.site = [o.x, o.y]; }
     for (const id of ev.siteReset || []) { const s = d.net.stations[id]; if (s) s.site = [s.x, s.y]; }
-    for (const id in d.net.segments) if (!this.net.segments[id]) d.net.segments[id].built = [this.clock.y, this.clock.m];
+    for (const id in d.net.segments) {
+      const s = d.net.segments[id];
+      if (!this.net.segments[id] && !(s.tk && s.built && s.tkSplit)) s.built = [this.clock.y, this.clock.m];
+      if (s.tkSplit) s.replayFrom = [this.clock.y, this.clock.m];
+      delete s.tkSplit;
+    }
     // 轨道的“已付费长度”：之后的免费小幅调整以此为基准累计
     for (const id in d.net.segments) { const v = ev.paidLen && ev.paidLen[id]; if (v != null) d.net.segments[id].paidLen = Math.round(v); }
     // 收藏：记下被拆除或改名对象的最新名称（读档后已拆除的收藏仍显示原名）
@@ -757,7 +766,10 @@
         }
         if (rewired) { s.replayFrom = at; delete s.lh; }
       }
-      for (const id in off.stations) if (!d.net.stations[id]) { const s = off.stations[id]; gone.stations[id] = Object.assign(M.clone(s), { built: s.built || null, gone: at }); any = true; }
+      for (const id in off.stations) {
+        const s = off.stations[id], next = d.net.stations[id];
+        if (!next || (!M.isVirt(s) && M.isVirt(next))) { gone.stations[id] = Object.assign(M.clone(s), { built: s.built || null, gone: at }); any = true; }
+      }
       for (const id in off.lines) if (!d.net.lines[id]) { keepLine(id); any = true; }
       if (any) this.netGone = gone; }
     const netBefore = this.net;
@@ -776,6 +788,7 @@
     this.impactReport = { status: 'waiting', at: [this.clock.y, this.clock.m] };
     this.draft = null;
     this.logEvent({ tag: '建设', title: '建设完成并投入运营', desc: summary + (ev.total > 0 ? '，费用 ' + U.fmtMoney(ev.total) : '，无费用') });
+    this.tasks?.quickCheck?.(this).forEach((o) => this.logTask(o));
     if (CM.Milestones) CM.Milestones.onNetwork(this);
     this.emit('network');
     this.emit('draft');
@@ -1014,6 +1027,7 @@
       g.model.setDayType(CM.Model.dayType(g.clock.y, g.clock.m, g.clock.d));
       g.model.buildZones(); g.model.buildDemand();
       g.net = s.net;
+      M.repairStationNames(g.net, g.city);
       // 扩图后旧接驳站保留在线网中。接驳口迁移或机场进入图内时，原站按普通车站运营。
       if (s.mapUpgrade && !s.mapUpgrade.displayOnly && CM.Fac) {
         for (const st of Object.values(g.net.stations)) {

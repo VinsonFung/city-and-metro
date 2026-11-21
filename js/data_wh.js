@@ -273,6 +273,7 @@
     ],
     // 线路配色参考武汉地铁
     lineColorsNice: ['#3080b7', '#ec83a8', '#c8a64a', '#8dc21f', '#a7354b', '#008b54', '#f08c00', '#9b8bb6', '#2a6b9c', '#c9d200', '#5a3f92'],
+    stationNameCorrections: { '车站': '车站街' },
     places: (G.places || []).map(function (p) { return [p[0], p[1], p[2], p[3]]; }),
   };
   // 位置校正：与 OSM 地铁站同名的设施与任务锚点，改用车站位置（相距 3 km 以内时；手填坐标的误差可达数百米）

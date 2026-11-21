@@ -326,6 +326,7 @@
     ],
     // 线路配色参考北京地铁
     lineColorsNice: ['#c23a30', '#0b5aa2', '#f9e700', '#008e9c', '#a6217f', '#d29700', '#f6c582', '#009b6b', '#8fc31f', '#009bc0', '#ed796b', '#d5a7a1'],
+    stationNameCorrections: { '1907': null, '北1门': null },
     places: (G.places || []).map(function (p) { return [p[0], p[1], p[2], p[3]]; }),
   };
   // 位置校正：与 OSM 地铁站同名的设施与任务锚点，改用车站位置（相距 3 km 以内时；手填坐标的误差可达数百米）

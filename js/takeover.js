@@ -349,6 +349,7 @@
     const L = B.lid && g.net.lines[B.lid];
     g.logEvent({ tag: '建设', title: '接管' + R.short + '：' + span, desc: U.fmtNum(P.km, 1) + ' km、' + P.stations.length + ' 座车站' + (P.nKeep ? '（沿用 ' + P.nKeep + ' 座已接管车站）' : '') + '，完成现代化改造后' + (P.join ? '并入' : '作为') + (L ? L.name : '新线路') + '投入运营，费用 ' + money(P.total) + '。' });
     if (CM.Milestones) CM.Milestones.onNetwork(g);
+    g.tasks?.quickCheck?.(g).forEach(o => g.logTask(o));
     g.emit('network'); g.emit('draft');
     g.emit('toast', { kind: 'good', text: '已接管' + R.short + ' ' + span + '，立即投入运营（' + money(P.total) + '）' });
     g.emit('autosave', 'build');
@@ -613,7 +614,7 @@
     // 规则与史实（折叠）
     const rules = [
       '费用按当年物价：轨道每公里按地面线造价的 ' + Math.round((R.km != null ? R.km : 0.6) * 100) + '%、车站按造价的 ' + Math.round((R.station != null ? R.station : 0.5) * 100) + '%，加上基础车队。',
-      '接管的轨道和车站沿用原有线位：可以改名、升级车站规模、接入新线路和加开交路，不能拆除、移动或改线。',
+      '接管的车站保留原址。可改建、改线、在区间插站或接入新线路。接管的轨道和原车站不可拆除。',
       '接管的车站和你已有的车站各自独立，步行范围内自动形成换乘；在边界站可以和没接管的铁路换乘，你的列车不会开进没接管的区段。',
       '没接管的区段照常作为背景铁路运行；接管的里程按比例从背景交通里扣掉，同一批乘客不会重复计算。',
       '之后的历史事件（新车站开通、线路延伸、运营权变化）只写进纪事，不会改动你接管的线路；新通车的区间可以另行接管。'].concat(R.limits ? [R.limits] : []);

@@ -136,7 +136,14 @@
 
   // ======================== 选择地图 ========================
   UI.prototype.showMapSelect = function (selId, tr) {
-    const self = this, all = CM.MAP_ORDER.slice();
+    const self = this, all = [], added = new Set();
+    const linked = id => CM.MAPS[id].data.cityLink?.map;
+    for (const id of CM.MAP_ORDER) {
+      if (added.has(id)) continue;
+      all.push(id); added.add(id);
+      const other = linked(id);
+      if (other && CM.MAPS[other] && !added.has(other)) { all.push(other); added.add(other); }
+    }
     let sel = selId && CM.MAPS[selId] ? selId : (this._mapSel && CM.MAPS[this._mapSel] ? this._mapSel : all[0]);
     const F = this._mapFilter || (this._mapFilter = { q: '', era: 'all', region: 'all' }), freeOpts = this._freeOpts || (this._freeOpts = {});
     if (selId) { F.q = ''; F.era = 'all'; F.region = 'all'; }
@@ -180,9 +187,10 @@
       return true;
     };
     all.forEach(function (id, k) {
+      const other = CM.MAPS[linked(id)];
       const mp = CM.MAPS[id], n = CM.Save.list(id).length;
       const it = h('button', { class: 'ms2-item', role: 'option', 'data-id': id, style: { animationDelay: (0.03 * Math.min(k, 8)) + 's' }, onclick: function () { pick(id); }, ondblclick: function () { pick(id); goPrimary(); } },
-        h('span', { class: 'ms2-thumb' }, CM.thumbInto(h('img', { alt: '' }), id, theme), mp.tutorial ? h('span', { class: 'ms2-flag' }, '教程') : null),
+        h('span', { class: 'ms2-thumb' }, CM.thumbInto(h('img', { alt: '' }), id, theme), mp.tutorial ? h('span', { class: 'ms2-flag' }, '教程') : other ? h('span', { class: 'ms2-flag link', 'data-tip': '与' + other.name + '口岸相连' }, '口岸') : null),
         h('span', { class: 'ms2-it' },
           h('span', { class: 'ms2-name' }, h('b', null, mp.tutorial ? (mp.data.city || mp.name) : mp.name), h('em', null, String(mp.cfg.START.y))),
           h('small', null, mp.tagline || mp.sub),

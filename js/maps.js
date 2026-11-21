@@ -68,6 +68,38 @@
     m.cfg = cfg;
     MAPS[m.id] = m;
   }
+  // 默认命名、地名搜索和坐标对齐使用同一份清理后的地点。
+  const normalizePlaceNames = function (m) {
+    const corrections = m.data.stationNameCorrections || {};
+    const cleanName = function (name, kind) {
+      const key = kind + ":" + name;
+      if (Object.hasOwn(corrections, key)) return corrections[key];
+      if (Object.hasOwn(corrections, name)) return corrections[name];
+      const clean = name.replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '').trim();
+      return /^\p{Nd}+$/u.test(clean) ? null : clean;
+    };
+    const normalize = function (places, repairs) {
+      return places.flatMap(function (p) {
+        const [name, x, y, kind] = p, clean = cleanName(name, kind);
+        if (clean === name) return [p];
+        if (repairs) {
+          if (!repairs.has(name)) repairs.set(name, []);
+          repairs.get(name).push([name, x, y, kind, clean]);
+        }
+        if (!clean) return [];
+        // 去掉编号或隐形字符后实为同一站时，使用已有的正式站点坐标。
+        if (places.some(function (q) { return kind <= 1 && q[0] === clean && q[3] === kind && U.dist(x, y, q[1], q[2]) < 0.6; })) return [];
+        return [[clean, x, y, kind]];
+      });
+    };
+    const places = m.data.places || [], labels = new Map(), corrected = normalize(places, labels);
+    if (labels.size) {
+      m.data.places = corrected;
+      m.data.stationNameRepair = { revision: 1, labels: labels };
+    }
+    if (m.geo.places) m.geo.places = m.geo.places === places ? m.data.places : normalize(m.geo.places);
+  };
+  for (const id in MAPS) if (MAPS[id].kind === 'real') normalizePlaceNames(MAPS[id]);
   // 地图数据指纹：格网、要素数量与名称表；范围修订提高 mapVersion，原范围内的地形校正由 terrainRevision 识别。
   for (const id in MAPS) {
     const m = MAPS[id], G = m.geo;

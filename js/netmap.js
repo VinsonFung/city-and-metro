@@ -1267,7 +1267,8 @@
       c.textAlign = 'left';
       cv.toBlob(function (blob) {
         if (!blob) { fail('无法生成图片'); return; }
-        const filename = (isGeo ? '地铁地理线网图-' : '地铁线路示意图-') + (D.city || '城市') + '-' + g.clock.y + '年' + g.clock.m + '月.png';
+        const tr = CM.I18n ? CM.I18n.text : s => s;
+        const filename = tr(isGeo ? '地铁地理线网图' : '地铁线路示意图') + '-' + tr(D.city || '城市') + '-' + U.fileDate(g.clock.y, g.clock.m) + '.png';
         try { U.downloadBlob(blob, filename); ui.toast('已导出线路示意图（' + cv.width + '×' + cv.height + ' PNG）', 'good'); setExporting(false); } catch (e) { fail('无法保存图片：' + e.message); }
       }, 'image/png');
     } catch (err) { console.error(err); fail('无法绘制示意图'); } };

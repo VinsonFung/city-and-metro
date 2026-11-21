@@ -33,7 +33,7 @@
     ];
     if (!free) {
       const L = E.ledger.slice(-12), Tk = CM.Tasks, rec = L.length && Tk ? L.reduce(function (a, r) { return a + Tk.recoveryOf(r); }, 0) / L.length : 0, income = L.reduce(function (a, r) { return a + (r.fare || 0) + (r.commerce || 0); }, 0), debt = E.debtTotal(), ratio = debt / Math.max(1, income);
-      dims.push({ k: 'fin', name: '财政健康', w: 12, score: 60 * clamp01(rec) + 40 * (1 - clamp01(ratio / 12)) - (E.funds < 0 ? 15 : 0), val: '票款和商业覆盖运营 ' + Math.round(rec * 100) + '% · 负债 ' + U.fmtMoney(debt) });
+      dims.push({ k: 'fin', name: '财政健康', w: 12, score: 60 * clamp01(rec) + 40 * (1 - clamp01(ratio / 12)) - (E.funds < 0 ? 15 : 0), val: '票款和商业覆盖运营 ' + Math.round(rec * 100) + '% · 负债 ', debt: debt });
       const done = g.tasks.done.length, failed = g.tasks.failed.length;
       dims.push({ k: 'goal', name: '目标达成', w: 6, score: done + failed ? 100 * done / (done + failed) : 50, val: '完成任务 ' + done + ' 项 · 未完成 ' + failed + ' 项' });
     }
@@ -43,18 +43,52 @@
     const comment = GOOD[best.k] + '。' + (worst.score < 70 ? WEAK[worst.k] + '。' : '各方面都比较均衡。');
     let first = null; for (const id in net.segments) { const b = net.segments[id].built; if (b && (!first || b[0] + b[1] / 12 < first[0] + first[1] / 12)) first = b; }
     let lines = 0; for (const lid in net.lines) if (CM.Metro.lineTopo(net, lid).topo !== 'empty') lines++;
-    const stations = Object.keys(net.stations).filter(function (sid) { return CM.Metro.stationLines(net, sid).length; }).length;
-    const stats = [['总评线路', lines, 'tiao'], ['总评车站', stations, 'zuo'], ['线路总长', km.toFixed(0) + ' km'], ['日均客流', U.fmtPeople(D.metro || 0)], ['地铁分担率', (share * 100).toFixed(1) + '%'], ['人口覆盖', Math.round(cover * 100) + '%'], ['平均通勤', (D.commute || 0).toFixed(1), 'min'], ['总评满意度', Math.round(sat), 'fen']];
-    if (E.built) stats.push(['累计建设投入', U.fmtMoney(E.built)]);
+    const stations = Object.keys(net.stations).filter(function (sid) { return !CM.Metro.isVirt(net.stations[sid]) && CM.Metro.stationLines(net, sid).length; }).length;
+    const stats = [['总评线路', lines, 'tiao'], ['总评车站', stations, 'zuo'], ['线路总长', km.toFixed(0) + ' km'], ['日均客流', D.metro || 0], ['地铁分担率', (share * 100).toFixed(1) + '%'], ['人口覆盖', Math.round(cover * 100) + '%'], ['平均通勤', (D.commute || 0).toFixed(1), 'min'], ['总评满意度', Math.round(sat), 'fen']];
+    if (E.built) stats.push(['累计建设投入', E.built]);
     const H = g.history.filter(function (r) { return r && r.m === 1; }), step = Math.max(1, Math.ceil(H.length / 40)), trend = [];
     for (let i = 0; i < H.length; i += step) trend.push([H[i].y, +(H[i].share || 0).toFixed(4)]);
     trend.push([g.clock.y, +share.toFixed(4)]);
-    return { paper: CM.NetMap && CM.NetMap.paper ? CM.NetMap.paper() : '#fff', id: g.id, map: g.mapId, city: CM.DATA.city || '', game: g.name || '', mode: E.mode, from: first ? first[0] : g.clock.y, at: [g.clock.y, g.clock.m], score: score, grade: grade, title: GRADE[grade].title, comment: comment, dims: dims.map(function (d) { return { k: d.k, name: d.name, score: d.score, val: d.val }; }), stats: stats, trend: trend, ver: CFG.GAME_VERSION, when: Date.now() };
+    return { paper: CM.NetMap && CM.NetMap.paper ? CM.NetMap.paper() : '#fff', id: g.id, map: g.mapId, city: CM.DATA.city || '', game: g.name || '', mode: E.mode, from: first ? first[0] : g.clock.y, at: [g.clock.y, g.clock.m], score: score, grade: grade, title: GRADE[grade].title, comment: comment, dims: dims.map(function (d) { return { k: d.k, name: d.name, score: d.score, val: d.val, debt: d.debt }; }), stats: stats, trend: trend, ver: CFG.GAME_VERSION, when: Date.now() };
   }
 
   // ---------- 卡片 ----------
   const UNIT = { tiao: [' 条', ''], zuo: [' 座', ''], min: [' 分钟', ' min'], fen: [' 分', ''] };
-  const statText = function (s) { const u = s[2] && UNIT[s[2]]; return String(s[1]) + (u ? u[CM.I18n && CM.I18n.get() === 'en' ? 1 : 0] : ''); };
+  const COMPACT = { k: 1e3, K: 1e3, M: 1e6, B: 1e9, T: 1e12 };
+  // 旧版总评已保存显示文本，只重新格式化能够识别的单位；原始记录保持不变。
+  function readAmount(value, units) {
+    const m = /^([−-]?[\d,]+(?:\.\d+)?)([kKMBT]?)\s*(.*)$/.exec(value);
+    if (!m || !Object.hasOwn(units, m[3])) return NaN;
+    return Number(m[1].replaceAll(',', '').replace('−', '-')) * (COMPACT[m[2]] || 1) * units[m[3]];
+  }
+  function reviewMoney(rec, value) {
+    const map = CM.MAPS[rec.map];
+    const money = map ? CM.moneyAt(map, rec.at[0], rec.at[1]) : CM.CFG.money;
+    if (typeof value === 'number') return U.fmtMoney(value, undefined, money);
+    if (!money) return value;
+    const units = { [money.wan]: 1, [money.yi]: 10000 };
+    if (money.unit) units[money.unit] = 1e-4;
+    if (money.code) units[money.code] = 1e-4;
+    const amount = readAmount(value, units);
+    return Number.isFinite(amount) ? U.fmtMoney(amount * (money.div || 1), undefined, money) : value;
+  }
+  function dimText(rec, d) {
+    if (d.k !== 'fin' || typeof d.val !== 'string') return d.val;
+    if (typeof d.debt === 'number') return d.val + reviewMoney(rec, d.debt);
+    const sep = ' · 负债 ', i = d.val.indexOf(sep);
+    if (i < 0) return d.val;
+    const end = i + sep.length;
+    return d.val.slice(0, end) + reviewMoney(rec, d.val.slice(end));
+  }
+  function statText(rec, s) {
+    if (s[0] === '累计建设投入') return reviewMoney(rec, s[1]);
+    if (s[0] === '日均客流') {
+      const n = typeof s[1] === 'number' ? s[1] : readAmount(s[1], { '': 1, '万': 1e4, '萬': 1e4 });
+      return Number.isFinite(n) ? U.fmtPeople(n) : s[1];
+    }
+    const u = s[2] && UNIT[s[2]];
+    return String(s[1]) + (u ? u[CM.I18n && CM.I18n.get() === 'en' ? 1 : 0] : '');
+  }
   const statName = function (n) { return n.replace('总评', ''); };
   const spark = function (trend, color) {
     if (!trend || trend.length < 2) return null;
@@ -71,11 +105,11 @@
         h('div', { class: 'grow' }, h('div', { class: 'rv-score' }, h('b', null, String(rec.score)), h('small', null, ' / 100')), h('div', { class: 'rv-title' }, rec.title))),
       h('p', { class: 'rv-comment' }, rec.comment),
       h('div', { class: 'rv-dims' }, rec.dims.map(function (d) {
-        return h('div', { class: 'rv-dim' }, h('div', { class: 'rv-dim-h' }, h('b', null, d.name), h('span', null, String(d.score))), h('div', { class: 'rv-bar' }, h('i', { style: { width: d.score + '%', background: G.color } })), h('small', null, d.val));
+        return h('div', { class: 'rv-dim' }, h('div', { class: 'rv-dim-h' }, h('b', null, d.name), h('span', null, String(d.score))), h('div', { class: 'rv-bar' }, h('i', { style: { width: d.score + '%', background: G.color } })), h('small', null, dimText(rec, d)));
       })));
     const right = h('div', { class: 'rv-right' },
       thumb ? h('div', { class: 'rv-thumb' }, h('img', { src: thumb, alt: '' })) : null,
-      h('div', { class: 'rv-stats' }, rec.stats.map(function (s) { return h('div', { class: 'rv-stat' }, h('small', { 'data-k': s[0] }, statName(s[0])), h('b', null, statText(s))); })),
+      h('div', { class: 'rv-stats' }, rec.stats.map(function (s) { return h('div', { class: 'rv-stat' }, h('small', { 'data-k': s[0] }, statName(s[0])), h('b', null, statText(rec, s))); })),
       spark(rec.trend, G.color));
     return h('div', { class: 'rv-body' }, left, right);
   }
@@ -137,7 +171,7 @@
           c.fillStyle = '#1f2a3a'; c.font = '700 28px ' + font; c.fillText(T(d.name), M0, y + 28);
           c.textAlign = 'right'; c.fillStyle = G.color; c.font = '800 30px ' + font; c.fillText(String(d.score), M0 + colW, y + 28); c.textAlign = 'left';
           c.fillStyle = '#e3e8ef'; c.fillRect(M0, y + 42, colW, 10); c.fillStyle = G.color; c.fillRect(M0, y + 42, colW * d.score / 100, 10);
-          c.fillStyle = '#5d6b80'; c.font = '400 21px ' + font; c.fillText(T(d.val), M0, y + 78);
+          c.fillStyle = '#5d6b80'; c.font = '400 21px ' + font; c.fillText(T(dimText(rec, d)), M0, y + 78);
           y += 92;
         });
         // 数字
@@ -146,7 +180,7 @@
           const x = sx + (i % 2) * (sw + 24), yy = midY + Math.floor(i / 2) * 112;
           c.fillStyle = '#fff'; c.fillRect(x, yy, sw, 96);
           c.fillStyle = '#5d6b80'; c.font = '400 22px ' + font; c.fillText(CM.I18n && CM.I18n.get() === 'en' ? T(s[0]) : T(statName(s[0])), x + 18, yy + 34);
-          c.fillStyle = '#1f2a3a'; c.font = '800 32px ' + font; c.fillText(statText(s), x + 18, yy + 76);
+          c.fillStyle = '#1f2a3a'; c.font = '800 32px ' + font; c.fillText(statText(rec, s), x + 18, yy + 76);
         });
         // 评语与落款
         c.fillStyle = '#1f2a3a'; c.font = commentFont;
@@ -154,7 +188,7 @@
         c.fillStyle = '#9aa5b5'; c.font = '400 22px ' + font; c.fillText(T('《城市与地铁》') + (rec.game ? ' · ' + rec.game : ''), M0, HH - 28);
         cv.toBlob(function (blob) {
           if (!blob) { done('无法生成图片'); return; }
-          const name = '城市总评-' + rec.city + '-' + rec.at[0] + '年.png';
+          const name = T('城市总评') + '-' + T(rec.city) + '-' + U.fileDate(rec.at[0]) + '.png';
           try { U.downloadBlob(blob, name); ui.toast('已导出城市总评海报', 'good'); done(); } catch (e) { done(e.message || '无法保存图片'); }
         }, 'image/png');
       } catch (err) { console.error(err); done('无法绘制海报'); }

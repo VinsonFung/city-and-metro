@@ -1433,6 +1433,40 @@ td .tag { margin-left: 4px; padding: 0 6px; font-size: 10px; }
 .tk-card.hot::before { background: var(--bad); opacity: 1; }
 .tk-card.ok { border-color: rgba(31, 146, 84, 0.35); }
 .tk-card.ok::before { background: var(--good); opacity: 1; }
+
+/* 任务卡片（v3.2 重新设计）：每类任务有自己的颜色与题头纹样——历史参考（琥珀、横纹档案）、事件引发（珊瑚、斜纹警示）、
+   本城任务（青绿）、动态任务（靛紫）、可选挑战（翠绿）、城市难题（深蓝）；题头写类别与剩余月数，已达标时有醒目的结算说明 */
+.tk-card.tk-paced { --kc: var(--accent); padding-top: 0; overflow: hidden; }
+.tk-card.k-hist { --kc: #c27a1a; } .tk-card.k-event { --kc: #d9534f; } .tk-card.k-city { --kc: #0f8f87; } .tk-card.k-dyn { --kc: #6a55d8; } .tk-card.k-opt { --kc: #1f9254; } .tk-card.k-puzzle { --kc: #2a5bb8; }
+.tk-card.tk-paced::before { background: var(--kc); opacity: .9; top: 0; bottom: 0; width: 4px; border-radius: 0; }
+.tk-ribbon { display: flex; align-items: center; gap: 6px; margin: 0 -12px 9px; padding: 6px 12px 6px 14px; font-size: 11.5px; font-weight: 700; color: var(--kc);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--kc) 14%, transparent), color-mix(in srgb, var(--kc) 4%, transparent)); border-bottom: 1px solid color-mix(in srgb, var(--kc) 18%, transparent); }
+.tk-ribbon em { font-style: normal; font-weight: 600; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--kc) 16%, transparent); }
+.tk-card.k-hist .tk-ribbon { background-image: repeating-linear-gradient(0deg, transparent 0 5px, color-mix(in srgb, var(--kc) 7%, transparent) 5px 6px), linear-gradient(90deg, color-mix(in srgb, var(--kc) 14%, transparent), color-mix(in srgb, var(--kc) 4%, transparent)); font-family: var(--serif, 'Songti SC', 'SimSun', serif); }
+.tk-card.k-event .tk-ribbon { background-image: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--kc) 10%, transparent) 0 6px, transparent 6px 12px), linear-gradient(90deg, color-mix(in srgb, var(--kc) 12%, transparent), transparent); }
+.tk-card.k-opt .tk-ribbon, .tk-card.k-puzzle .tk-ribbon { background-image: radial-gradient(circle at 92% 50%, color-mix(in srgb, var(--kc) 18%, transparent) 0 28px, transparent 29px), linear-gradient(90deg, color-mix(in srgb, var(--kc) 12%, transparent), transparent); }
+.tk-due { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; background: var(--surface-solid); color: var(--muted); border: 1px solid var(--line); font-weight: 600; }
+.tk-card.warm .tk-due { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.tk-card.hot .tk-due { color: #fff; background: var(--bad); border-color: var(--bad); }
+.tk-card.tk-paced .tk-top .badge { background: color-mix(in srgb, var(--kc) 14%, transparent); color: var(--kc); }
+.tk-card.ok { border-color: color-mix(in srgb, var(--good) 45%, transparent); }
+.tk-card.ok::before { background: var(--kc); }
+.tk-met { display: flex; align-items: center; gap: 6px; margin: 7px 0 2px; padding: 6px 10px; border-radius: 10px; background: var(--good-soft); color: var(--good); font-size: 12px; }
+.tk-met b { font-weight: 800; } .tk-met span { color: var(--text); opacity: .8; }
+.tk-card.tk-paced .tk-ribbon, .tk-card.tk-paced .tk-met { flex-wrap: wrap; }
+.tk-card.pp-paper { --paper-ink: #614b28; --paper-line: rgba(150, 128, 86, .12); padding-top: 0; border-color: #d9cba9; background: repeating-linear-gradient(180deg, transparent 0 25px, var(--paper-line) 25px 26px), #fbf7ec; }
+:root[data-theme="dark"] .tk-card.pp-paper { --paper-ink: #e0d2af; --paper-line: rgba(220, 200, 160, .08); border-color: #5a503e; background-color: #2b2620; }
+.tk-card.pp-paper::before { display: none; }
+.pp-doc { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 8px 0 6px; margin-bottom: 10px; border-bottom: 3px double var(--paper-ink); color: var(--paper-ink); font-size: 12px; }
+.pp-doc b { margin-right: auto; }
+.pp-no { font: 600 10.5px ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+.pp-stamp { padding: 2px 6px; border: 1px solid currentColor; border-radius: 4px; color: #a52d26; font-weight: 700; }
+.pp-stamp.blue { color: #254e9e; }
+:root[data-theme="dark"] .pp-stamp { color: #ff9d93; }
+:root[data-theme="dark"] .pp-stamp.blue { color: #a2bcff; }
+.pp-sign { display: flex; flex-wrap: wrap; gap: 4px 12px; padding-top: 8px; margin-top: 10px; border-top: 1px dashed var(--paper-ink); color: var(--paper-ink); font-size: 11.5px; }
+.ms2-flag.link { background: rgba(167, 55, 10, .94); }
+
 .tk-top { display: flex; gap: 10px; align-items: center; }
 .tk-top .badge { width: 34px; height: 34px; border-radius: 11px; }
 .tk-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 2px; }

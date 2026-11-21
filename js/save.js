@@ -346,7 +346,8 @@
   };
   Save.fileName = function (meta) {
     const d = meta.date || [0, 0];
-    return '城市与地铁_' + (meta.name || '存档').replace(/[\\/:*?"<>|]/g, '_') + '_' + d[0] + '年' + d[1] + '月.cmsave.json';
+    const t = CM.I18n ? CM.I18n.text : function (s) { return s; };
+    return t('城市与地铁') + '_' + (meta.name || t('存档')).replace(/[\\/:*?"<>|]/g, '_') + '_' + U.fileDate(d[0], d[1]) + '.cmsave.json';
   };
   Save.download = function (text, filename) {
     const blob = new Blob([text], { type: 'application/json' });

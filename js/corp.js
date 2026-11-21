@@ -418,8 +418,15 @@
     // 招标中
     body.appendChild(h('div', { class: 'fl-h tk-sech' }, ic('megaphone', 14), '招标中 · ' + P.tenders.length));
     if (!P.tenders.length) body.appendChild(h('div', { class: 'note' }, '暂无招标。政府约每 ' + RULE.every + ' 个月按城市需要提出一个项目' + (P.next > ym ? '（下次约 ' + ymText(P.next) + '）' : '') + '；不接合同也可以自主建设。'));
+    const docHead = function (type, record, status, bid) {
+      return h('div', { class: 'pp-doc' },
+        h('b', null, type),
+        record.id ? h('span', { class: 'pp-no' }, 'No. ' + String(record.id).toUpperCase()) : null,
+        h('span', { class: 'pp-stamp' + (bid ? ' blue' : '') }, status));
+    };
     for (const t of P.tenders) {
-      const c = h('div', { class: 'tk-card pp-card pp-tender' + (t.bid ? ' bid' : '') });
+      const c = h('div', { class: 'tk-card pp-card pp-paper pp-tender' + (t.bid ? ' bid' : '') });
+      c.appendChild(docHead('招标文件', t, t.bid ? '已投标' : '招标中', t.bid));
       c.appendChild(h('div', { class: 'tk-top' }, h('span', { class: 'badge b-blue' }, ic(TYPE[t.type].icon)),
         h('div', { class: 'grow' }, h('div', { class: 'tk-meta' }, typeTag(t), h('span', { class: 'tiny muted' }, t.bid ? '已投标' : (t.expires > ym ? '还可投标 ' + (t.expires - ym) + ' 个月' : '本月截止投标'))), h('b', { class: 'tk-title' }, t.title))));
       c.appendChild(h('div', { class: 'tk-desc' }, t.desc));
@@ -456,7 +463,8 @@
     if (!P.contracts.length) body.appendChild(h('div', { class: 'note' }, '还没有履约中的合同。'));
     for (const c of P.contracts) {
       const o = c.opt, left = c.phase === 'build' ? c.deadline - ym : c.opsEnd - ym, urg = c.phase === 'build' && left <= 6 ? ' hot' : (c.phase === 'build' && left <= 12 ? ' warm' : '');
-      const card = h('div', { class: 'tk-card pp-card' + urg + (c.phase === 'ops' && c.kpi && c.kpi.f === 1 ? ' ok' : '') });
+      const card = h('div', { class: 'tk-card pp-card pp-paper' + urg + (c.phase === 'ops' && c.kpi && c.kpi.f === 1 ? ' ok' : '') });
+      card.appendChild(docHead(c.phase === 'ops' ? '建设运营合同' : '建设合同', c, c.phase === 'ops' ? '运营中' : '已签约'));
       card.appendChild(h('div', { class: 'tk-top' }, h('span', { class: 'badge b-blue' }, ic(TYPE[c.type].icon)),
         h('div', { class: 'grow' }, h('div', { class: 'tk-meta' }, typeTag(c), h('span', { class: 'tag ' + (c.phase === 'ops' ? 'good' : 'info') }, c.phase === 'ops' ? '运营期' : '建设期'), h('span', { class: 'tiny muted' }, o.name)), h('b', { class: 'tk-title' }, c.title)),
         c.phase === 'build' ? this.taskRing(c.prog ? c.prog.v : 0, '') : null));
@@ -486,6 +494,10 @@
         self.confirm('退出合同？', '保证金不予退还，未来 ' + RULE.fail.months + ' 个月拨款 ×' + RULE.fail.grant + '，满意度与履约信誉下降。已建的线路照常归公司运营。', '退出合同', function () { Corp.quit(g, c.id); done(); }, true, 'warn');
       } }, '退出合同'));
       if (acts.length) card.appendChild(h('div', { class: 'row', style: { marginTop: '6px', justifyContent: 'flex-end' } }, acts));
+      card.appendChild(h('div', { class: 'pp-sign' },
+        h('span', null, '甲方：', h('b', null, city + '政府')),
+        h('span', null, '乙方：', h('b', null, city + '地铁公司')),
+        c.signed != null ? h('span', null, '签订于 ' + ymText(c.signed)) : null));
       body.appendChild(card);
     }
     // 已结束

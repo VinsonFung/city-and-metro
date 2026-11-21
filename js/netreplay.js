@@ -28,7 +28,10 @@
     for (const id in gone.lines) lines[id] = gone.lines[id];
     for (const id in net.lines) lines[id] = net.lines[id];
     for (const id in gone.stations) stations[id] = gone.stations[id];
-    for (const id in net.stations) stations[id] = net.stations[id];
+    for (const id in net.stations) {
+      const s = net.stations[id], former = gone.stations[id];
+      stations[id] = M.isVirt(s) && former && !M.isVirt(former) ? { ...former, virtualAfter: s } : s;
+    }
     const add = function (s, t1) {
       if (!stations[s.a] || !stations[s.b]) return;
       const t0 = timeOf(s.replayFrom || s.built, CM.CFG.START.y); if (t0 < T0) T0 = t0;
@@ -52,7 +55,11 @@
   // 某一时刻的线网（只读，用来排版）
   function subnet(H, t) {
     const n = { stations: {}, segments: {}, lines: {} };
-    for (const x of H.segs) if (x.t0 <= t + 1e-6 && t < x.t1) { n.segments[x.id] = x.s; n.stations[x.a] = H.stations[x.a]; n.stations[x.b] = H.stations[x.b]; n.lines[x.line] = H.lines[x.line]; }
+    const at = function (sid) {
+      const s = H.stations[sid];
+      return s.virtualAfter && timeOf(s.gone, Infinity) <= t + 1e-6 ? s.virtualAfter : s;
+    };
+    for (const x of H.segs) if (x.t0 <= t + 1e-6 && t < x.t1) { n.segments[x.id] = x.s; n.stations[x.a] = at(x.a); n.stations[x.b] = at(x.b); n.lines[x.line] = H.lines[x.line]; }
     return n;
   }
   function resample(pts) {
@@ -327,7 +334,8 @@
     // 站标
     const labels = [];
     stLines.forEach(function (ls, sid) {
-      const info = D.stInfo.get(sid); if (!info || p < info.p0) return;
+      const info = D.stInfo.get(sid), former = H.stations[sid];
+      if (!info || p < info.p0 || (former.virtualAfter && p >= D.W.t2p(timeOf(former.gone, Infinity)))) return;
       const q = stationPos(sid); if (!q) return;
       const pop = ease((p - info.p0) / 0.006), scale = 0.4 + 0.6 * pop;
       if (ls.length > 1) {

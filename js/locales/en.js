@@ -18701,3 +18701,81 @@ Object.assign(window.CM.I18N_EN_MAP.tk, {
   "芝南": "South Shiba",
   "芝北": "North Shiba"
 });
+
+Object.assign(window.CM.I18N_EN, {
+  "宾夕法尼亚车站": "Pennsylvania Station",
+  "霍博肯总站": "Hoboken Terminal",
+  "大西洋总站": "Atlantic Terminal",
+  "大中央总站": "Grand Central Terminal",
+  "新": "New",
+  "接驳已建成，启用后开始产生客流": "Connection built. Airport trips begin when it opens.",
+  "可提前修到地图边缘的接驳口，启用后开始产生客流": "You can build to the map edge in advance. Airport trips begin when it opens.",
+  "载入存档？": "Load this save?",
+  "载入后会舍弃未保存的进度和未确认的建设草案。": "Loading discards unsaved progress and unconfirmed construction drafts.",
+  "放弃改动并载入": "Discard changes and load",
+  "接管的车站保留原址。可改建、改线、在区间插站或接入新线路。接管的轨道和原车站不可拆除。": "Taken-over stations keep their original locations. Rebuild or realign the track, insert a station, or connect a new line. The original tracks and stations cannot be demolished.",
+  "接管铁路 {route} 中间插站（沿用原线位，不另收轨道费）": "Station added on {route}. The existing track incurs no construction cost.",
+  "该片区人口约 {p}，尚无地铁覆盖。使片区 {percent}% 以上的居民与岗位步行 15 分钟可达车站。": "About {p} people live here and the area has no metro coverage. Reach at least {percent}% of residents and jobs within a 15-minute walk of a station.",
+  "其中由专项资金支付": "Paid from capital funds"
+});
+
+Object.assign(window.CM.I18N_EN, {
+  "历史参考": "Historical",
+  "事件引发": "Event",
+  "本城任务": "City goal",
+  "动态任务": "Dynamic",
+  "可选挑战": "Optional challenge",
+  "城市难题": "City puzzle",
+  "可选": "Optional",
+  "剩 {n} 个月": "{n} months left",
+  "本月到期": "Due this month",
+  "已达标": "Target met",
+  "下月初结算即完成": "Completes at the start of next month",
+  "还要再保持 {n} 个月，下月初起计": "Maintain this for {n} more months, starting next month.",
+  "排队或等地点开放后才发布，期限顺延到 {y} 年 {m} 月（原为 {oldY} 年 {oldM} 月）": "The deadline moved to {y}-{m} (originally {oldY}-{oldM}) after waiting for availability.",
+  "招标文件": "Tender document",
+  "建设合同": "Construction contract",
+  "建设运营合同": "Construction and operating contract",
+  "已签约": "Signed",
+  "甲方：": "Client: ",
+  "乙方：": "Contractor: ",
+  "{city}政府": "{city} government",
+  "{city}地铁公司": "{city} Metro Company",
+  "签订于 {date}": "Signed {date}",
+  "与{city}口岸相连": "Border connection with {city}"
+});
+
+Object.assign(window.CM.I18N_EN_MAP.ny, {
+  "宾夕法尼亚车站": "Penn Station",
+  "霍博肯总站": "Hoboken Terminal",
+  "大西洋总站": "Atlantic Terminal",
+  "大中央总站": "Grand Central Terminal",
+  "纽瓦克宾州车站": "Newark Penn Station",
+  "纽瓦克布罗德街站": "Newark Broad Street Station"
+});
+Object.assign(window.CM.I18N_EN_MAP.pa, {
+  "莱萨尔杜瓦讷": "Les Ardoines",
+  "戴高乐机场第一航站楼": "CDG Airport Terminal 1",
+  "戴高乐机场第二航站楼": "CDG Airport Terminal 2",
+  "戴高乐机场第三航站楼": "CDG Airport Terminal 3 – Roissypôle",
+  "戴高乐机场 PR 停车场": "CDG Airport – Car Park PR",
+  "戴高乐机场 PX 停车场": "CDG Airport – Car Park PX"
+});
+Object.assign(window.CM.I18N_EN_MAP.sh, {
+  "陆家浜路": "Lujiabang Road",
+  "浦东机场 S1 卫星厅": "Pudong Airport Satellite S1",
+  "浦东机场 S2 卫星厅": "Pudong Airport Satellite S2",
+  "浦东机场 T1 航站楼": "Pudong Airport Terminal 1",
+  "浦东机场 T2 航站楼": "Pudong Airport Terminal 2"
+});
+Object.assign(window.CM.I18N_EN_MAP.tk, {
+  "地下铁赤冢": "Chikatetsu-akatsuka",
+  "冰川台": "Hikawadai",
+  "本乡三丁目": "Hongo-sanchome",
+  "都筑交流之丘": "Tsuzuki-fureainooka",
+  "度假区总站": "Resort Gateway Station",
+  "户冢安行": "Tozuka-angyo"
+});
+Object.assign(window.CM.I18N_EN_MAP.wh, {
+  "车站街": "Chezhan Subdistrict"
+});

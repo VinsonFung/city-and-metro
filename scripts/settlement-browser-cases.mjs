@@ -58,7 +58,13 @@ export async function runSettlementChecks({ E, until, fs, path, task, close, tap
     return { ok: r.ok, slotId: r.slotId, ym: g.ym(), funds: g.econ.funds };
   });
   check(save.ok, '30-month save could not be written');
+  await E('CM.ui.markUnsaved();CM.ui.loadSlot(' + JSON.stringify(save.slotId) + ');true');
+  await until('!!document.querySelector("#screen .modal-actions .danger")');
+  await tap('#screen .modal-actions button:not(.danger)');
+  check(await E('CM.game===window.settlementBeforeReload&&!CM.isLoading()'), 'Cancel must keep the current game');
   await E('CM.ui.loadSlot(' + JSON.stringify(save.slotId) + ');true');
+  await until('!!document.querySelector("#screen .modal-actions .danger")');
+  await tap('#screen .modal-actions .danger');
   await until(gameReady + ' && CM.game !== window.settlementBeforeReload', 180000);
   check(await E('CM.game.ym()===' + save.ym + ' && CM.game.econ.funds===' + save.funds), 'The first restore changed saved time or money');
   await close();

@@ -2996,12 +2996,18 @@
         h('button', { class: 'btn primary', onclick: function () { if (self.g()) self.closeScreen(); else self.showStart(); } }, '返回'))));
   };
   UI.prototype.loadSlot = function (slotId) {
-    const self = this, request = this._slotLoadRequest = {};
-    this.showLoading('正在读取存档…', 'load', CM.Save.slotInfo(slotId)?.map);
-    CM.Save.load(slotId).then(function (data) { if (self._slotLoadRequest === request) { self._loadingSlotId = slotId; CM.loadGame(data); } }, function (e) {
-      if (self._slotLoadRequest !== request) return; self._slotLoadRequest = null;
-      self.showLoadError(e, slotId);
-    });
+    const self = this, g = this.g();
+    const load = function () {
+      const request = self._slotLoadRequest = {};
+      self.showLoading('正在读取存档…', 'load', CM.Save.slotInfo(slotId)?.map);
+      CM.Save.load(slotId).then(function (data) { if (self._slotLoadRequest === request) { self._loadingSlotId = slotId; CM.loadGame(data); } }, function (e) {
+        if (self._slotLoadRequest !== request) return; self._slotLoadRequest = null;
+        self.showLoadError(e, slotId);
+      });
+    };
+    if (g && !g.settlementError && (!this.isSaved() || g.draft?.liveSnap || g.draft && g.draftEval().changed)) {
+      this.confirm('载入存档？', '载入后会舍弃未保存的进度和未确认的建设草案。', '放弃改动并载入', load, true, 'folder');
+    } else load();
   };
   // 返回主菜单：先确认最新状态已成功保存；保存失败时保留当前游戏
   // after：返回后要打开的界面（默认主菜单）
@@ -3175,27 +3181,18 @@
         !free && Math.abs(a.fiscF - b.fiscF) > 1e-6 ? h('span', { class: 'env-chip ' + (a.fiscF >= b.fiscF ? 'good' : 'warn') }, ic('bank', 13), '财力系数 ×' + b.fiscF.toFixed(2) + ' → ×' + a.fiscF.toFixed(2)) : null));
       parts.push(h('div', { class: 'jr-sec' }, ic('trend', 15), '城市经济', h('button', { class: 'linkbtn', onclick: function () { self.closeScreen(); self.openTop('econ'); } }, '查看', ic('chev', 13))), box);
     }
-    // ---- 财政（经营挑战）：期间已封账月份的收支 ----
-    if (!free) {
-      const rows = g.econ.ledger.filter(function (x) { const ym = U.ymIndex(x.y, x.m); return ym >= fromYm && ym < toYm; });
-      let inc = 0, ops = 0, bld = 0, svc = 0, bond = 0, contractOut = 0;
-      for (const x of rows) {
-        inc += CM.Economy.incomeOf(x);
-        ops += CM.Economy.opsOf(x);
-        contractOut += x.pppOut || 0;
-        for (const k of CM.Economy.BUILD_KINDS) bld += x[k] || 0;
-        svc += (x.interest || 0) + (x.principal || 0) + (x.penalty || 0);
-        bond += x.bond || 0;
-      }
+    // ---- 财政（经营挑战）：期间实际发生的收支 ----
+    if (r.finance) {
+      const f = r.finance, money = function (v) { return U.fmtMoney(v, undefined, r.money); };
       const fb = h('div', { class: 'jr-fin' },
-        h('div', null, h('small', null, '财政收入'), h('b', { class: 'good' }, '+' + U.fmtMoney(inc))),
-        h('div', null, h('small', null, '运营成本'), h('b', { class: 'warn' }, '−' + U.fmtMoney(ops))),
-        contractOut > 0.5 ? h('div', null, h('small', null, '合同支出'), h('b', { class: 'warn' }, '−' + U.fmtMoney(contractOut))) : null,
-        bld > 0.5 ? h('div', null, h('small', null, '建设支出'), h('b', { class: 'warn' }, '−' + U.fmtMoney(bld))) : null,
-        svc > 0.5 ? h('div', null, h('small', null, '偿债'), h('b', { class: 'bad' }, '−' + U.fmtMoney(svc))) : null,
-        bond > 0.5 ? h('div', null, h('small', null, '债券募集'), h('b', null, '+' + U.fmtMoney(bond))) : null,
-        h('div', { class: 'jf-net' }, h('small', null, '一般资金'), h('b', { class: a.funds >= b.funds ? 'good' : 'bad' }, U.fmtMoney(b.funds) + ' → ' + U.fmtMoney(a.funds))));
-      parts.push(h('div', { class: 'jr-sec' }, ic('coin', 15), '财政收支（' + rows.length + ' 个已结算月份）', h('button', { class: 'linkbtn', onclick: function () { self.closeScreen(); self.openTop('money'); } }, '查看', ic('chev', 13))), fb);
+        h('div', null, h('small', null, '财政收入'), h('b', { class: 'good' }, '+' + money(f.income))),
+        h('div', null, h('small', null, '运营成本'), h('b', { class: 'warn' }, '−' + money(f.ops))),
+        f.contractOut > 0.5 ? h('div', null, h('small', null, '合同支出'), h('b', { class: 'warn' }, '−' + money(f.contractOut))) : null,
+        f.build > 0.5 ? h('div', null, h('small', null, '建设支出'), h('b', { class: 'warn' }, '−' + money(f.build)), f.capexUse > 0.5 ? h('small', null, '其中由专项资金支付', ' ' + money(f.capexUse)) : null) : null,
+        f.debt > 0.5 ? h('div', null, h('small', null, '偿债'), h('b', { class: 'bad' }, '−' + money(f.debt))) : null,
+        f.bond > 0.5 ? h('div', null, h('small', null, '债券募集'), h('b', null, '+' + money(f.bond))) : null,
+        h('div', { class: 'jf-net' }, h('small', null, '一般资金'), h('b', { class: a.funds >= b.funds ? 'good' : 'bad' }, money(b.funds) + ' → ' + money(a.funds))));
+      parts.push(h('div', { class: 'jr-sec' }, ic('coin', 15), '财政收支', h('button', { class: 'linkbtn', onclick: function () { self.closeScreen(); self.openTop('money'); } }, '查看', ic('chev', 13))), fb);
     }
     // ---- 任务 ----
     const tEv = evs.filter(function (e) { return e.tag === '任务'; });
