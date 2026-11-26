@@ -37,6 +37,7 @@
     if(namesReady||!CM.MAPS)return;namesReady=true;
     for(const m of Object.values(CM.MAPS)){
       const list=[...(m.geo.names||[]),...(m.data.landmarks||[]).map(x=>x.name),...(m.data.regions||[]).flatMap(x=>[x.name,...(x.streets||[]),...(x.district||[])]),...(m.data.facilities||[]).flatMap(x=>[x.n,x.label]),...((m.data.bgViz&&m.data.bgViz.ferries)||[]).map(x=>x.name),...(m.data.districtLabels||[]).map(x=>x[0]),...Object.keys(m.data.roadYears||{}),...Object.keys(m.data.bridgeYears||{}),...(m.data.places||[]).map(x=>Array.isArray(x)?x[0]:x.name)];
+      for(const p of m.data.places||[])if(typeof p[0]==='string')list.push(CM.U.stationLabel(p[0]));
       if(m.data.defaultRegion)list.push(m.data.defaultRegion.name);
       for(const task of m.data.histTasks||[])for(const anchor of task.anchors||[])list.push(anchor.name);
       for(const raw of list)if(typeof raw==='string')for(const s of new Set([raw,raw.replace(/（.*?）/g,'').trim()]))if(hasHan(s)&&s.length>1&&s.length<80&&!en[s]){
@@ -103,7 +104,7 @@
     const source=sanitize(value.replace(/(?:[A-Za-z]:[\\/]|\\\\)[^\r\n<>"|]*|https?:\/\/[^\s<>"）)]+/g,p=>{const token='\uE000'+protectedParts.length+'\uE001';protectedParts.push(p);return token;}));
     const restore=s=>s.replace(/\uE000(\d+)\uE001/g,(_,i)=>protectedParts[+i]);
     if(language==='zh-CN'||!hasHan(source))return restore(source);
-    if(language==='zh-TW'){if(!traditional)traditional=window.OpenCC.Converter({from:'cn',to:'tw'});result=twControls.get(source)||traditional(traditional(source));}else result=english(source);
+    if(language==='zh-TW'){if(!traditional)traditional=window.OpenCC.Converter({from:'cn',to:'tw'});result=twControls.get(source)||traditional(traditional(source)).replace(/([多這那幾某每各一二兩三四五六七八九十百千萬\d]\s*)箇/g,'$1個');}else result=english(source);
     if(twNames) for(const [pattern,name] of twNames) result=result.replace(pattern,name);
     result=restore(result);
     if(cache.size>12000)cache.delete(cache.keys().next().value);cache.set(key,result);return result;

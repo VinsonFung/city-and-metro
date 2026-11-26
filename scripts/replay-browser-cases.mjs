@@ -35,10 +35,13 @@ export async function runReplayChecks({E,send,until,screenshot,delay,settle,tap,
  await E('document.querySelector(".nm-mode [data-mode=schematic]").click();true');await settle();
  if(await E('CM.NetReplay.active()'))throw Error('Layout change did not stop replay');
  await tap('.nm-replay');await until('!!CM.NetReplay.info()');await E('document.querySelector(".nr-play").click();true');
+ await send('Emulation.setTouchEmulationEnabled',{enabled:false});
+ await delay(250);
  const p=await E('(()=>{var r=document.querySelector(".nm-canvas").getBoundingClientRect();return{x:r.left+r.width*.5,y:r.top+r.height*.65}})()');
  const oldView=await E('document.querySelector(".nm-svg").getAttribute("viewBox")');
  await send('Input.dispatchMouseEvent',{type:'mousePressed',x:p.x,y:p.y,button:'left',buttons:1,clickCount:1});await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:p.x+100,y:p.y+30,buttons:1});await send('Input.dispatchMouseEvent',{type:'mouseReleased',x:p.x+100,y:p.y+30,button:'left',buttons:0,clickCount:1});await delay(200);
  if(await E('document.querySelector(".nm-svg").getAttribute("viewBox")')===oldView)throw Error('Diagram drag did not move view');
+ await send('Emulation.setTouchEmulationEnabled',{enabled:true});
  await screenshot('replay-desktop');
  await E('var r=document.querySelector(".nr-range");r.value=1000;r.dispatchEvent(new Event("input",{bubbles:true}));r.dispatchEvent(new Event("change",{bubbles:true}));document.querySelector(".nr-play").click();true');await until('document.querySelector(".nr-play").dataset.tip===CM.I18n.text("重播")',10000);
  await tap('.nr-play');if(await E('CM.NetReplay.info().p')>=1)throw Error('Replay did not restart');await E('CM.NetReplay.stop();true');await settle();
@@ -62,6 +65,10 @@ export async function runReplayChecks({E,send,until,screenshot,delay,settle,tap,
  // UI zoom changes physical pointer coordinates but must not move the zoom anchor or exaggerate dragging.
  await send('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
  await E('CM.Settings.set("uiScale",1.15);CM.ui.openNetMap();true');await settle();
+ await E('document.querySelector(".nm-mode [data-mode=geographic]").click();true');await settle();
+ await tap(".nm-chip");
+ const focus=await E('(()=>{const svg=document.querySelector(".nm-svg.focusing"),other=svg?.querySelector(".nm-lines [data-line]:not(.on)"),terrain=svg?.querySelector(".nm-terrain");if(!other||!terrain)return null;return [other,terrain].map(el=>{const s=getComputedStyle(el);return [s.opacity,s.strokeOpacity,s.fillOpacity]})})()');
+ if(JSON.stringify(focus)!==JSON.stringify([["1","0.14","0.14"],["1","0.6","0.6"]]))throw Error("Unexpected focus opacity "+JSON.stringify(focus));
  const anchor=await E('(()=>{const r=document.querySelector(".nm-canvas").getBoundingClientRect(),p={x:r.left+r.width*.67,y:r.top+r.height*.62};window.anchorWorld=new DOMPoint(p.x,p.y).matrixTransform(document.querySelector(".nm-svg").getScreenCTM().inverse());return p})()');
  await send('Input.dispatchMouseEvent',{type:'mouseWheel',x:anchor.x,y:anchor.y,deltaX:0,deltaY:-120});await delay(800);
  let screen=await E('(()=>{const p=anchorWorld.matrixTransform(document.querySelector(".nm-svg").getScreenCTM());return{x:p.x,y:p.y}})()');
@@ -69,6 +76,9 @@ export async function runReplayChecks({E,send,until,screenshot,delay,settle,tap,
  await send('Input.dispatchMouseEvent',{type:'mousePressed',x:anchor.x,y:anchor.y,button:'left',buttons:1,clickCount:1});await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:anchor.x+85,y:anchor.y+27,buttons:1});await send('Input.dispatchMouseEvent',{type:'mouseReleased',x:anchor.x+85,y:anchor.y+27,button:'left',buttons:0,clickCount:1});await delay(250);
  screen=await E('(()=>{const p=anchorWorld.matrixTransform(document.querySelector(".nm-svg").getScreenCTM());return{x:p.x,y:p.y}})()');
  if(Math.hypot(screen.x-anchor.x-85,screen.y-anchor.y-27)>2)throw Error('UI zoom exaggerated dragging '+JSON.stringify({anchor,screen}));
+ if(!await E('!!document.querySelector(".nm-svg.focusing .nm-lines [data-line].on")'))throw Error("Zoom interrupted route focus");
+ await tap(".nm-chip");await until('!document.querySelector(".nm-svg.focusing")');
+ console.log("PASS route focus without group compositing, pointer-anchored zoom and drag");
  // Seek within a month, pause and watch actual canvas paints. An idle replay should stop repainting.
  await tap('.nm-replay');await until('!!CM.NetReplay.info()',10000);await tap('.nr-play');
  await E('var r=document.querySelector(".nr-range");r.value=500;r.dispatchEvent(new Event("input",{bubbles:true}));r.dispatchEvent(new Event("change",{bubbles:true}));true');await delay(200);
@@ -78,7 +88,8 @@ export async function runReplayChecks({E,send,until,screenshot,delay,settle,tap,
  if(await E('CM.NetReplay.info().p')<=.5)throw Error('Cancelled timeline gesture froze playback');await tap('.nr-play');
  // A paused replay must still redraw after rotation or a viewport resize.
  await send('Emulation.setDeviceMetricsOverride',{width:568,height:320,deviceScaleFactor:1,mobile:true});await settle();
- if(!await E('(()=>{const cv=document.querySelector(".nr-canvas"),p=cv.parentElement;return cv.width===Math.round(p.clientWidth*Math.min(2,devicePixelRatio))&&cv.height===Math.round(p.clientHeight*Math.min(2,devicePixelRatio))})()'))throw Error('Paused replay did not resize its canvas');
+ const replaySize='(()=>{const cv=document.querySelector(".nr-canvas"),p=cv?.parentElement,d=Math.min(2,devicePixelRatio);return p&&[cv.width,cv.height,Math.round(p.clientWidth*d),Math.round(p.clientHeight*d)]})()';
+ try{await until(`(()=>{const a=${replaySize};return a&&a[0]===a[2]&&a[1]===a[3]})()`,5000);}catch{throw Error("Paused replay did not resize its canvas "+JSON.stringify(await E(replaySize)));}
  await audit('paused replay after rotation','#netmap button,.nr-range');await close();
  // All tracks may have been demolished; their history must remain playable in both layouts.
  await E('window.archivedFixture={net:CM.game.net,compiled:CM.game.compiled,gone:CM.game.netGone};CM.game.netGone={stations:CM.Metro.clone(CM.game.net).stations,lines:CM.Metro.clone(CM.game.net).lines,segments:Object.fromEntries(Object.entries(CM.game.net.segments).map(([id,s])=>[id,{...s,gone:[CM.game.clock.y,CM.game.clock.m]}]))};CM.game.net=CM.Metro.empty();CM.game.compiled=CM.Metro.compile(CM.game.net,CM.game.city);CM.Settings.set("uiScale",1);CM.ui.openNetMap();true');await settle();

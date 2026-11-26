@@ -26,21 +26,22 @@
   const huizhanPoly = [[22.7350, 113.7500], [22.7350, 113.7720], [22.7000, 113.7800], [22.6800, 113.7830], [22.6760, 113.7690], [22.6900, 113.7500]];
   const reclaim = [
     { id: 'baoan', name: '宝安中心区', year: 2003, sea: '前海湾', desc: '2001 年起填海约 4 平方公里，新的宝安中心区在海边成形。', poly: poly(baoanPoly) },
-    { id: 'shenzhenbayport', name: '深圳湾口岸', year: 2004, sea: '深圳湾', desc: '2003 年底完成约 1.5 平方公里的填海，为西部通道和深圳湾口岸预备用地。', poly: poly(portPoly) },
+    { id: 'shenzhenbayport', name: '深圳湾口岸', year: 2004, dev: false, sea: '深圳湾', desc: '2003 年底完成约 1.5 平方公里的填海，为西部通道和深圳湾口岸预备用地。', poly: poly(portPoly) },
     { id: 'houhai', name: '后海', year: 2004, big: true, sea: '深圳湾', desc: '后海滨路以东的海面成为陆地，后来的总部楼群、深圳湾体育中心和人才公园都在这片土地上。', poly: poly(houhaiPoly) },
     { id: 'qianhaie', name: '前海东片', year: 2005, sea: '前海湾', desc: '月亮湾大道以西、靠近南头半岛的一片新土地，先作仓储用地。', poly: poly(qianhaiE) },
     { id: 'xixiang', name: '西乡海滨', year: 2006, minor: true, sea: '伶仃洋', desc: '', poly: poly(xixiangPoly) },
-    { id: 'dachan', name: '大铲湾港区', year: 2007, sea: '伶仃洋', desc: '2004 年起建设，2007 年一期完工。', poly: poly(dachanPoly) },
+    { id: 'dachan', name: '大铲湾港区', year: 2007, dev: false, sea: '伶仃洋', desc: '2004 年起建设，2007 年一期完工。', poly: poly(dachanPoly) },
     { id: 'szbay', name: '深圳湾滨海带', year: 2009, sea: '深圳湾', desc: '滨海大道南侧填出一条狭长的海滨带，成为深圳湾公园。', poly: poly(bayPoly) },
     { id: 'qianhaic', name: '前海中片', year: 2009, big: true, sea: '前海湾', desc: '前海的土地继续向海推进，地铁前海湾站就建在这片新土地上。', poly: poly(qianhaiC) },
-    { id: 'airport2', name: '机场第二跑道', year: 2009, big: true, sea: '伶仃洋', desc: '2007 年起在第一跑道西侧的海面上填海，2011 年 7 月第二跑道启用，T3 航站楼也在这里。', poly: poly(air2Poly) },
+    { id: 'airport2', name: '机场第二跑道', year: 2009, dev: false, big: true, sea: '伶仃洋', desc: '2007 年起在第一跑道西侧的海面上填海，2011 年 7 月第二跑道启用，T3 航站楼也在这里。', poly: poly(air2Poly) },
     { id: 'qianhaiw', name: '前海西片', year: 2012, big: true, sea: '前海湾', desc: '约 7.7 平方公里的填海工程大体完工，前海形成今天的轮廓，接下来才开始修路和盖楼。', poly: poly(qianhaiW) },
     { id: 'taizi', name: '太子湾', year: 2016, minor: true, sea: '深圳湾', desc: '蛇口南端填海形成的邮轮母港与商务区。', poly: poly([[22.4805, 113.9065], [22.4805, 113.9175], [22.4690, 113.9175], [22.4690, 113.9065]]) },
     { id: 'huizhan', name: '会展新城', year: 2017, sea: '伶仃洋', desc: '福永以西的海边开始填海，新的国际会展中心 2019 年启用。', poly: poly(huizhanPoly) },
-    { id: 'airport3', name: '机场第三跑道', year: 2024, sea: '伶仃洋', desc: '2024 年 6 月完成填海与软基处理，2025 年第三跑道投运。', poly: poly(air3Poly) },
+    { id: 'airport3', name: '机场第三跑道', year: 2024, dev: false, sea: '伶仃洋', desc: '2024 年 6 月完成填海与软基处理，2025 年第三跑道投运。', poly: poly(air3Poly) },
   ];
 
   const data = {
+    scenicRevision: 2,
     // 城市特色（traits.js，规则见《地图设计与城市特色机制.md》）。新条目加在末尾，已触发事件按序号记录
     traits: [
       { use: 'reclaim', star: true, icon: 'wave', label: '向海要地', text: '前海、后海和机场周边按年份由海变陆，先有土地，再有道路、写字楼和住宅', why: '深圳西岸的新城区大多建在填海土地上：后海和深圳湾在 2000 年代成陆，前海约 2012 年大体完工，机场第二、第三跑道都建在海面上。' },
@@ -121,8 +122,8 @@
       { id: 'meilinshan', name: '梅林山', scenic: true, open: null, geo: { reserve: '梅林山郊野公园' }, relief: 400 },
       { id: 'tanglang', name: '塘朗山', scenic: true, open: null, geo: { reserve: '塘朗山郊野公园' }, relief: 430 },
       { id: 'daping', name: '大屏嶂', scenic: true, open: null, geo: { reserve: '大屏嶂森林公园' }, relief: 300 },
-      { id: 'mangrove', name: '福田红树林', scenic: true, open: null, geo: { reserve: '福田红树林自然保护区' } },
-      { id: 'wutong', name: '梧桐山', scenic: true, open: null, poly: poly([[22.6050, 114.1780], [22.6050, 114.2480], [22.5720, 114.2480], [22.5640, 114.2050], [22.5720, 114.1780]]), relief: 944 },
+      { id: 'mangrove', name: '福田红树林', scenic: true, relief: 0, open: null, geo: { reserve: '福田红树林自然保护区' } },
+      { id: 'wutong', name: '梧桐山', scenic: true, open: null, geo: { wood: '梧桐山风景名胜区' }, relief: 944 },
       { id: 'szbay', name: '深圳湾滨海带', park: true, poly: poly(bayPoly), open: 2010, plan: 'res', note: '滨海大道南侧的填海土地，建成深圳湾公园（史实），保留为绿地' },
       { id: 'qianhai', name: '前海', poly: poly([[22.5500, 113.8850], [22.5490, 113.8990], [22.5475, 113.9062], [22.5262, 113.9065], [22.5050, 113.8760], [22.5040, 113.8560], [22.5150, 113.8560], [22.5300, 113.8800]]), open: 2012, plan: 'cbd', note: '2010 年前海规划获批（史实）；新土地先修路，随后才有写字楼和住宅' },
       { id: 'houhai', name: '后海', poly: [poly(houhaiPoly), poly(portPoly)], open: 2004, plan: 'cbd', note: '后海滨路以东的填海土地，后来成为南山的总部基地（史实）' },

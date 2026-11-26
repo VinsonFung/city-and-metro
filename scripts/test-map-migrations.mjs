@@ -21,6 +21,7 @@ for(const [id,m]of Object.entries(C.MAPS)){
   payload.impactReport={hot:[{x:7,y:8}]};
   payload.digs={[2*e.oldW+1]:1};payload.finds=[{id:'finding',x:1.5,y:1990,yy:2.5}];
   payload.congRef={year:1990};
+  payload.folks={list:[{home:{x:1,y:2,z:1},dest:{x:2,y:3,z:1},kid:{school:{x:3,y:4,z:1}}}]};
   const body=JSON.stringify(payload),raw=JSON.stringify({format:C.CFG.SAVE_FORMAT,version:2,body,checksum:C.U.fnv(body)}),p=C.Save.parseEnvelope(raw).payload;
   assert.equal(p.netGone.stations.old.x,1.5+dx);assert.equal(p.netGone.stations.old.y,2.5+dy);
   assert.deepEqual(Array.from(p.netGone.segments.gone.pts[0]),[3.5+dx,4.5+dy]);assert.equal(JSON.stringify(p.netGone.segments.gone.lh),'[[1985,3,"l0"]]');
@@ -41,6 +42,8 @@ for(const [id,m]of Object.entries(C.MAPS)){
   assert.equal(p.corp.tenders[0].area.x,4+dx);assert.equal(p.corp.tenders[0].area.y,5+dy);
   assert.equal(p.corp.contracts[0].zone,z);assert.equal(p.corp.closed[0].zone,z);assert.equal(p.corp.cool['z:'+z],25);
   assert.equal(p.voices.follow.reader.posts[0].at.zone,z);
+  assert.equal(p.folks.list[0].kid.school.z,z);
+  assert.equal(p.folks.list[0].kid.school.y,4+dy);
   assert.equal(p.impactReport.hot[0].x,7+dx);assert.equal(p.impactReport.hot[0].y,8+dy);assert.equal(p.congRef,undefined);
   assert.equal(p.digs[(2+dy)*m.cfg.W+1+dx],1);
   assert.equal(p.finds[0].x,1.5+dx);assert.equal(p.finds[0].yy,2.5+dy);assert.equal(p.finds[0].y,1990);
@@ -68,3 +71,47 @@ for(const [id,m]of Object.entries(C.MAPS)){
   console.log('PASS migration',id,'v'+from+' -> v'+m.mapVersion,e.oldW+'x'+e.oldH,'->',m.cfg.W+'x'+m.cfg.H);
  }
 }
+
+
+const nj = C.MAPS.nj;
+assert.equal(nj.mapVersion, 2);
+assert.equal(nj.cfg.ZONE, 4);
+assert.ok(Object.values(C.MAPS).every(map => map.cfg.ZONE === 4));
+const oldZone = 1259, newZone = 2834;
+const task = { zone: oldZone, coolKey: 'cov:' + oldZone, anchors: [{ x: 31, y: 54 }] };
+const save = {
+  meta: { map: 'nj', mapVersion: 1 },
+  clock: { y: 2014, m: 8, d: 17 },
+  city: Object.fromEntries(keys.map(key => [key, C.U.packTyped(new Float32Array(180 * 252).fill(17), 'f32')])),
+  net: { stations: { s: { x: 21, y: 19, site: [21, 19] } }, segments: {} },
+  econ: { funds: 123456, debt: 600, ledger: [{ y: 2014, m: 7 }] },
+  tasks: { active: [task], adjusted: [task], offers: [{ parts: [task] }], cool: { ['cov:' + oldZone]: 55, 'at:31.0,54.0': 66 } },
+  corp: { contracts: [task], cool: { ['z:' + oldZone]: 99 } },
+  voices: { follow: { commuter: { posts: [{ at: { zone: oldZone } }] } } },
+  folks: { list: [{ home: { x: 21, y: 19, z: 31 }, dest: { x: 31, y: 54, z: -1 }, kid: { school: { x: 179, y: 251, z: oldZone } } }] },
+  congRef: { year: 2014 },
+};
+const body = JSON.stringify(save);
+const raw = JSON.stringify({ format: C.CFG.SAVE_FORMAT, version: 2, body, checksum: C.U.fnv(body) });
+const result = C.Save.parseEnvelope(raw).payload;
+for (const field of ['city', 'net', 'clock', 'econ']) assert.equal(JSON.stringify(result[field]), JSON.stringify(save[field]));
+assert.equal(result.meta.mapVersion, 2);
+assert.equal(result.mapUpgrade.zoneOnly, true);
+for (const entry of [result.tasks.active[0], result.tasks.adjusted[0], result.tasks.offers[0].parts[0], result.corp.contracts[0]]) {
+  assert.equal(entry.zone, newZone);
+  assert.equal(entry.coolKey, 'cov:' + newZone);
+  assert.equal(JSON.stringify(entry.anchors), JSON.stringify(task.anchors));
+}
+assert.equal(result.tasks.cool['cov:' + newZone], 55);
+assert.equal(result.tasks.cool['at:31.0,54.0'], 66);
+assert.equal(result.corp.cool['z:' + newZone], 99);
+assert.equal(result.voices.follow.commuter.posts[0].at.zone, newZone);
+assert.equal(result.folks.list[0].home.z, 92);
+assert.equal(result.folks.list[0].dest.z, -1);
+assert.equal(result.folks.list[0].kid.school.z, newZone);
+assert.equal(result.folks.list[0].kid.school.y, 251);
+assert.equal(result.congRef, undefined);
+const newBody = JSON.stringify(result);
+const parsedAgain = C.Save.parseEnvelope(JSON.stringify({ format: C.CFG.SAVE_FORMAT, version: 2, body: newBody, checksum: C.U.fnv(newBody) })).payload;
+assert.equal(parsedAgain.tasks.active[0].zone, newZone, 'A migrated save must not remap the zone twice');
+console.log('PASS Nanjing 1.5 km to 1 km migration, including nested tasks, contracts, school and untouched coordinates');

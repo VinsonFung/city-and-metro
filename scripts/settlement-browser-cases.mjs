@@ -139,6 +139,61 @@ export async function runSettlementChecks({ E, until, fs, path, task, close, tap
   });
   await until('CM.game.model.trafficReady()', 180000);
 
+  if (process.env.CM_EXPANSION_SAVE_ONLY) {
+    const old = await js(async () => {
+      const g = CM.game, map = CM.curMap(), spec = map.extent.find(step => step.from === map.mapVersion - 1);
+      const { dx, dy, oldW, oldH } = spec;
+      const save = structuredClone(g.serialize()), expected = Object.values(save.net.stations).map(({ id, name, x, y }) => ({ id, name, x, y }));
+      if (!expected.length) throw Error('The extent fixture needs an operating line');
+      const keys = ['pop', 'jobs', 'bh', 'taken', 'lu', 'street', 'urbanYear'];
+      for (const key of keys) {
+        const array = CM.U.unpackTyped(save.city[key]), crop = new array.constructor(oldW * oldH);
+        for (let y = 0; y < oldH; y++) {
+          const i = (y + dy) * g.city.W + dx;
+          crop.set(array.subarray(i, i + oldW), y * oldW);
+        }
+        save.city[key] = CM.U.packTyped(crop, save.city[key].t);
+      }
+      for (const station of Object.values(save.net.stations)) {
+        station.x -= dx; station.y -= dy;
+        if (station.site) station.site = [station.site[0] - dx, station.site[1] - dy];
+      }
+      for (const segment of Object.values(save.net.segments)) {
+        segment.pts = segment.pts.map(([x, y]) => [x - dx, y - dy]);
+      }
+      delete save.city.grownRoads;
+      save.meta = { ...save.meta, mapVersion: spec.from };
+      save.rulesRevision = 21;
+      const body = JSON.stringify(save);
+      const imported = await CM.Save.importText(JSON.stringify({
+        body, checksum: CM.U.fnv(body), format: CM.CFG.SAVE_FORMAT, version: CM.CFG.SAVE_VERSION,
+      }));
+      if (!imported.slotId) throw Error('The migrated save was not imported');
+      const payload = await CM.Save.load(imported.slotId);
+      if (payload.meta.mapVersion !== map.mapVersion || !payload.city.fillNew) throw Error('No expansion on import');
+      window.beforeExtentReload = g;
+      CM.loadGame(payload);
+      return { expected, w: map.cfg.W, h: map.cfg.H, ym: g.ym(), funds: g.econ.funds };
+    });
+    await until(gameReady + ' && CM.game !== window.beforeExtentReload', 180000);
+    const actual = await js(() => {
+      const g = CM.game, c = g.city;
+      return { w: c.W, h: c.H, ym: g.ym(), funds: g.econ.funds, stations: Object.values(g.net.stations).map(({ id, name, x, y }) => ({ id, name, x, y })) };
+    });
+    check(actual.w === old.w && actual.h === old.h && actual.ym === old.ym && actual.funds === old.funds, 'Map migration changed date, funds or new bounds');
+    check(actual.stations.length === old.expected.length && old.expected.every((s, i) => {
+      const a = actual.stations[i];
+      return s.id === a.id && s.name === a.name && Math.abs(s.x - a.x) < 1e-9 && Math.abs(s.y - a.y) < 1e-9;
+    }), 'Map migration changed station identity or geographical position');
+    await close();
+    check(await E('CM.game.startJump(3)'), 'Quarterly jump after expansion did not start');
+    await until(settled, 180000);
+    check(await E('!CM.game.settlementError && CM.game.ym() === ' + (old.ym + 3)), 'Quarterly jump after expansion did not complete');
+    console.log('PASS mobile expansion import', map, actual.w, actual.h, 'coordinates and funds preserved, quarter settled');
+    await fs.writeFile(path.join(task, 'report.json'), JSON.stringify({ map, ...actual }));
+    return;
+  }
+
   if (process.env.CM_SETTLEMENT_RECOVERY_ONLY) {
     report.recovery = await runSettlementRecoveryChecks({ E, until, close, tap });
     await fs.writeFile(path.join(task, 'report.json'), JSON.stringify(report));
@@ -252,10 +307,12 @@ export async function runSettlementChecks({ E, until, fs, path, task, close, tap
     const formatted = amount => CM.U.fmtMoney(amount, undefined, money);
     try {
       CM.ui.showReport({ from, to, before, after: before, finance, money });
-      const rows = new Map([...document.querySelectorAll('.jr-fin>div')].map(row => [row.querySelector('small').textContent, row.querySelector('b').textContent]));
-      return rows.get('财政收入') === '+' + formatted(150) &&
-        rows.get('运营成本') === '−' + formatted(7) &&
-        rows.get('合同支出') === '−' + formatted(4);
+      const financePanel = document.querySelector('.jr-fin2');
+      const legend = [...financePanel.querySelectorAll('.jr-flegend span')].map(row => row.textContent);
+      return financePanel.querySelector('.jf-v.good').textContent === '+' + formatted(150) &&
+        financePanel.querySelector('.jf-v.warn').textContent === '−' + formatted(11) &&
+        legend.includes('运营 ' + formatted(7)) && legend.includes('合同 ' + formatted(4)) &&
+        legend.includes('债券募集 +' + formatted(50));
     } finally { CM.ui.closeScreen(); }
   });
   check(totalsMatch, 'The jump report omitted or double-counted a financial category');

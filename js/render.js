@@ -151,7 +151,7 @@
     let any = false;
     if (s.city !== c) {
       msg.base = { W: c.W, H: c.H, N: c.N, FS: c.FS, FW: c.FW, FH: c.FH, BS: c.BS, BW: c.BW, BH: c.BH, uid: c.uid, region: c.region, scenicHost: c.scenicHost, airportBox: c.airportBox, regions: c.regions.map(function (r) { return { scenic: !!r.scenic, relief: r.relief }; }) };
-      s.city = c; s.roads = null; s.geoVer = null; s.terrainVer = null; s.version = null; s.roadVersion = null; s.lk = null; s.facm = undefined; s.mt = undefined; s.viewKey = null; any = true;
+      s.city = c; s.roads = null; s.geoVer = null; s.terrainVer = null; s.version = null; s.roadVersion = null; s.roadGrowthVersion = null; s.lk = null; s.facm = undefined; s.mt = undefined; s.viewKey = null; any = true;
     }
     if (s.roads !== c.roadGroups) {
       // 线程已解码同一份地理数据：道路只发序号与分组（复制全部折线要几百毫秒），新开局第一帧不再卡一下
@@ -162,7 +162,8 @@
       msg.roads = { cls: cls, flags: flags, synthetic: synthetic, wayRoad: wayRoad, wayGroup: wayGroup, extra: extra };
       s.roads = c.roadGroups; any = true;
     }
-    if (s.geoVer !== c.geoVer || s.terrainVer !== c.terrainVer) {
+    const growthChanged = s.roadGrowthVersion !== c.roadGrowthVersion;
+    if (growthChanged || s.geoVer !== c.geoVer || s.terrainVer !== c.terrainVer) {
       msg.terrain = { wmask: c.wmask, bmask: c.bmask, landFrac: c.landFrac, wood: c.wood, terrainVer: c.terrainVer, terrainYear: c.terrainYear, reclaim: c.reclaimWater ? c.reclaimWater() : [] };
       if (s.terrainVer !== c.terrainVer) {
         msg.terrain.wsdf = c.wsdf;
@@ -174,7 +175,10 @@
       msg.cells = { version: c.version, lu: c.lu, street: c.street, taken: c.taken, bh: c.bh, pop: c.pop, jobs: c.jobs, urbanYear: c.urbanYear, protectedId: c.protectedId, landmarkOn: c.landmarkOn };
       s.version = c.version; any = true;
     }
-    if (s.roadVersion !== c.roadVersion) { msg.built = c.roadsBuilt; msg.roadVersion = c.roadVersion; s.roadVersion = c.roadVersion; any = true; }
+    if (growthChanged || s.roadVersion !== c.roadVersion) {
+      msg.built = c.roadsBuilt; msg.roadVersion = c.roadVersion; msg.roadGrowthVersion = c.roadGrowthVersion;
+      s.roadVersion = c.roadVersion; s.roadGrowthVersion = c.roadGrowthVersion; any = true;
+    }
     const LK = c.lockState();
     if (s.lk !== LK) { msg.lock = { mask: LK.mask, info: LK.info.map(function (f) { return { n: f.n, b: f.b }; }) }; s.lk = LK; any = true; }
     const fm = R._facm && R._facm.city === c ? R._facm : null;
@@ -238,9 +242,12 @@
 
   Renderer.prototype.noteFrameTime = function (ms) { this.lastFrameMs = ms; };
   Renderer.prototype.cacheLimit = function () {
-    const memory = Number(navigator.deviceMemory) || 8;
+    const memory = Number(navigator.deviceMemory);
     const touch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
-    return Math.min(CFG.perf.cacheMaxPx, memory <= 2 ? 8e6 : memory <= 4 || touch ? 12e6 : CFG.perf.cacheMaxPx);
+    const base = CFG.perf.cacheMaxPx;
+    if (memory > 0 && memory <= 2) return Math.min(base, 8e6);
+    if (touch || (memory > 0 && memory <= 4)) return Math.min(base, 12e6);
+    return memory >= 8 ? Math.min(base * 2, 48e6) : base;
   };
   Renderer.prototype.adaptDetail = function (dt) {
     const d = this.detail, elapsed = Math.min(0.1, dt || 1 / 60);
@@ -881,6 +888,24 @@
     if (city.roadReclaimMask !== undefined) return city.roadReclaimMask;
     return D.reclaim?.length ? city.reclaimGeom().mask : null;
   }
+  Renderer.prototype.roadTilePath = function (way, box) {
+    const [x0, y0, x1, y1] = box, b = way.bbox;
+    if (b && (b[2] < x0 || b[0] > x1 || b[3] < y0 || b[1] > y1)) return null;
+    if (b && b[0] >= x0 && b[1] >= y0 && b[2] <= x1 && b[3] <= y1) return this.featurePath(way, false);
+    const p = way.p, out = new Path2D();
+    let continuous = false, visible = false;
+    for (let i = 2; i < p.length; i += 2) {
+      const ax = p[i - 2], ay = p[i - 1], bx = p[i], by = p[i + 1];
+      if ((ax < x0 && bx < x0) || (ax > x1 && bx > x1) || (ay < y0 && by < y0) || (ay > y1 && by > y1)) {
+        continuous = false;
+        continue;
+      }
+      if (!continuous) out.moveTo(ax, ay);
+      out.lineTo(bx, by);
+      continuous = visible = true;
+    }
+    return visible ? out : null;
+  };
   Renderer.prototype.roadParts = function (city, way) {
     let cache = this._roadParts;
     if (!cache || cache.city !== city || cache.version !== city.terrainVer) {
@@ -939,7 +964,7 @@
   // 两端都接上已通车道路、总长不足 150 m 的断口可先铺在底图上。
   Renderer.prototype.roadGaps = function (city) {
     const previous = this._roadGaps;
-    if (previous && previous.city === city && previous.road === city.roadVersion && previous.terrain === city.terrainVer) return previous.groups;
+    if (previous && previous.city === city && previous.road === city.roadVersion && previous.growth === city.roadGrowthVersion && previous.terrain === city.terrainVer) return previous.groups;
     const groups = new Set(), endpoints = new Map(), pending = new Map();
     const key = (x, y) => Math.floor(x / 0.08) + ',' + Math.floor(y / 0.08);
     const put = function (x, y) {
@@ -974,7 +999,7 @@
       });
       if (joined) groups.add(id);
     }
-    this._roadGaps = { city, road: city.roadVersion, terrain: city.terrainVer, groups };
+    this._roadGaps = { city, road: city.roadVersion, growth: city.roadGrowthVersion, terrain: city.terrainVer, groups };
     return groups;
   };
 
@@ -1038,17 +1063,17 @@
     // 林地（真实范围）
     ctx.fillStyle = GROUND.wood;
     const wp = new Path2D();
-    for (const f of Geo.woods) if (inBox(f.bbox, 0.5)) wp.addPath(this.featurePath(f, true));
+    for (const f of Geo.view('woods')) if (inBox(f.bbox, 0.5)) wp.addPath(this.featurePath(f, true));
     ctx.fill(wp, 'nonzero');
     // 风景区山体：雾蓝绿色
     // 逐个填充：风景区内常有嵌套的子景区，合在一条路径里用奇偶规则会互相抵消成空洞
     ctx.fillStyle = GROUND.hill[0]; ctx.globalAlpha = 0.85;
-    for (const f of Geo.reserves) if (inBox(f.bbox, 0.5)) ctx.fill(this.featurePath(f, true), 'evenodd');
+    for (const f of Geo.view('reserves')) if (inBox(f.bbox, 0.5)) ctx.fill(this.featurePath(f, true), 'evenodd');
     ctx.globalAlpha = 1;
     if (CM.Settings.get('lighting') !== false) this.drawTerrainLight(ctx);
     // 公园（真实范围）
     const pp = new Path2D();
-    for (const f of Geo.parks) if (inBox(f.bbox, 0.5)) pp.addPath(this.featurePath(f, true));
+    for (const f of Geo.view('parks')) if (inBox(f.bbox, 0.5)) pp.addPath(this.featurePath(f, true));
     ctx.fillStyle = GROUND.park; ctx.fill(pp, 'nonzero');
     if (lvl >= 16) { ctx.strokeStyle = GROUND.parkEdge; ctx.lineWidth = px * 1.2; ctx.stroke(pp); }
     // 旧机场跑道
@@ -1086,8 +1111,8 @@
       if (city.landmarkOn[k] && CM.Sites.complex(lm) && inBox([lm.x - Math.hypot(lm.w, lm.d) / CFG.CELL_M, lm.y - Math.hypot(lm.w, lm.d) / CFG.CELL_M, lm.x + Math.hypot(lm.w, lm.d) / CFG.CELL_M, lm.y + Math.hypot(lm.w, lm.d) / CFG.CELL_M], 0)) this.drawSiteFloor(ctx, lm);
     }
     // 水系（真实岸线）
-    const wpth = new Path2D(), bankPath = new Path2D();
-    for (const f of Geo.water) if (inBox(f.bbox, 0.5)) { wpth.addPath(this.featurePath(f, true)); bankPath.addPath(this.bankPath(f)); }
+    const wpth = new Path2D(), bankPath = new Path2D(), displayWater = Geo.view('water');
+    for (const f of displayWater) if (inBox(f.bbox, 0.5)) { wpth.addPath(this.featurePath(f, true)); bankPath.addPath(this.bankPath(f)); }
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     // 历史海岸线：尚未填海成陆的区域仍画成水面（单独以 nonzero 填充，避免与海域多边形的奇偶规则抵消）
     // v2.1：填海范围按平滑后的实际水面（city.reclaimWater），岸线只描旧海岸一侧
@@ -1209,7 +1234,9 @@
       }
     }
     // 主要道路（已通车）
-    const ways = city.roadWayBk ? Geo.query(city.roadWayBk, X0 - 0.5, Y0 - 0.5, X1 + 0.5, Y1 + 0.5) : [];
+    const pad = Math.max(0.6, px * 2.5 + 0.1);
+    const outer = [X0 - pad, Y0 - pad, X1 + pad, Y1 + pad];
+    const ways = city.roadWayBk ? Geo.query(city.roadWayBk, ...outer) : [];
     const lay = { 2: [], 3: [], 4: [] }, links = [], tunnels = [];
     const gaps = ways.length ? this.roadGaps(city) : null;
     for (const k of ways) {
@@ -1218,9 +1245,19 @@
       const gr = city.roadGroups[w.g], list = gr.flags & 2 ? tunnels : gr.flags & 4 ? links : lay[gr.cls];
       for (const part of this.roadParts(city, w)) list.push(part);
     }
-    const path = (arr) => { const p = new Path2D(); for (const w of arr) p.addPath(this.featurePath(w, false)); return p; };
-    const bridgePath = (arr) => { const p = new Path2D(); for (const w of arr) if (city.roadGroups[w.g].flags & 1) p.addPath(this.featurePath(w, false)); return p; };
-    const P2 = path(lay[2]), P3 = path(lay[3]), P4 = path(lay[4]), PL = path(links), PT = path(tunnels);
+    // 把可见道路段汇总一次，路面与桥缘复用；虚线隧道保留整条路径的虚线起点。
+    const path = (arr, clip = true) => {
+      const line = new Path2D(), bridge = new Path2D();
+      for (const w of arr) {
+        const visible = clip ? this.roadTilePath(w, outer) : this.featurePath(w, false);
+        if (!visible) continue;
+        line.addPath(visible);
+        if (city.roadGroups[w.g].flags & 1) bridge.addPath(visible);
+      }
+      return [line, bridge];
+    };
+    const [P2, B2] = path(lay[2]), [P3, B3] = path(lay[3]), [P4, B4] = path(lay[4]);
+    const [PL] = path(links), [PT] = path(tunnels, false);
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     // 路缘（桥梁加深）
     ctx.strokeStyle = RD.localCase; ctx.lineWidth = Math.max(0.05, px * 2.2); ctx.stroke(st);
@@ -1229,8 +1266,8 @@
     ctx.strokeStyle = RD.expCase; ctx.lineWidth = Math.max(0.065, px * 2.4); ctx.stroke(PL);
     ctx.lineWidth = Math.max(0.16, px * 4.2); ctx.stroke(P4);
     ctx.strokeStyle = RD.bridgeCase;
-    ctx.lineWidth = Math.max(0.12, px * 3.6); ctx.stroke(bridgePath(lay[3])); ctx.stroke(bridgePath(lay[2]));
-    ctx.lineWidth = Math.max(0.17, px * 4.4); ctx.stroke(bridgePath(lay[4]));
+    ctx.lineWidth = Math.max(0.12, px * 3.6); ctx.stroke(B3); ctx.stroke(B2);
+    ctx.lineWidth = Math.max(0.17, px * 4.4); ctx.stroke(B4);
     // 路面
     ctx.strokeStyle = RD.local; ctx.lineWidth = Math.max(0.03, px * 1.1); ctx.stroke(st);
     ctx.strokeStyle = RD.coll; ctx.lineWidth = Math.max(0.055, px * 1.7); ctx.stroke(P2);
@@ -1282,14 +1319,24 @@
       lx.beginPath();
       for (let k = Math.floor((X0 + Y0) / 0.6) * 0.6; k < X1 + Y1; k += 0.6) { lx.moveTo(k - Y0, Y0); lx.lineTo(k - Y1, Y1); }
       lx.stroke();
-      lx.globalCompositeOperation = 'destination-out'; lx.fillStyle = '#000'; lx.fill(wpth, 'nonzero');
-      if (anyRc) lx.fill(rpth, 'nonzero');
-      lx.strokeStyle = '#000'; lx.lineCap = 'round'; lx.lineJoin = 'round';
+      // 先合成不透明的水域遮罩，再统一扣除，避免重复混合留下抗锯齿色边。
+      const water = makeCanvas(cv.width, cv.height), wx = water.getContext('2d');
+      wx.setTransform(tf); wx.fillStyle = wx.strokeStyle = '#000'; wx.lineCap = wx.lineJoin = 'round';
+      wx.fill(wpth, 'nonzero');
+      // 平滑岸线可能向内移动少量。原始水域也从锁区遮罩扣除，保留近岸的水陆规则。
+      if (displayWater.some((f, i) => f !== Geo.water[i] && inBox(Geo.water[i].bbox, 0.5))) {
+        const original = new Path2D();
+        for (const f of Geo.water) if (inBox(f.bbox, 0.5)) original.addPath(this.featurePath(f, true));
+        wx.fill(original, 'nonzero');
+      }
+      if (anyRc) wx.fill(rpth, 'nonzero');
       for (const l of Geo.waterLines) {
         const width = Math.max(l.w, px * 1.5);
         if (!inBox(l.bbox, width / 2 + px)) continue;
-        lx.lineWidth = width; lx.stroke(this.featurePath(l, false));
+        wx.lineWidth = width; wx.stroke(this.featurePath(l, false));
       }
+      lx.save(); lx.setTransform(1, 0, 0, 1, 0, 0);
+      lx.globalCompositeOperation = 'destination-out'; lx.drawImage(water, 0, 0); lx.restore();
       lx.globalCompositeOperation = 'destination-in'; lx.imageSmoothingEnabled = true; lx.imageSmoothingQuality = 'high';
       lx.drawImage(mc, 0, 0, mw, mh, i0 - 1, j0 - 1, mw, mh);
       ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(layer, 0, 0); ctx.restore();
@@ -5389,6 +5436,21 @@
       for (const p of hl.ways) for (let q = 0; q < p.length; q += 2) { this.P(p[q], p[q + 1], 0, tmp); if (q) ctx.lineTo(tmp.x, tmp.y); else ctx.moveTo(tmp.x, tmp.y); }
       ctx.strokeStyle = U.rgb(col, 0.25 + 0.2 * pulse); ctx.lineWidth = 14; ctx.stroke();
       outline(4);
+    } else if (hl.kind === 'trip') {
+      // 行程（v3.4 地铁圈的导航与市民故事）：乘车段为线路色粗线，步行与站外换乘为虚线，开车为灰蓝线；起终点为带字的标记
+      for (const L of hl.legs) {
+        path(L.pts);
+        if (L.k === 'ride') { ctx.setLineDash([]); ctx.strokeStyle = TH.halo; ctx.lineWidth = 11; ctx.stroke(); ctx.strokeStyle = L.color; ctx.lineWidth = 7; ctx.stroke(); }
+        else if (L.k === 'car') { ctx.setLineDash([]); ctx.strokeStyle = TH.halo; ctx.lineWidth = 8; ctx.stroke(); ctx.strokeStyle = U.rgb([96, 120, 156], 0.9); ctx.lineWidth = 4.5; ctx.stroke(); }
+        else { ctx.setLineDash([7, 6]); ctx.lineDashOffset = -age * 14; ctx.strokeStyle = TH.halo; ctx.lineWidth = 6; ctx.stroke(); ctx.strokeStyle = TH.night ? '#e2e8f0' : '#334155'; ctx.lineWidth = 3; ctx.stroke(); ctx.setLineDash([]); }
+      }
+      for (const pn of hl.pins || []) {
+        const p = this.P(pn.x, pn.y, 0, tmp), x = p.x, y = p.y;
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.bezierCurveTo(x - 11, y - 15, x - 11, y - 29, x, y - 29); ctx.bezierCurveTo(x + 11, y - 29, x + 11, y - 15, x, y);
+        ctx.fillStyle = pn.color || U.rgb(col, 1); ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = '#fff'; ctx.stroke();
+        ctx.fillStyle = '#fff'; ctx.font = '700 12px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(pn.ch || '', x, y - 19.5);
+        if (pn.label) { ctx.font = '600 12.5px ' + FONT; ctx.textAlign = 'left'; ctx.lineWidth = 3.5; ctx.strokeStyle = TH.halo; ctx.strokeText(pn.label, x + 14, y - 19); ctx.fillStyle = TH.night ? '#f1f5f9' : '#1a202c'; ctx.fillText(pn.label, x + 14, y - 19); }
+      }
     }
     // 名称标签
     if (hl.label) {

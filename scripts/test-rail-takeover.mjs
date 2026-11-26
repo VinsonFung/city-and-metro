@@ -48,6 +48,18 @@ for (const [map, before, open, first, last] of [
   delete altered.segments[track.id];
   assert.ok(M.evaluate(altered, game.net, game.city, game.clock.y).conflicts.some(c => c.type === 'takeover'));
   if (map === 'hk') {
+    const early = CM.Game.create({ mode: 'challenge', seed: 724 });
+    CM.Fleet.ensure(early);
+    early.econ.funds = 1e9;
+    [early.clock.y, early.clock.m] = [1982, 12];
+    const original = TK.apply(early, railway, 'un', 'tp');
+    assert.ok(original.ok, original.error);
+    [early.clock.y, early.clock.m] = [1983, 7];
+    const carried = TK.plan(early, railway, 'tp', 'tpm');
+    assert.ok(carried.ok, carried.error);
+    assert.ok(TK.stationOf(early.net, railway, 'tp'));
+    assert.equal(TK.plan(game, railway, 'tp', 'tpm').ok, false);
+    console.log('PASS a player-owned historic Tai Po station remains a takeover endpoint after closure');
     const g = M.geomFromControl(M.segControl(game.net, track), track.type, game.city);
     const mid = CM.U.posAt(g.pts, g.cum, g.cum.at(-1) / 2, {});
     const ownership = track.tkE.slice(), built = track.built.slice();
@@ -181,3 +193,15 @@ const conflicts = evaluate(fresh).conflicts;
 assert.ok(conflicts.some(c => c.type === 'level' && c.ref === crossing));
 assert.ok(conflicts.some(c => c.type === 'protected' && c.ref === crossing));
 console.log('PASS existing alignment and shared/reassigned track; physical changes still enforce protected areas and crossings');
+
+const junctionBase = M.clone(old), junction = M.clone(old);
+junctionBase.stations[a].tk = junction.stations[a].tk = 'fixture';
+const branch = M.newLine(junction);
+const endpoint = M.addStation(junction, 8, 6, { type: 'surface', size: 'M' }, sandbox.city);
+const spur = M.addSegment(junction, branch, a, endpoint, [], 'surface').id;
+const atPlatform = [8, 11.9], away = [8, 9];
+sandbox.city.railCross = () => ({ surf: [atPlatform, away], via: [] });
+M.clearCaches();
+const spurConflict = M.evaluate(junction, junctionBase, sandbox.city, sandbox.clock.y).conflicts.find(c => c.type === 'rail' && c.ref === spur);
+assert.equal(spurConflict?.y, away[1], 'Only the crossing outside the adopted station platform should be reported');
+console.log('PASS surface spur keeps the adopted platform crossing and rejects a separate crossing');

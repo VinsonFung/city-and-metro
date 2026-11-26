@@ -23,13 +23,18 @@ export async function runWaterMaskChecks({E,task,fs,path}){
    const draw=()=>{const cv=make(),x=cv.getContext('2d',{willReadFrequently:true});x.setTransform(scale,0,0,scale,-x0*scale,-y0*scale);R.drawGround(x,x0,y0,x1,y1,scale);return cv};
    const normal=draw(),fill=R.th.lockFill,hatch=R.th.lockHatch;let clear;
    try{R.th.lockFill='transparent';R.th.lockHatch='transparent';clear=draw()}finally{R.th.lockFill=fill;R.th.lockHatch=hatch}
-   const mask=make(),mx=mask.getContext('2d',{willReadFrequently:true});mx.setTransform(scale,0,0,scale,-x0*scale,-y0*scale);mx.fillStyle='#fff';mx.strokeStyle='#fff';mx.lineCap='round';mx.lineJoin='round';
-   const p=new w.Path2D();for(const f of C.Geo.water)p.addPath(R.featurePath(f,true));mx.fill(p,'nonzero');
-   const pending=new w.Path2D();for(const f of city.reclaimWater())pending.addPath(R.featurePath(f,true));mx.fill(pending,'nonzero');
-   for(const l of C.Geo.waterLines){mx.lineWidth=Math.max(l.w,1/scale*1.5);mx.stroke(R.featurePath(l,false))}
-   const a=normal.getContext('2d').getImageData(0,0,W,H).data,b=clear.getContext('2d').getImageData(0,0,W,H).data,m=mx.getImageData(0,0,W,H).data;
+   const coverage=paint=>{const cv=make(),x=cv.getContext('2d',{willReadFrequently:true});x.setTransform(scale,0,0,scale,-x0*scale,-y0*scale);x.fillStyle=x.strokeStyle='#fff';x.lineCap=x.lineJoin='round';paint(x);return x.getImageData(0,0,W,H).data;};
+   const polys=features=>coverage(x=>{const p=new w.Path2D();for(const f of features)p.addPath(R.featurePath(f,true));x.fill(p,'nonzero')});
+   const raw=polys(C.Geo.water), visual=polys(C.Geo.view('water')), pending=polys(city.reclaimWater());
+   const rivers=coverage(x=>{for(const l of C.Geo.waterLines){x.lineWidth=Math.max(l.w,1/scale*1.5);x.stroke(R.featurePath(l,false))}});
+   const a=normal.getContext('2d').getImageData(0,0,W,H).data,b=clear.getContext('2d').getImageData(0,0,W,H).data;
    let water=0,leaked=0,landChanged=0,maxDelta=0;const samples=[];
-   for(let i=0;i<a.length;i+=4){const delta=Math.max(...[0,1,2,3].map(k=>Math.abs(a[i+k]-b[i+k])));if(m[i+3]===255){water++;if(delta>1){leaked++;maxDelta=Math.max(maxDelta,delta);if(samples.length<4)samples.push([(i/4)%W,Math.floor(i/4/W),delta])}}else if(m[i+3]===0&&delta>1)landChanged++}
+   for(let i=0;i<a.length;i+=4){
+    const alpha=Math.max(raw[i+3],visual[i+3],pending[i+3],rivers[i+3]);
+    const delta=Math.max(Math.abs(a[i]-b[i]),Math.abs(a[i+1]-b[i+1]),Math.abs(a[i+2]-b[i+2]),Math.abs(a[i+3]-b[i+3]));
+    if(alpha===255){water++;if(delta>1){leaked++;maxDelta=Math.max(maxDelta,delta);if(samples.length<4)samples.push([(i/4)%W,Math.floor(i/4/W),delta,raw[i+3],visual[i+3],pending[i+3],rivers[i+3]])}}
+    else if(alpha===0&&delta>1)landChanged++;
+   }
    w.audit.normal=normal;w.audit.clear=clear;
    return {year,theme,scale,water,leaked,landChanged,maxDelta,samples};
   };

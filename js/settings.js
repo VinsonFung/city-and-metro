@@ -22,12 +22,15 @@
     keys: {},             // 自定义物理键位
     recentColors: [],      // 最近使用的自定义线路颜色
     lineTags: false, taskPins: false,
+    detail: 'simple',
+    seenTips: [],
   };
   let cur = Object.assign({}, DEF);
   try {
     const s = JSON.parse(localStorage.getItem(KEY) || 'null');
     if (s) {
       for (const k in DEF) if (s[k] !== undefined) cur[k] = s[k];
+      if (s.detail === undefined) cur.detail = 'pro';
       // 旧版的两个标注开关合并为一项
       if (s.labels === undefined && (s.stationLabels === false || s.mapLabels === false)) cur.labels = s.stationLabels === false ? 'none' : 'stations';
     } else {
@@ -49,6 +52,8 @@
   const mqRM = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
   const mqCompact = window.matchMedia ? window.matchMedia('(max-width: 760px), (max-width: 1024px) and (max-height: 520px) and (pointer: coarse)') : null;
 
+  if (cur.detail !== 'simple' && cur.detail !== 'pro') cur.detail = 'pro';
+  if (!Array.isArray(cur.seenTips)) cur.seenTips = [];
   const Settings = {
     DEF: DEF,
     get: function (k) { return cur[k]; },
@@ -59,6 +64,7 @@
       if (k === 'language' && !['zh-CN', 'zh-TW', 'en'].includes(v)) v = 'zh-CN';
       if (k === 'colorBlind' || k === 'immersive') v = v === true;
       if (k === 'recentColors') v = recent(v);
+      if (k === 'detail') v = v === 'simple' ? 'simple' : 'pro';
       if (cur[k] === v) return;
       cur[k] = v; save();
       Settings.apply(k);
@@ -75,6 +81,7 @@
     resolvedTheme: function () { return cur.theme === 'auto' ? (mq && mq.matches ? 'dark' : 'light') : cur.theme; },
     apply: function (k) {
       const root = document.documentElement;
+      if (!k || k === 'detail') root.dataset.detail = cur.detail;
       if (CM.I18n && (!k || k === 'language')) CM.I18n.apply(cur.language);
       if (!k || k === 'theme') { if (CM.setTheme) CM.setTheme(Settings.resolvedTheme()); else root.dataset.theme = Settings.resolvedTheme(); }
       if (CM.R && (!k || k === 'lighting')) { CM.R.clearImages(); CM.R.dropThemeStash(); CM.R.clearFacilitySprites(); CM.R.overviewStale = true; }

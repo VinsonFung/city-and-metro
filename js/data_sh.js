@@ -112,6 +112,16 @@
       { id: 'jiading', name: '嘉定（江桥·真新）', district: ['嘉定区'], open: 2005, plan: 'res', pop: 13.75e6 },
       // v2.9 地图向东扩大到浦东机场、向西扩大到虹桥枢纽西侧：新增范围按街道与区并入相邻片区（川沙、浦东其他、莘庄、嘉定，青浦与松江属外围），只新设机场
       { id: 'pvgair', name: '浦东国际机场', poly: [[31.1700, 121.7750], [31.1700, 121.8470], [31.1150, 121.8470], [31.1150, 121.7790]].map(function (p) { return llW(p[0], p[1]); }), open: null, hub: true, empty: true, lockNote: '民用机场照常运营，用地不开发', note: '1999 年 9 月启用（史实）；重要交通枢纽：范围内可以地下设站与地下穿越' },
+      // v3.5 地图向西扩大到嘉定老城、安亭与青浦新城，向南扩大到松江新城、闵行南部、浦江、新场与惠南：新片区只用完全落在新增范围内的街道，
+      // 或整个落在新增范围内的多边形（OSM 坐标，范围为近似）；跨接缝的安亭镇、菊园、浦江、惠南等仍按所在区归入嘉定、闵行、浦东，原有范围内每一格的归属不变
+      { id: 'anting', name: '安亭汽车城', poly: [[31.3500, 121.1400], [31.3500, 121.2350], [31.2700, 121.2350], [31.2700, 121.1400]].map(function (p) { return llW(p[0], p[1]); }), open: 1990, plan: 'ind', note: '1985 年上海大众在安亭投产，2001 年起建设上海国际汽车城，2004 年起 F1 中国大奖赛在上海国际赛车场举行（史实）' },
+      { id: 'sjuc', name: '松江大学城', poly: [[31.0620, 121.1980], [31.0620, 121.2320], [31.0450, 121.2320], [31.0450, 121.1980]].map(function (p) { return llW(p[0], p[1]); }), open: 2000, plan: 'campus', note: '2000 年起建设，东华大学、上海外国语大学、华东政法大学等七所高校陆续入驻（史实）' },
+      { id: 'zizhu', name: '紫竹·交大闵行校区', poly: [[31.0400, 121.4200], [31.0400, 121.4650], [31.0100, 121.4650], [31.0100, 121.4200]].map(function (p) { return llW(p[0], p[1]); }), open: 1990, plan: 'campus', note: '上海交通大学闵行校区 1987 年启用，华东师范大学闵行校区 2006 年启用，紫竹科学园区 2002 年设立（史实）' },
+      { id: 'jdold', name: '嘉定老城', streets: ['嘉定镇街道'], open: 1990, plan: 'oldmix', note: '嘉定县城，孔庙、法华塔与汇龙潭所在（史实）' },
+      { id: 'qingpu', name: '青浦新城（夏阳·盈浦·香花桥·赵巷）', streets: ['夏阳街道', '盈浦街道', '香花桥街道', '赵巷镇'], open: 1999, plan: 'res', pop: 11.2e6, note: '1999 年青浦撤县设区（史实）' },
+      { id: 'songjiang', name: '松江新城（方松·中山·岳阳）', streets: ['方松街道', '中山街道', '岳阳街道'], open: 1998, plan: 'res', pop: 11.0e6, note: '1998 年松江撤县设区，2000 年代起建设松江新城（史实）' },
+      { id: 'mhold', name: '闵行老城（江川路·马桥）', streets: ['江川路街道', '马桥镇'], open: 1990, plan: 'resind', note: '1950 年代起建设的工业卫星城，电机、汽轮机与重型机器厂集中于此（史实）' },
+      { id: 'jiangsu', name: '昆山·太仓（市外）', district: ['昆山市', '太仓市'], open: null, empty: true, passOnly: true, lockNote: '江苏省昆山市、太仓市，不属于上海的建设范围：线路可以穿过，不能设站' },
     ],
     defaultRegion: { id: 'outer', name: '外围地区', open: 2008, plan: 'res', pop: 15.75e6, island: true },   // island（v2.9）：长兴岛等与城区隔水的部分开放后自成一片，可以建设
     // 片区设施（商业中心、区域医院、文体公园）出现门槛的人口基准：保持扩图前 2020 年的全图人口，原有片区不因 v2.9 扩图推迟出现（见 facility.js）
@@ -144,12 +154,25 @@
       atW(31.3349, 121.2792, { pop: 3000, jobs: 1500, r: 0.8 }),    // 马陆
       atW(31.1173, 121.7526, { pop: 5000, jobs: 2500, r: 0.9 }),    // 祝桥
       atW(31.2395, 121.7190, { pop: 3000, jobs: 1500, r: 0.8 }),    // 合庆
+      // v3.5 扩大范围（1990 年估算，OSM 坐标）
+      atW(31.3830, 121.2500, { pop: 9000, jobs: 6000, r: 1.1 }),    // 嘉定县城
+      atW(31.2965, 121.1596, { pop: 3500, jobs: 6000, r: 1.0 }),    // 安亭（上海大众）
+      atW(31.1520, 121.1180, { pop: 7000, jobs: 4000, r: 1.0 }),    // 青浦县城
+      atW(31.0200, 121.2250, { pop: 8000, jobs: 5000, r: 1.1 }),    // 松江县城北部
+      atW(31.0230, 121.4050, { pop: 9000, jobs: 9000, r: 1.1 }),    // 闵行（江川路）
+      atW(31.0450, 121.4600, { pop: 2500, jobs: 5000, r: 0.9 }),    // 吴泾化工区
+      atW(31.0500, 121.7550, { pop: 6000, jobs: 3500, r: 1.0 }),    // 惠南（南汇县城）
+      atW(31.0282, 121.6492, { pop: 3000, jobs: 1500, r: 0.8 }),    // 新场
     ],
-    rural: { pop: 800, jobs: 150 },
+    // 新增范围（原范围以外）的乡村底数略低：原值按近郊校准，放到青浦、松江与南汇的农田偏高（v3.5）
+    rural: { pop: 800, jobs: 150, out: { box: [56, 0, 224, 152], k: 0.5 } },
+    // 新增范围的增长倍率（v3.5）：嘉定、青浦、松江新城与闵行南部、南汇在 2000 年代起大规模建设（「一城九镇」与新城规划，史实）；倍率为估算，
+    // 按新增范围 2020 年约 350 万人（嘉定约 70 万、青浦约 95 万、松江约 95 万、闵行南部约 55 万、南汇约 55 万）校准
+    growOut: { box: [56, 0, 224, 152], pop: [[1992, 1.4], [2001, 2.2], [2016, 2.2], [2028, 1.6]], jobs: [[1992, 1.3], [2001, 1.9], [2016, 1.9], [2028, 1.5]] },
     // 越江桥隧与高架道路通车年份（名称前缀匹配；1990 年已有的道路按所在区域开放年份出现）。1990 年黄浦江上还没有桥；
     // OSM 中杨浦、徐浦大桥分别并入「内环高架路」「外环高速」。越江桥隧、内环与南北高架为史实，部分高架与快速路为近似年份
     // 铁路通车年份（线路名或前缀 → 年份，或 [通车, 停运]）：开局后才通车或停运的线路，按公开通车时间整理
-    railYears: { '沪昆高速线': 2010, '沪宁城际': 2010, '京沪高铁': 2011, '沪苏湖高速线': 2024, '市域铁机场联络线': 2024, '上海示范区线': 2027, '嘉闵线': 2030 },
+    railYears: { '沪昆高速线': 2010, '沪宁城际': 2010, '京沪高铁': 2011, '沪苏湖高速线': 2024, '沪苏通线': 2020,'市域铁机场联络线': 2024, '上海示范区线': 2027, '嘉闵线': 2030 },
     roadYears: {
       '南浦大桥': 1991, '杨浦大桥': 1993, '徐浦大桥': 1997, '卢浦大桥': 2003, '打浦路隧道': 1971, '延安东路隧道': 1988, '外环隧道': 2003, '复兴东路隧道': 2004,
       '大连路隧道': 2003, '翔殷路隧道': 2005, '新建路隧道': 2009, '人民路隧道': 2009, '西藏南路隧道': 2010, '龙耀路隧道': 2010, '上中路隧道': 2009, '军工路隧道': 2011,
@@ -158,6 +181,7 @@
       '沪嘉高速': 1988, '京沪高速': 1996, '沪昆高速': 1998, '沪渝高速': 2002, '沪金高速': 2000, '沪崇高速': 2009, '沪翔高速': 2011,
       '杨高路': 1992, '世纪大道': 2000, '罗山路': 1997, '龙东大道': 1998, '龙东高架路': 2008, '罗山高架路': 2005, '华夏高架路': 2009, '军工高架路': 2007,
       '北翟高架路': 2015, '嘉闵高架路': 2014, '虹梅高架路': 2014, '崧泽高架路': 2015, '度假区高架路': 2016, '五洲大道': 2011, '世博大道': 2010,
+      '闵浦大桥': 2010, '虹梅南路隧道': 2015,   // v3.5 向南扩大：黄浦江上游的越江桥隧（年份约数）
     },
     bridgeYears: {}, bridgeDefaultYear: 1990,
     simRoads: [],
@@ -194,6 +218,8 @@
       Object.assign(atW(31.1865, 121.4899), { id: 'sh_cnpav', name: '中国馆', w: 140, d: 140, year: 2010, kind: 'museum', style: 'crown' }),
       Object.assign(atW(31.2356, 121.5013), { id: 'sh_tower', name: '上海中心大厦', w: 80, d: 80, year: 2015, kind: 'skyscraper', style: 'shtower', h: 632 }),
       Object.assign(atW(31.1463, 121.6560), { id: 'sh_disney', name: '上海迪士尼乐园', w: 1150, d: 900, h: 60, year: 2016, kind: 'themepark', style: 'castle' }),   // 约 91 公顷，奇幻童话城堡约 60 m
+      // v3.5 扩大范围
+      Object.assign(atW(31.0964, 121.1878), { id: 'sh_sheshan', name: '佘山圣母大殿', w: 56, d: 25, h: 38, year: 1935, kind: 'church' }),   // 西佘山山顶的罗马式教堂，钟楼约 38 m
     ],
     // 重要设施（见 facility.js）：位置与启用 / 停用年份为史实参考（位置近似）；规模均为估算。
     // 枢纽 pax：市内接驳出行（汽车 + 地铁，万人次/日）；浦东国际机场 v2.9 起在图内（地图向东扩大到机场）。
@@ -264,8 +290,20 @@
       { id: 'sh_icc', n: '上海国际会议中心', t: 'venue', at: llW(31.24145, 121.49245), y0: 1999, w: 0.005 },
       { id: 'sh_gt', n: '上海大剧院', t: 'venue', lm: 'sh_gt', w: 0.006 },
       { id: 'sh_mbcc', n: '世博文化中心', t: 'venue', at: ll(31.1890, 121.4970), y0: [2010, 5], w: 0.008 },
+      // v3.5 扩大范围（OSM 坐标；规模为估算）
+      { id: 'sh_anting', n: '上海国际汽车城（安亭）', t: 'cbd', at: llW(31.2900, 121.1620), w: [[1990, 0.004], [2005, 0.012]], note: '上海大众安亭工厂 1985 年投产；2001 年起建设上海国际汽车城（史实）。' },
+      { id: 'sh_f1', n: '上海国际赛车场', t: 'stadium', at: llW(31.3389, 121.2197), y0: [2004, 9], w: 0.004, note: '2004 年 9 月举办首届 F1 中国大奖赛（史实）。' },
+      { id: 'sh_sjuc', n: '松江大学城', t: 'uni', at: llW(31.0515, 121.2120), y0: 2001, w: [[2001, 0.01], [2010, 0.035]] },
+      { id: 'sh_sjtumh', n: '上海交通大学（闵行）', t: 'uni', at: llW(31.0300, 121.4370), w: [[1990, 0.008], [2005, 0.03]] },
+      { id: 'sh_ecnumh', n: '华东师范大学（闵行）', t: 'uni', at: llW(31.0330, 121.4520), y0: 2006, w: 0.02 },
+      { id: 'sh_zizhu', n: '紫竹高新区', t: 'cbd', at: llW(31.0259, 121.4470), y0: 2002, w: [[2002, 0.002], [2015, 0.01]] },
+      { id: 'sh_sheshan', n: '佘山国家旅游度假区', t: 'scenic', lm: 'sh_sheshan', y0: 1995, w: [[1995, 0.006], [2009, 0.015]], note: '佘山、天马山一带的山林、天文台与圣母大殿，2009 年欢乐谷开园（史实）。' },
+      { id: 'sh_chenshan', n: '辰山植物园', t: 'park', at: llW(31.0728, 121.1810), y0: [2010, 4], w: 0.006 },   // 园中心是湖面，需求点放在南侧辰花路一侧
+      { id: 'sh_wildzoo', n: '上海野生动物园', t: 'scenic', at: llW(31.0560, 121.7140), y0: [1995, 11], w: 0.012 },
+      { id: 'sh_jdkm', n: '嘉定孔庙·汇龙潭', t: 'scenic', at: llW(31.3810, 121.2490), w: 0.004 },
+      { id: 'sh_xinchang', n: '新场古镇', t: 'scenic', at: llW(31.0282, 121.6492), w: 0.004 },
     ],
-    districtLabels: [['黄浦', ['黄浦区']], ['静安', ['静安区']], ['徐汇', ['徐汇区']], ['长宁', ['长宁区']], ['普陀', ['普陀区']], ['虹口', ['虹口区']], ['杨浦', ['杨浦区']], ['浦东', ['浦东新区']], ['宝山', ['宝山区']], ['闵行', ['闵行区']], ['嘉定', ['嘉定区']]],
+    districtLabels: [['黄浦', ['黄浦区']], ['静安', ['静安区']], ['徐汇', ['徐汇区']], ['长宁', ['长宁区']], ['普陀', ['普陀区']], ['虹口', ['虹口区']], ['杨浦', ['杨浦区']], ['浦东', ['浦东新区']], ['宝山', ['宝山区']], ['闵行', ['闵行区']], ['嘉定', ['嘉定区']], ['青浦', ['青浦区']], ['松江', ['松江区']]],
     // 纪事（只能在末尾追加：已发生记录按序号保存）
     events: [
       { y: 1990, m: 1, tag: '史实', title: '1990 年的上海', desc: '市区人口约 740 万，城市集中在黄浦江西岸；浦东大多是农田、工厂与码头，黄浦江上没有一座大桥；没有地铁，公交车厢严重超载。' },
@@ -298,13 +336,16 @@
       { id: 'sh1', appear: [1990, 3], deadline: [1995, 12], type: 'connect', reward: 250000, title: '南北主轴', desc: '连接上海站、人民广场、徐家汇与锦江乐园，为最拥挤的南北走廊建设第一条地铁。', anchors: [anchor('上海站', 31.2495, 121.4560, 3), anchor('人民广场', 31.2330, 121.4750, 3), anchor('徐家汇', 31.1940, 121.4370, 3), anchor('锦江乐园', 31.1420, 121.4140, 3)] },
       { id: 'sh2', appear: [1993, 1], deadline: [2000, 12], type: 'connect', reward: 300000, title: '越过黄浦江：东西主轴', desc: '连接中山公园、静安寺、人民广场、陆家嘴与龙阳路。过黄浦江需要建设越江隧道。', anchors: [anchor('中山公园', 31.2190, 121.4180, 3), anchor('静安寺', 31.2230, 121.4460, 3), anchor('人民广场', 31.2330, 121.4750, 3), anchor('陆家嘴', 31.2380, 121.5020, 3), anchor('龙阳路', 31.2030, 121.5570, 3)] },
       { id: 'sh3', appear: [1995, 1], deadline: [2001, 12], type: 'connect', reward: 250000, title: '西部高架环线', desc: '沿铁路线建设一条高架线路，连接漕溪路、宜山路、中山公园、上海站与江湾镇。', anchors: [anchor('漕溪路', 31.1730, 121.4330, 3), anchor('宜山路', 31.1860, 121.4230, 3), anchor('中山公园', 31.2190, 121.4180, 3), anchor('上海站', 31.2495, 121.4560, 3), anchor('江湾镇', 31.2930, 121.4800, 3)] },
-      { id: 'sh4', appear: [2000, 1], deadline: [2007, 12], type: 'coverage', target: 0.27, reward: 300000, title: '地铁覆盖近三成人口', desc: '2007 年底前，步行 15 分钟可到达地铁站的人口不低于全市人口的 27%。' },   // v2.9 地图扩大后按人口比例由 30% 换算，难度不变
+      { id: 'sh4', appear: [2000, 1], deadline: [2007, 12], type: 'coverage', target: 0.24, reward: 300000, title: '地铁覆盖近四分之一人口', desc: '2007 年底前，步行 15 分钟可到达地铁站的人口不低于全市人口的 24%。' },   // v2.9 地图扩大后按人口比例由 30% 换算为 27%，v3.5 再换算为 24%，难度不变
       { id: 'sh5', appear: [2003, 1], deadline: [2010, 4], type: 'connect', reward: 300000, title: '世博会', desc: '世博会开幕前，连接世博园区、陆家嘴与人民广场。', anchors: [anchor('世博园', 31.1865, 121.4925, 3), anchor('陆家嘴', 31.2380, 121.5020, 3), anchor('人民广场', 31.2330, 121.4750, 3)] },
       { id: 'sh6', appear: [2005, 1], deadline: [2010, 12], type: 'connect', reward: 250000, title: '五角场与江湾', desc: '连接五角场、同济大学、四川北路与人民广场。', anchors: [anchor('五角场', 31.3000, 121.5145, 3), anchor('同济大学', 31.2830, 121.5025, 3), anchor('四川北路', 31.2610, 121.4840, 3), anchor('人民广场', 31.2330, 121.4750, 3)] },
       { id: 'sh7', appear: [2007, 1], deadline: [2010, 3], type: 'connect', reward: 250000, title: '虹桥综合交通枢纽', desc: '枢纽启用前，连接虹桥站、中山公园与人民广场。', anchors: [anchor('虹桥站', 31.1945, 121.3215, 3), anchor('中山公园', 31.2190, 121.4180, 3), anchor('人民广场', 31.2330, 121.4750, 3)] },
-      { id: 'sh8', appear: [2010, 1], deadline: [2016, 12], type: 'coverage', target: 0.52, reward: 300000, title: '地铁覆盖过半人口', desc: '2016 年底前，步行 15 分钟可到达地铁站的人口不低于全市人口的 52%。' },   // v2.9 地图扩大后按人口比例由 60% 换算，难度不变
+      { id: 'sh8', appear: [2010, 1], deadline: [2016, 12], type: 'coverage', target: 0.44, reward: 300000, title: '地铁覆盖四成四人口', desc: '2016 年底前，步行 15 分钟可到达地铁站的人口不低于全市人口的 44%。' },   // v2.9 地图扩大后按人口比例由 60% 换算为 52%，v3.5 再换算为 44%，难度不变
       { id: 'sh9', appear: [2012, 1], deadline: [2020, 12], type: 'connect', reward: 200000, title: '浦东腹地', desc: '不经陆家嘴，连接金桥、张江与世纪公园。', anchors: [anchor('金桥', 31.2620, 121.5850, 3), anchor('张江', 31.2030, 121.5900, 3), anchor('世纪公园', 31.2170, 121.5485, 3)] },
       { id: 'sh10', appear: [2013, 1], deadline: [2016, 12], type: 'connect', reward: 200000, title: '迪士尼接驳', desc: '乐园开园前，连接上海迪士尼乐园、秀沿路与龙阳路，让游客从市区直达度假区。', anchors: [anchorW('上海迪士尼乐园', 31.1434, 121.6637, 3), anchorW('秀沿路', 31.1403, 121.5942, 3), anchor('龙阳路', 31.2030, 121.5570, 3)] },
+      // v3.5 扩图新增范围的史实任务
+      { id: 'sh11', appear: [2004, 1], deadline: [2010, 12], type: 'connect', reward: 250000, title: '轨道交通到松江新城', desc: '松江大学城的七所高校陆续开学，松江新城的居民大多到徐家汇、漕河泾上班。连接徐家汇、九亭、松江大学城与松江新城，9 号线 2007–2012 年分段通车（史实）。', anchors: [anchor('徐家汇', 31.1940, 121.4370, 3), anchorW('九亭', 31.1410, 121.3280, 3), anchorW('松江大学城', 31.0562, 121.2282, 3), anchorW('松江新城', 31.0322, 121.2263, 3)] },
+      { id: 'sh12', appear: [2005, 1], deadline: [2011, 12], type: 'connect', reward: 250000, title: '嘉定与安亭汽车城', desc: '嘉定新城与安亭国际汽车城离中心城区三十多公里，沪嘉高速天天拥堵。连接曹杨路、南翔、嘉定新城与安亭，11 号线 2009–2010 年通车（史实）。', anchors: [anchor('曹杨路', 31.2410, 121.4160, 3), anchorW('南翔', 31.2980, 121.3200, 3), anchorW('嘉定新城', 31.3321, 121.2498, 3), anchorW('安亭', 31.2904, 121.1575, 3)] },
     ],
     dynTasks: [
       { id: 'shd1', from: [1993, 1], to: [2003, 12], type: 'connect', months: 36, reward: 40000, title: '浦东沿江过江通勤', desc: '浦东沿江的居民每天过江上班。连接塘桥、东昌路与外滩。', anchors: [anchor('塘桥', 31.2190, 121.5190, 3), anchor('东昌路', 31.2330, 121.5100, 3), anchor('外滩', 31.2385, 121.4870, 3)] },
@@ -331,12 +372,15 @@
     ],
     // 线路配色参考上海地铁
     lineColorsNice: ['#e3002b', '#8cc220', '#fcd600', '#461d84', '#944d9a', '#d40068', '#ed6f00', '#0094d8', '#87caed', '#c6afd4', '#871c2b', '#007a60', '#e999c0', '#626020', '#bca886', '#98d1c0', '#bc796f', '#c4984f'],
+    // 空侧捷运站保留为定位候选，写清航站楼和卫星厅。陆家浜路按运营站名。
     stationNameCorrections: {
       '陆家滨路': '陆家浜路', 'S1': '浦东机场 S1 卫星厅', 'S2': '浦东机场 S2 卫星厅',
       'T1': '浦东机场 T1 航站楼', 'T2': '浦东机场 T2 航站楼',
     },
     places: (G.places || []).map(function (p) { return [p[0], p[1], p[2], p[3]]; }),
   };
+  // v3.5 地图向西、向南扩大：全图人口按新增范围的份额再抬高（约 12%–16%），提前开放的人口门槛同比放大，原有片区的开放时机不变（新片区的门槛也按扩图前的口径填写）
+  for (const rg of data.regions.concat([data.defaultRegion])) if (rg.pop) rg.pop = Math.round(rg.pop * 1.15 / 1e4) * 1e4;
   // 位置校正：与 OSM 地铁站同名的设施与任务锚点，改用车站位置（相距 3 km 以内时；手填坐标的误差可达数百米）
   const ST = {}; for (const p of G.places || []) if (p[3] === 0 && !ST[p[0]]) ST[p[0]] = p;
   const nearSt = function (name, x, y) { const p = ST[name.replace(/（.*?）/g, '')]; return p && Math.hypot(p[1] - x, p[2] - y) < 12 ? p : null; };
@@ -346,10 +390,11 @@
   (CM.MAP_LIST = CM.MAP_LIST || []).push({
     id: 'sh', name: '上海', title: '上海 · 1990', sub: '真实地理 · 1990 年起 · 人民币',
     desc: '从 1990 年尚无地铁的上海开始：七百多万人挤在浦西，黄浦江上没有一座桥，浦东开发开放即将宣布。陆家嘴、虹桥枢纽与世博会将陆续到来，地铁要追上中国最大城市的扩张。',
-    facts: [['范围', '56 km × 38 km'], ['起始', '1990 年'], ['人口', '约 944 万'], ['货币', '人民币（元）'], ['模式', '经营挑战 / 自由建造']],
-    // 第 3 版（v2.9）：向东扩大 52 格到浦东机场，向西扩大 20 格到虹桥枢纽西侧；旧存档依次迁移（见 maps.js extentMigration）
-    modes: ['challenge', 'free'], kind: 'real', mapVersion: 3, extent: [{ from: 1, dx: 0, dy: 0, oldW: 124, oldH: 136, newW: 152, newH: 152, note: '地图向东扩大到川沙、曹路，向南扩大到梅陇、康桥一带', oldRegionIds: ['airport', 'lujiazui', 'hqcbd', 'huangpu', 'jingan', 'xuhui', 'changning', 'putuo', 'hongkou', 'yangpu', 'pdriver', 'jinqiao', 'waigaoqiao', 'beicai', 'pudong', 'wusong', 'dachang', 'xinzhuang', 'minhang', 'jiading', 'outer'], oldLandmarkIds: ['sh_bund', 'sh_park', 'sh_expoctr', 'sh_yuyuan', 'sh_jingan', 'sh_jade', 'sh_longhua', 'sh_xjh', 'sh_station', 'sh_fudan', 'sh_tongji', 'sh_sjtu', 'sh_ecnu', 'sh_pearl', 'sh_museum', 'sh_stadium', 'sh_gt', 'sh_jinmao', 'sh_hongkou', 'sh_sniec', 'sh_south', 'sh_swfc', 'sh_hqstation', 'sh_cnpav', 'sh_tower'] },
-      { from: 2, dx: 20, dy: 0, oldW: 152, oldH: 152, newW: 224, newH: 152, eventInsert: { index: 22, count: 1 }, note: '地图向东扩大到浦东机场，向西扩大到虹桥枢纽西侧的徐泾、华漕与马陆', oldRegionIds: ['airport', 'lujiazui', 'hqcbd', 'huangpu', 'jingan', 'xuhui', 'changning', 'putuo', 'hongkou', 'yangpu', 'pdriver', 'jinqiao', 'waigaoqiao', 'beicai', 'pudong', 'wusong', 'dachang', 'xinzhuang', 'minhang', 'chuansha', 'disney', 'jiading', 'outer'], oldLandmarkIds: ['sh_bund', 'sh_park', 'sh_expoctr', 'sh_yuyuan', 'sh_jingan', 'sh_jade', 'sh_longhua', 'sh_xjh', 'sh_station', 'sh_fudan', 'sh_tongji', 'sh_sjtu', 'sh_ecnu', 'sh_pearl', 'sh_museum', 'sh_stadium', 'sh_gt', 'sh_jinmao', 'sh_hongkou', 'sh_sniec', 'sh_south', 'sh_swfc', 'sh_hqstation', 'sh_cnpav', 'sh_tower', 'sh_disney'] }], scenario: 'sh-1990',
+    facts: [['范围', '70 km × 44 km'], ['起始', '1990 年'], ['人口', '约 1088 万'], ['货币', '人民币（元）'], ['模式', '经营挑战 / 自由建造']],
+    // 第 3 版（v2.9）：向东扩大 52 格到浦东机场，向西扩大 20 格到虹桥枢纽西侧；第 4 版（v3.5）：向西扩大 56 格到嘉定老城、安亭与青浦新城，向南扩大 24 格到松江新城、闵行南部与惠南；旧存档依次迁移（见 maps.js extentMigration）
+    modes: ['challenge', 'free'], kind: 'real', mapVersion: 4, extent: [{ from: 1, dx: 0, dy: 0, oldW: 124, oldH: 136, newW: 152, newH: 152, note: '地图向东扩大到川沙、曹路，向南扩大到梅陇、康桥一带', oldRegionIds: ['airport', 'lujiazui', 'hqcbd', 'huangpu', 'jingan', 'xuhui', 'changning', 'putuo', 'hongkou', 'yangpu', 'pdriver', 'jinqiao', 'waigaoqiao', 'beicai', 'pudong', 'wusong', 'dachang', 'xinzhuang', 'minhang', 'jiading', 'outer'], oldLandmarkIds: ['sh_bund', 'sh_park', 'sh_expoctr', 'sh_yuyuan', 'sh_jingan', 'sh_jade', 'sh_longhua', 'sh_xjh', 'sh_station', 'sh_fudan', 'sh_tongji', 'sh_sjtu', 'sh_ecnu', 'sh_pearl', 'sh_museum', 'sh_stadium', 'sh_gt', 'sh_jinmao', 'sh_hongkou', 'sh_sniec', 'sh_south', 'sh_swfc', 'sh_hqstation', 'sh_cnpav', 'sh_tower'] },
+      { from: 2, dx: 20, dy: 0, oldW: 152, oldH: 152, newW: 224, newH: 152, eventInsert: { index: 22, count: 1 }, note: '地图向东扩大到浦东机场，向西扩大到虹桥枢纽西侧的徐泾、华漕与马陆', oldRegionIds: ['airport', 'lujiazui', 'hqcbd', 'huangpu', 'jingan', 'xuhui', 'changning', 'putuo', 'hongkou', 'yangpu', 'pdriver', 'jinqiao', 'waigaoqiao', 'beicai', 'pudong', 'wusong', 'dachang', 'xinzhuang', 'minhang', 'chuansha', 'disney', 'jiading', 'outer'], oldLandmarkIds: ['sh_bund', 'sh_park', 'sh_expoctr', 'sh_yuyuan', 'sh_jingan', 'sh_jade', 'sh_longhua', 'sh_xjh', 'sh_station', 'sh_fudan', 'sh_tongji', 'sh_sjtu', 'sh_ecnu', 'sh_pearl', 'sh_museum', 'sh_stadium', 'sh_gt', 'sh_jinmao', 'sh_hongkou', 'sh_sniec', 'sh_south', 'sh_swfc', 'sh_hqstation', 'sh_cnpav', 'sh_tower', 'sh_disney'] },
+      { from: 3, dx: 56, dy: 0, oldW: 224, oldH: 152, newW: 280, newH: 176, note: '地图向西扩大到嘉定老城、安亭与青浦新城，向南扩大到松江新城、闵行南部、浦江与惠南', oldRegionIds: ['airport', 'lujiazui', 'hqcbd', 'huangpu', 'jingan', 'xuhui', 'changning', 'putuo', 'hongkou', 'yangpu', 'pdriver', 'jinqiao', 'waigaoqiao', 'beicai', 'pudong', 'wusong', 'dachang', 'xinzhuang', 'minhang', 'chuansha', 'disney', 'jiading', 'pvgair', 'outer'], oldLandmarkIds: ['sh_bund', 'sh_park', 'sh_expoctr', 'sh_yuyuan', 'sh_jingan', 'sh_jade', 'sh_longhua', 'sh_xjh', 'sh_station', 'sh_fudan', 'sh_tongji', 'sh_sjtu', 'sh_ecnu', 'sh_pearl', 'sh_museum', 'sh_stadium', 'sh_gt', 'sh_jinmao', 'sh_hongkou', 'sh_sniec', 'sh_south', 'sh_swfc', 'sh_hqstation', 'sh_cnpav', 'sh_tower', 'sh_disney'] }], scenario: 'sh-1990',
     region: '中国内地', tagline: '浦江两岸，从零开始的超大网络', difficulty: 3, tags: ['无地铁开局', '越江', '超大城市'],
     intro: '1990 年的上海，七百多万人挤在黄浦江西岸，公交车厢里人贴着人；对岸的浦东还是农田与码头，江上一座桥也没有。4 月，浦东开发开放的消息传来。你要从第一条南北线开始，跨过黄浦江，跟上一座超大城市三十年的扩张。',
     features: [['building', '陆家嘴天际线', '东方明珠、金茂、环球金融中心与上海中心按年份出现']],
@@ -357,10 +402,11 @@
     geo: G, data: data,
     econ: { devOffset: 2, money: 1 },   // 出行选择参数：上海 1990 年约对应广州样本 1992 年的发展阶段
     cfg: {
-      W: 224, H: 152, START: { y: 1990, m: 1, d: 1, minute: 360 },
+      W: 280, H: 176, START: { y: 1990, m: 1, d: 1, minute: 360 },
+      // v3.5 再向西扩大到嘉定老城、安亭、青浦新城，向南扩大到松江新城、闵行南部、浦江与惠南：在第 3 版曲线上再按新增范围的份额（1990 年约 13%，2000 年约 12%，2020 年约 16%）抬高，岗位比例同样换算。
       // v2.9 地图向东扩大到浦东机场（祝桥、合庆与长兴、横沙岛的一部分），向西扩大到徐泾、华漕、马陆、泗泾一带。曲线为扩图前曲线 ÷（1 − 新增范围的人口份额），
       // 份额按开局生成与增长模型实测（1990 年约 12%，2000 年约 10%，2020 年约 14%），原有范围的人口与扩图前一致；新增范围约 115 万（1990）到 275 万（2020），为估算
-      growth: Object.assign({}, CM.CFG.growth, { popCurve: [[1990, 9.44e6], [1995, 10.14e6], [2000, 11.81e6], [2005, 14.02e6], [2010, 16.84e6], [2015, 18.07e6], [2020, 18.91e6], [2030, 19.77e6], [2050, 20.24e6], [2300, 20.59e6]], histEnd: 2020, jobsRatio: [[1990, 0.513], [2000, 0.512], [2010, 0.543], [2020, 0.562]] }),   // 岗位比例同样按新增范围的份额由原值（0.56 / 0.55 / 0.58 / 0.6）换算，原有范围的岗位与扩图前一致
+      growth: Object.assign({}, CM.CFG.growth, { popCurve: [[1990, 10.877e6], [1995, 11.655e6], [2000, 13.468e6], [2005, 15.972e6], [2010, 19.559e6], [2015, 21.254e6], [2020, 22.445e6], [2030, 23.466e6], [2050, 24.024e6], [2300, 24.439e6]], histEnd: 2020, jobsRatio: [[1990, 0.474], [2000, 0.477], [2010, 0.506], [2020, 0.523]] }),   // 岗位比例同样按新增范围的份额由原值（0.56 / 0.55 / 0.58 / 0.6）换算，原有范围的岗位与扩图前一致
       money: { code: 'CNY', unit: '元', wan: '万元', yi: '亿元', sym: '¥' },
       econBase: 1990,
       // 造价（万元，1990 年价格；估算，参考地铁 1 号线约 16 km、总投资约 54 亿元的量级）：软土地基，越江隧道附加较高
@@ -374,9 +420,9 @@
       // 城市经济（macro.js）：1990 年地图范围 GDP 约 650 亿元（估算：上海全市约 780 亿元，地图覆盖中心城区与浦东主要开发区）；
       // 1994 年分税制改革前地方财政收入占比很高；浦东开发与金融、贸易中心建设带动 1990 年代起的高速增长
       macro: {
-        area: '地图范围（中心城区、浦东主要开发区、浦东机场与近郊）', region: '中国内地',
-        // gdp0：v2.9 地图扩大后按全图岗位增加的比例（约 4%）上调，人均产出不变（估算）
-        gdp0: 7600000, revRatio: [[1990, 0.25], [1994, 0.15], [2003, 0.18], [2010, 0.2], [2020, 0.2], [2040, 0.18]], revElastic: 1.5,
+        area: '地图范围（中心城区、浦东主要开发区、浦东机场与嘉定、青浦、松江、闵行、南汇的近郊）', region: '中国内地',
+        // gdp0：v2.9 地图扩大后按全图岗位增加的比例（约 4%）上调，v3.5 再上调约 6.5%，人均产出不变（估算）
+        gdp0: 8090000, revRatio: [[1990, 0.25], [1994, 0.15], [2003, 0.18], [2010, 0.2], [2020, 0.2], [2040, 0.18]], revElastic: 1.5,
         prod: [[1990, 0.03], [1991, 0.08], [1993, 0.11], [1997, 0.09], [2000, 0.085], [2005, 0.085], [2008, 0.07], [2011, 0.06], [2015, 0.05], [2019, 0.045], [2025, 0.032], [2035, 0.02], [2050, 0.014], [2080, 0.012]],
         infl: 'cn', longRun: { infl: 0.02 }, histEnd: 2020, ref: 'cn',
         struct: { trade: 0.75, fin: 0.65, ind: 0.6, tour: 0.5, prop: 0.65 },
@@ -397,6 +443,6 @@
         ],
       },
     },
-    cam: { cx: 83, cy: 80, zoom: 16 },   // v2.9 地图向西扩大 20 格，镜头仍对准原处
+    cam: { cx: 139, cy: 80, zoom: 16 },   // v2.9 地图向西扩大 20 格、v3.5 再向西扩大 56 格，镜头仍对准原处
   });
 })(window.CM);

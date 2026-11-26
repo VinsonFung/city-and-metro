@@ -49,7 +49,7 @@ self.matchMedia = function () { return {matches:false}; };
     }
     if (m.terrain) { const t = m.terrain; reclaim = t.reclaim || []; delete t.reclaim; Object.assign(city, t); R.geoPaths = new WeakMap(); R._bankPaths = null; }
     if (m.cells) Object.assign(city, m.cells);
-    if (m.built) { city.roadsBuilt = m.built; city.roadVersion = m.roadVersion; }
+    if (m.built) { city.roadsBuilt = m.built; city.roadVersion = m.roadVersion; city.roadGrowthVersion = m.roadGrowthVersion; }
     if (m.lock) LK = m.lock;
     if (m.facm !== undefined) R._facm = m.facm ? Object.assign(m.facm, { city: city }) : null;
     if (m.mt !== undefined) R._mt = m.mt;

@@ -105,3 +105,77 @@ try {
 } finally {
   Object.assign(pool, savedPool);
 }
+
+const damaged = makeGame(), previousModel = damaged.model;
+previousModel.setNetwork(damaged.compiled);
+let partialCalls = 0;
+previousModel.solveGen = function* () {
+  partialCalls++;
+  this.fn = null;
+  throw Error('Fault leaves the traffic model partially refreshed');
+};
+const oldYear = damaged.clock.y, oldMonth = damaged.clock.m;
+const co = damaged.ensureSettlementTraffic();
+for (let r = co.next(); !r.done; r = co.next()) {}
+assert.equal(partialCalls, 1, 'Recovery should discard the partial model');
+assert.notEqual(damaged.model, previousModel);
+assert.ok(previousModel.retired && damaged.model.trafficReady());
+assert.equal(damaged.econ.cur.days, 0);
+assert.equal(damaged.clock.y, oldYear);
+assert.equal(damaged.clock.m, oldMonth);
+console.log('PASS a partial traffic failure is rebuilt before any day is billed');
+
+
+const stranded = makeGame(), openModel = stranded.model;
+const from = stranded.ym(), before = stranded.econ.funds, refreshCity = C.Model.prototype.refreshCityGen;
+openModel.setNetwork(stranded.compiled);
+openModel.solveGen = function* () { throw Error('Fault in live traffic'); };
+let rebuilds = 0;
+C.Model.prototype.refreshCityGen = function* (...args) {
+  if (++rebuilds === 1) throw Error('Fault while rebuilding traffic');
+  return yield* refreshCity.apply(this, args);
+};
+try {
+  assert.ok(stranded.startJump(1));
+  for (let i = 0; stranded.jumping && i < 5000; i++) stranded.stepJump();
+  assert.match(stranded.settlementError?.message, /while rebuilding traffic/);
+  assert.equal(stranded.model, openModel);
+  assert.ok(!openModel.retired && stranded._settlementTrafficNeedsRebuild);
+  assert.equal(stranded.ym(), from);
+  assert.equal(stranded.serialize().econ.funds, before);
+  stranded.retrySettlement();
+  for (let i = 0; stranded.jumping && i < 5000; i++) stranded.stepJump();
+  assert.ok(!stranded.settlementError && stranded.model.trafficReady());
+  assert.equal(stranded.ym(), from + 1);
+  assert.equal(stranded.econ.ledger.length, 1);
+  assert.ok(stranded.econ.cur.grant > 0);
+  console.log('PASS failed traffic rebuild leaves a saveable date and retries the original jump once');
+} finally {
+  C.Model.prototype.refreshCityGen = refreshCity;
+}
+
+const boundary = makeGame();
+boundary.clock.d = C.U.daysInMonth(boundary.clock.y, boundary.clock.m);
+boundary.econ.cur.days = boundary.clock.d - 1;
+assert.equal(boundary.endDay(), true);
+const input = JSON.parse(JSON.stringify(boundary.serialize()));
+const archived = JSON.stringify(input), balance = input.econ.funds;
+const restored = C.Game.restore(input);
+assert.equal(restored.clock.d, 1);
+assert.equal(restored.econ.cur.m, restored.clock.m, 'Legacy closed opening must not keep billing into the old month');
+assert.equal(restored.econ.cur.y, restored.clock.y);
+assert.equal(restored.econ.cur.days, 0);
+assert.equal(restored.econ.cur.closed, undefined);
+assert.equal(restored.econ.ledger.length, 1);
+assert.ok(restored.econ.cur.grant > 0 && Math.abs(restored.econ.funds - balance - restored.econ.cur.grant) < 1e-6);
+assert.equal(JSON.stringify(restored.econ.ledger[0]), JSON.stringify(JSON.parse(archived).econ.ledger[0]));
+const second = C.Game.restore(JSON.parse(JSON.stringify(restored.serialize())));
+assert.equal(second.econ.funds, restored.econ.funds);
+assert.equal(second.econ.flow.filter(r => r.kind === 'grant' && r.y === second.clock.y && r.m === second.clock.m).length,
+  restored.econ.flow.filter(r => r.kind === 'grant' && r.y === restored.clock.y && r.m === restored.clock.m).length);
+assert.ok(second.startJump(1));
+for (let i = 0; second.jumping && i < 5000; i++) second.stepJump();
+assert.equal(second.settlementError, undefined);
+assert.equal(second.ym(), restored.ym() + 1);
+assert.equal(second.econ.ledger.length, 2);
+console.log('PASS a closed legacy opening restores the missing month and grant once and advances normally');

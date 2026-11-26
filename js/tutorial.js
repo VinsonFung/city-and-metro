@@ -213,7 +213,7 @@
       ] },
     { id: 'flow', main: true, ch: '读懂城市', title: '看车站客流与拥挤',
       body: '「车站客流」图层标出哪些站最忙。点开车站能看到客流、负荷和解决办法。',
-      hint: '真实城市里，线路或车站持续过载时，地铁芯入口上方会出现提醒：可以自动处理，也可以定位后手动处理。',
+      hint: '线路或车站持续过载时，在任务的「待办」里可以自动处理或定位。',
       check: function () { return ui.layer === 'station' && ui.topIs(['station', 'line']); },
       sub: [
         PICK,

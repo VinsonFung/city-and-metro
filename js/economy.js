@@ -167,8 +167,18 @@
   };
   // 早期网页版可能把未发完拨款的月初当作推进完成并保存。
   Economy.prototype.restoreOpeningGrant = function (clock) {
-    const { y, m, d } = clock, cur = this.cur, last = this.ledger[this.ledger.length - 1];
-    if (this.mode !== 'challenge' || this.failed || d !== 1 || cur.y !== y || cur.m !== m ||
+    const { y, m, d } = clock, last = this.ledger[this.ledger.length - 1];
+    if (d !== 1) return;
+    const prior = this.cur;
+    // 旧版可能在上月封账后、新月开账前保存。只有能确认当前行是同一张已封账的账单时才补开新月。
+    if (last?.closed && prior.closed && prior.y === last.y && prior.m === last.m &&
+        U.ymIndex(last.y, last.m) + 1 === U.ymIndex(y, m) &&
+        last.days === U.daysInMonth(last.y, last.m) && Number.isFinite(this.funds) && last.end === this.funds &&
+        (last.capexEnd || 0) === this.capex && JSON.stringify(last) === JSON.stringify(prior)) {
+      this.openMonth(y, m);
+    }
+    const cur = this.cur;
+    if (this.mode !== 'challenge' || this.failed || cur.y !== y || cur.m !== m ||
         cur.closed || cur.days !== 0 || cur.grant !== 0 || !last?.closed ||
         U.ymIndex(last.y, last.m) + 1 !== U.ymIndex(y, m)) return;
     if (this.flow.some(function (entry) { return entry.kind === 'grant' && entry.y === y && entry.m === m; })) return;
@@ -334,7 +344,7 @@
     let total = 0; for (const k of BUILD_KINDS) total += byKind[k] || 0;
     if (total <= 0) return { total: 0, capex: 0, gen: 0 };
     for (const k of BUILD_KINDS) if (byKind[k] > 0) this.cur[k] = (this.cur[k] || 0) + byKind[k];
-    if (!side) this.built = (this.built || 0) + total;   // 累计建设支出（v2.3，含自由建造）：预算类挑战按接受后的增量计算；车站商业开发（side）不计入
+    if (!side) this.built = (this.built || 0) + total;   // 累计建设支出（含自由建造），也供未结算的旧预算任务沿用。车站商业开发不计入。
     if (this.isFree()) return { total: total, capex: 0, gen: 0 };
     const use = Math.min(Math.max(0, this.capex), total), gen = total - use;
     this.capex -= use; this.funds -= gen; this.cur.capexUse = (this.cur.capexUse || 0) + use;
@@ -692,9 +702,21 @@
   };
   // 设施能否由玩家接驳（v2.2 修正）：场地边缘约 600 m 内存在可以合法设站的位置（含风景区景区站与未开放区域规则）；
   // 只为能完成的设施发布接驳任务。结果按设施与年份缓存
-  const servCache = new Map();
-  Tasks.facServable = function (city, f) {
+  // v3.3 玩家反馈（珠海渔女的任务修不了地铁）：能设站还不够，那里还要有步行道路（与客流模型的进站规则一致：车站所在格的四角
+  // 或 2 格内有步行路口），设施的出入口也要接上道路（fn.link：立在海中礁石上的雕像、没有街道的农田里的区域设施都接不上）
+  const servCache = new Map(); let servWalk = null;
+  const walkable = function (city, x, y) {
+    const w = city.walk; if (!w) return true;
+    const VW = city.VW, ci = Math.floor(x), cj = Math.floor(y), lim = CM.CFG.walk.maxAccessM * 0.5;
+    const deg = function (i, j) { return i < 0 || j < 0 || i >= VW || j * VW + i >= w.deg.length ? 0 : w.deg[j * VW + i]; };
+    if (deg(ci, cj) || deg(ci + 1, cj) || deg(ci, cj + 1) || deg(ci + 1, cj + 1)) return true;
+    for (let j = cj - 2; j <= cj + 3; j++) for (let i = ci - 2; i <= ci + 3; i++) if (deg(i, j) && U.dist(x, y, i, j) * CM.CFG.CELL_M * 1.3 <= lim) return true;
+    return false;
+  };
+  Tasks.facServable = function (city, f, fn) {
     if (f.ext) return true;
+    if (servWalk !== city.walk) { servCache.clear(); servWalk = city.walk; }   // 街道随城市发展增加：步行网络重建后重新判断
+    if (fn && fn.link && fn.ids) { const k = fn.ids.indexOf(f.id); if (k >= 0 && !fn.link[k]) return false; }
     const key = city.uid + ':' + f.id + ':' + city.terrainVer + ':' + city.lockVer + ':' + (city.unlockAll ? 1 : 0);
     if (servCache.has(key)) return servCache.get(key);
     const lm = f.lmK >= 0 ? CM.DATA.landmarks[f.lmK] : null;
@@ -702,7 +724,7 @@
     let ok = false;
     for (let dy = -R; dy <= R && !ok; dy += 0.5) for (let dx = -R; dx <= R && !ok; dx += 0.5) {
       if (dx * dx + dy * dy > R * R) continue;
-      if (CM.Metro.checkSite(city, f.x + dx, f.y + dy, 'underground').ok) ok = true;
+      if (CM.Metro.checkSite(city, f.x + dx, f.y + dy, 'underground').ok && walkable(city, f.x + dx, f.y + dy)) ok = true;
     }
     if (servCache.size > 400) servCache.clear();
     servCache.set(key, ok);
@@ -743,7 +765,11 @@
     if (yr < f.open) return 'wait';
     return g.model.facIndex(f.id) >= 0 ? 'on' : 'idle';
   };
-  // 任务要考核的设施在截止时间之后（或临近截止）才启用：把截止时间放到启用后 FAC_SETTLE 个月。发布时和旧存档的进行中任务都走这里，只往后放
+  Tasks.facUnavailable = function (f, g) {
+    const m = g.model;
+    return !!(g.city.walk && m.fn && m.trafficReady() && !Tasks.facServable(g.city, f, m.fn));
+  };
+  // 截止时间至少放到设施启用后 FAC_SETTLE 个月，发布和旧档都只往后调。
   Tasks.alignFacDeadline = function (t) {
     if (!t.deadline || !CM.Fac) return;
     const list = t.type === 'facShare' ? [t] : (t.type === 'combo' ? t.parts.filter(function (p) { return p.type === 'facShare'; }) : []);
@@ -933,6 +959,7 @@
       if (st === 'gone' || st === 'closed') return { ok: false, na: true, value: 0, text: (f ? f.name + ' 已停用' : '设施已不存在') + '，这一项不再考核' };
       if (st === 'wait') return { ok: false, wait: true, value: 0, text: f.name + ' 将于 ' + ymWords(ymOf(f.open)) + '启用，启用后开始统计' };
       if (st === 'idle') return { ok: false, wait: true, value: 0, text: f.name + ' 还没有投入使用，投入后开始统计' };
+      if (Tasks.facUnavailable(f, g)) return { ok: false, na: true, value: 0, text: f.name + ' 附近暂无法接驳，这一项不再考核' };
       const r = Tasks.facShareOf(model, f, t.basis);
       if (!r) return { ok: false, value: 0, text: '客流计算中' };
       const cheap = Tasks.fareCheap(t, g);
@@ -946,8 +973,8 @@
     }
     // ---- v2.3 可选挑战与城市策略难题 ----
     if (t.type === 'budgetConnect') {
-      const c = this.evaluate(Object.assign({}, t, { type: 'connect' }), g), spent = Math.max(0, (g.econ.built || 0) - (t.spent0 || 0)), over = spent > t.budget + 0.5;
-      return { ok: c.ok && !over, dead: over, value: over ? 0 : c.value, text: c.text + ' · 已花 ' + U.fmtMoney(spent) + ' / 预算 ' + U.fmtMoney(t.budget) + (over ? '（已超预算）' : '') };
+      const c = this.evaluate(Object.assign({}, t, { type: 'connect' }), g), bill = budgetStatus(t, g);
+      return { ok: c.ok && !bill.over, dead: bill.over, value: bill.over ? 0 : c.value, text: c.text + ' · ' + bill.text };
     }
     if (t.type === 'lineCrowd') {
       const L = g.net.lines[t.line]; if (!L) return { ok: false, dead: true, value: 0, text: '线路已拆除' };
@@ -1065,8 +1092,9 @@
     }
     return null;
   };
-  Tasks.prepare = function (t, g) {
+  Tasks.prepare = function (t, g, issuing = false) {
     Tasks.alignFacDeadline(t);
+    if (issuing && t.type === 'budgetConnect') t.budgetFrom = g.buildSeq || 0;
     // 旧任务在新规则下补判一次，已经标为可选的任务保留原待遇。
     if ((t.kind === 'hist' || t.kind === 'dyn') && t.scenicChecked !== SCENIC_TASK_RULE && g.city && g.city.region) {
       t.scenicChecked = SCENIC_TASK_RULE;
@@ -1080,7 +1108,11 @@
         const v = Tasks.partValue(p, g);
         if (v != null) { p.base0 = v; p.target = p.gain ? v + p.gain : v * (1 - p.drop); }
       }
-      if (p.type === 'budget') { if (p.spent0 == null) p.spent0 = g.econ.built || 0; if (!(p.budget > 0)) p.budget = Tasks.roundMoney(Tasks.estimateLink(g, anchors) * (p.budgetX || 1.2)); }
+      if (p.type === 'budget') {
+        if (issuing) p.budgetFrom = g.buildSeq || 0;
+        else if (p.budgetFrom == null && p.spent0 == null) p.spent0 = g.econ.built || 0;
+        if (!(p.budget > 0)) p.budget = Tasks.roundMoney(Tasks.estimateLink(g, anchors) * (p.budgetX || 1.2));
+      }
       else if (p.type === 'lineCost') { if (p.y0 == null) p.y0 = g.clock.y; if (!(p.budget > 0)) p.budget = Tasks.roundMoney(Tasks.estimateLink(g, anchors) * (p.x || 1)); }
       else if (p.type === 'facShare') { if (p.fare0 == null) p.fare0 = Tasks.fareLevel(g.econ.fare); const f = CM.Fac && CM.Fac.byId(p.fac); if (f && !p.basis) p.basis = Tasks.facBasis(f); }
     }
@@ -1116,6 +1148,82 @@
     let i0 = Infinity, i1 = -1;
     for (const a of anchors) best.stIdx.forEach(function (i, k) { const s = C.stations[i]; if (U.dist(s.x, s.y, a.x, a.y) <= a.r) { i0 = Math.min(i0, k); i1 = Math.max(i1, k); } });
     return { route: best, n: bn, all: bn === anchors.length, i0: i0, i1: i1 };
+  };
+  function budgetStatus(t, g) {
+    const scoped = Number.isSafeInteger(t.budgetFrom);
+    const spent = scoped ? Tasks.sectionSpend(g, t.anchors || [], t.budgetFrom, t.avoid) :
+      Math.max(0, (g.econ.built || 0) - (t.spent0 || 0));
+    const over = spent > t.budget + 0.5;
+    const prefix = scoped ? "这段线路已花 " : "已花 ";
+    return { over, text: prefix + U.fmtMoney(spent) + " / 预算 " + U.fmtMoney(t.budget) + (over ? "（已超预算）" : "") };
+  }
+
+  // 在连接最多锚点的网内，按区间长度找实际连接，允许沿步行换乘换线。
+  Tasks.sectionSpend = function (g, anchors, from, avoid) {
+    const C = g.compiled, M = CM.Metro, net = g.net, N = C.stations.length;
+    if (!anchors.length || !N) return 0;
+    const acc = g.model.net?.C === C ? g.model.net.acc : null;
+    const comp = avoid ? componentsAvoiding(C, acc, avoid) : stationComponents(C, acc);
+    const permitted = C.stations.map((s, i) => comp.serviced[i] && (!avoid || U.dist(s.x, s.y, avoid.x, avoid.y) > avoid.r));
+    const groups = new Map();
+    for (const a of anchors) {
+      const matches = new Map();
+      C.stations.forEach((s, i) => {
+        if (!permitted[i]) return;
+        const d = U.dist(s.x, s.y, a.x, a.y);
+        if (d > a.r) return;
+        const root = comp.find(i);
+        if (!matches.has(root)) matches.set(root, []);
+        matches.get(root).push({ i, d });
+      });
+      for (const [root, points] of matches) {
+        if (!groups.has(root)) groups.set(root, []);
+        groups.get(root).push(points);
+      }
+    }
+    let targets = [];
+    for (const group of groups.values()) if (group.length > targets.length) targets = group;
+    if (!targets.length) return 0;
+    const first = targets[0].reduce((a, b) => b.d < a.d ? b : a).i;
+    const edges = Array.from({ length: N }, () => []);
+    const link = (a, b, m, refs) => {
+      if (!permitted[a] || !permitted[b] || a === b) return;
+      const len = Math.max(1, m || 0);
+      edges[a].push({ i: b, len, refs }); edges[b].push({ i: a, len, refs });
+    };
+    for (const r of C.routes) {
+      if (r.svc) continue;
+      for (let i = 0; i < r.legSegs.length; i++) {
+        link(r.stIdx[i], r.stIdx[(i + 1) % r.stIdx.length], r.legLenM?.[i], r.legSegs[i]);
+      }
+    }
+    for (const tr of acc?.transfers || []) link(tr.a, tr.b, tr.m);
+    const dist = new Float64Array(N).fill(Infinity), prev = new Array(N), heap = new U.Heap(N);
+    dist[first] = 0; heap.push(0, first);
+    while (heap.n) {
+      const i = heap.pop(), d = heap.lastKey;
+      if (d > dist[i]) continue;
+      for (const e of edges[i]) if (d + e.len < dist[e.i]) {
+        dist[e.i] = d + e.len; prev[e.i] = { i, refs: e.refs }; heap.push(dist[e.i], e.i);
+      }
+    }
+    const stations = new Set(), tracks = new Set();
+    const cost = asset => (asset?.buildPayments || []).reduce((v, [seq, , amount]) => seq > from ? v + amount : v, 0);
+    let total = 0;
+    for (const candidates of targets) {
+      const nearest = candidates.reduce((a, b) => dist[b.i] + b.d * CFG.CELL_M < dist[a.i] + a.d * CFG.CELL_M ? b : a);
+      if (!Number.isFinite(dist[nearest.i])) continue;
+      for (let i = nearest.i; !stations.has(i); i = prev[i].i) {
+        stations.add(i); total += cost(net.stations[C.stations[i].id]);
+        if (!prev[i]) break;
+        for (const ref of prev[i].refs || []) {
+          const s = net.segments[ref.id]; if (!s) continue;
+          const key = M.trackKey(s);
+          if (!tracks.has(key)) { tracks.add(key); total += cost(s); }
+        }
+      }
+    }
+    return total;
   };
   const inRegions = function (g, ids) { const city = g.city, set = new Set(ids); return function (x, y) { const rg = city.regionAt(x, y); return !!rg && set.has(rg.id); }; };
   // 交通小区落在指定片区内的比例（小区可能跨片区）
@@ -1285,9 +1393,9 @@
         return { ok: v <= t.target, value: atMost(v, t.target), text: '换乘客流在' + t.areaName + '的比例 ' + pct(v) + ' / 目标 ≤ ' + pct(t.target) };
       }
       // ---- 成本收益 ----
-      case 'budget': {   // 任务发布以来的建设支出
-        const spent = Math.max(0, (g.econ.built || 0) - (t.spent0 || 0)), over = spent > t.budget + 0.5;
-        return { ok: !over, dead: over, value: over ? 0 : 1, text: '已花 ' + U.fmtMoney(spent) + ' / 预算 ' + U.fmtMoney(t.budget) + (over ? '（已超预算）' : '') };
+      case 'budget': {
+        const bill = budgetStatus(t, g);
+        return { ok: !bill.over, dead: bill.over, value: bill.over ? 0 : 1, text: bill.text };
       }
       case 'lineCost': {   // 这段线路（anchors 之间）按发布当年物价的造价：改用高架、取直、少设站都能省钱，改建后重新计算
         const rt = Tasks.routeThrough(g, t.anchors);
@@ -1463,6 +1571,48 @@
   //  · 动态任务期限按 dynScale 缩短（不少于 dynMin 个月）；
   //  · 上手阶段（Tasks.ramp：开局头 rampYears 年、线网不到 rampStations 座车站）动态任务的目标降低，不出拥堵与收支类任务
   Tasks.PACE = { maxActive: 3, histWindow: 36, minLeft: 12, histLate: 24, dynScale: 0.75, dynMin: 12, rampYears: 8, rampStations: 16 };
+  // 动态任务结束后的冷却（v3.4 玩家反馈：任务不要重复）：同一地点或设施完成或失败后 10 年不再发（失败的原样再发也算重复），同名的片区（几个小区同叫
+  // 「某某街道一带」）一并算；同类任务完成后 1 年、失败后 2 年
+  Tasks.COOL = { place: [120, 120], type: [12, 24] };
+  // 任务涉及的全部锚点（含复合任务各分项）
+  const hasPoint = p => p && Number.isFinite(p.x) && Number.isFinite(p.y);
+  const anchorsOf = function (t) {
+    const points = (t.anchors || []).map(a => Array.isArray(a) ? Tasks.placeOf(a[0]) : a).filter(hasPoint);
+    for (const p of t.parts || []) points.push(...anchorsOf(p));
+    return points;
+  };
+  Tasks.coolDown = function (T, t, ym, complete) {
+    const c = T.cool || (T.cool = {}), k = complete ? 0 : 1;
+    c[t.coolKey || t.type] = ym + Tasks.COOL.place[k];
+    Tasks.coolPlace(T, t, ym, complete);
+    if (t.title) c['title:' + t.title] = ym + Tasks.COOL.place[k];
+    c['type:' + t.type] = ym + Tasks.COOL.type[k];
+  };
+  // 同一处的不同说法（v3.4 玩家反馈：「情侣路与珠海渔女」的设施任务和「情侣路一带」的片区任务各发一遍）：片区任务取片区中心、
+  // 设施任务取设施位置记为任务地点（spot），进行中的任务地点与锚点 1.2 km 内不再发片区与设施任务；有地点或锚点的任务结束后，
+  // 这些地点按 COOL.place 冷却（cool 里的 at:x,y），期间附近同样不发。车站拥挤、线路类任务不算地点
+  const SPOT_KM = 1.2;
+  Tasks.spotOf = function (t, g) {
+    if (hasPoint(t.spot)) return t.spot;
+    const m = g && g.model; if (!m) return null;
+    if ((t.type === 'zoneCov' || t.type === 'zoneCong') && Number.isInteger(t.zone) && t.zone >= 0 && t.zone < m.Z && m.zCx && m.zCy) {
+      const p = { x: m.zCx[t.zone], y: m.zCy[t.zone] }; if (hasPoint(p)) return p;
+    }
+    const f = t.fac && m.fn && m.fn.list.find(q => q.id === t.fac);
+    if (hasPoint(f) && !f.ext) return { x: f.x, y: f.y };
+    return null;
+  };
+  Tasks.coolPlace = function (T, t, ym, complete) {
+    const c = T.cool || (T.cool = {}), until = ym + Tasks.COOL.place[complete ? 0 : 1], pts = anchorsOf(t), sp = t.spot;
+    if (hasPoint(sp)) pts.push(sp);
+    for (const k in c) if (k.slice(0, 3) === 'at:' && !(c[k] > ym)) delete c[k];   // 过期的地点冷却顺手清掉
+    for (const p of pts) { const k = 'at:' + p.x.toFixed(1) + ',' + p.y.toFixed(1); c[k] = Math.max(c[k] || 0, until); }
+  };
+  Tasks.prototype.cooledNear = function (x, y, ym) {
+    const c = this.cool || {}, lim = SPOT_KM * 1000 / CFG.CELL_M;
+    for (const k in c) { if (k.slice(0, 3) !== 'at:' || !(c[k] > ym)) continue; const p = k.slice(3).split(','); if (U.dist(x, y, +p[0], +p[1]) <= lim) return true; }
+    return false;
+  };
   Tasks.mainCount = function (T) { return T.active.filter(function (t) { return t.kind !== 'opt'; }).length; };
   Tasks.ramp = function (g, T) {
     const P = Tasks.PACE, C = g.compiled; let st = 0;
@@ -1470,8 +1620,45 @@
     const y0 = T && T.startYM != null ? T.startYM : g.ym();
     return U.clamp(Math.max((g.ym() - y0) / (12 * P.rampYears), st / P.rampStations), 0, 1);
   };
-  // 任务涉及的全部锚点（含复合任务各分项）
-  const anchorsOf = function (t) { let a = (t.anchors || []).slice(); for (const p of t.parts || []) a = a.concat(p.anchors || []); return a; };
+  // 任务去重（v3.4 玩家反馈：同一组地点被阶段目标、历史任务、本城任务各发一遍）：两项任务的锚点一一配对，相距 0.8 km 以内算同一处
+  // （口岸、站前这类挤在一起的地点一一配对，不会因为都在附近就算重复）
+  const SAME_KM = 0.8;
+  Tasks.sameAnchors = function (A, B) {
+    const lim = SAME_KM * 1000 / CFG.CELL_M;
+    const matches = A.map(a => B.flatMap((b, i) => U.dist(a.x, a.y, b.x, b.y) <= lim ? [i] : []));
+    const owners = new Map();
+    const pair = (a, seen) => {
+      for (const b of matches[a]) {
+        if (seen.has(b)) continue;
+        seen.add(b);
+        if (!owners.has(b) || pair(owners.get(b), seen)) { owners.set(b, a); return true; }
+      }
+      return false;
+    };
+    matches.forEach((_, i) => pair(i, new Set()));
+    return owners.size;
+  };
+  // 和这项任务重复的进行中、已完成或失败的任务：进行中的有两处相同就先不发（done 为假）；它的地点都已被完成的任务连过、没有新去处，
+  // 或全在一项失败的任务里时不必再发（done 为真）。多出新地点的（如把线延伸到更远的大学城）照常发布
+  Tasks.prototype.dupOf = function (t) {
+    const A = anchorsOf(t); if (A.length < 2) return null;
+    for (const o of this.active) if (o !== t && Tasks.sameAnchors(A, anchorsOf(o)) >= 2) return { task: o, done: false };
+    // 已完成：其中一项完成的任务有两处相同，且每个地点都已被完成的任务连过（如只多出一个早就通车的关闸），没有新去处
+    let best = null, bn = 0; const doneA = [];
+    for (const o of this.done) { if (o.partial) continue; const B = anchorsOf(o), n = Tasks.sameAnchors(A, B); if (n > bn) { bn = n; best = o; } for (const b of B) doneA.push(b); }
+    if (bn >= 2 && Tasks.sameAnchors(A, doneA) >= A.length) return { task: best, done: true };
+    // 失败过的同一件事（v3.4 玩家反馈：任务不要重复）：地点全在一项失败的任务里（同样的几处或其中几处），不再换个名目重发
+    for (const o of this.failed) if (Tasks.sameAnchors(A, anchorsOf(o)) >= A.length) return { task: o, done: true };
+    return null;
+  };
+  // 某处是否已经是进行中的连线任务要去的地方（泛泛的覆盖、减堵、设施接驳任务不再在这里重复发布）
+  Tasks.prototype.targeted = function (x, y, g) {
+    const lim2 = SPOT_KM * 1000 / CFG.CELL_M;
+    return this.active.some(function (t) {
+      if (anchorsOf(t).some(function (a) { return U.dist(x, y, a.x, a.y) <= Math.max(lim2, a.r || 0); })) return true;
+      const sp = Tasks.spotOf(t, g); return !!sp && U.dist(x, y, sp.x, sp.y) <= lim2;   // 片区、设施任务的地点
+    });
+  };
   Tasks.prototype.monthly = function (g) {
     const y = g.clock.y, m = g.clock.m, ym = U.ymIndex(y, m), P = Tasks.PACE;
     const out = [];
@@ -1487,7 +1674,9 @@
       }   // 旧存档：截止已过、也没在排队的不补发
       if (waited == null && ym < dl0 - P.histWindow) continue;               // 离截止还很远：先不出现
       const tp = Tasks.withPlan(g, h);
-      const ready = Tasks.mainCount(this) < P.maxActive && Tasks.anchorsOpenBy(g, anchorsOf(tp), ym + 12);   // 名额已满或地点还没开放：排队
+      const dup = this.dupOf(tp);
+      if (dup && dup.done) { this.issued[h.id] = 1; delete this.issued['hw:' + h.id]; continue; }   // 同样的地点已经连过（阶段目标或本城任务完成了）：不再发
+      const ready = !dup && Tasks.mainCount(this) < P.maxActive && Tasks.anchorsOpenBy(g, anchorsOf(tp), ym + 12);   // 名额已满、地点还没开放或正在做同样的事：排队
       if (!ready) {
         if (waited == null) this.issued['hw:' + h.id] = ym;
         continue;
@@ -1496,7 +1685,7 @@
       const t = Object.assign({ kind: 'hist', status: 'active', issuedAt: [y, m], streak: 0 }, JSON.parse(JSON.stringify(tp)));
       if (dl0 < ym + P.minLeft) { t.deadline = ymPair(ym + P.minLeft); t.delayNote = '排队或等地点开放后才发布，期限顺延到 ' + t.deadline[0] + ' 年 ' + t.deadline[1] + ' 月（原为 ' + h.deadline[0] + ' 年 ' + h.deadline[1] + ' 月）'; }
       t.reward = t.reward * g.econ.costIndex(y);
-      Tasks.prepare(t, g);
+      Tasks.prepare(t, g, true);
       this.active.push(t);
       out.push({ type: 'issued', task: t });
     }
@@ -1513,13 +1702,15 @@
         if (ym - ey > 2) { this.issued['ev:' + sp.id] = 1; continue; }
         this.issued['evw:' + sp.id] = ey;
       }
-      const tp = Tasks.withPlan(g, sp), dl = ym + Math.max(P.dynMin, Math.round((sp.months || 36) * P.dynScale));
+      const tp = Tasks.withPlan(g, sp), dup = this.dupOf(tp);
+      if (dup?.done) { this.issued['ev:' + sp.id] = 1; delete this.issued['evw:' + sp.id]; continue; }
+      const dl = ym + Math.max(P.dynMin, Math.round((sp.months || 36) * P.dynScale));
       if (ym - ey >= (sp.months || 36)) {
         this.issued['ev:' + sp.id] = 1;
         delete this.issued['evw:' + sp.id];
         continue;
       }
-      if (Tasks.mainCount(this) >= P.maxActive || !(G || (G = Tasks.gate(g))).check(tp).ok) continue;
+      if (dup || Tasks.mainCount(this) >= P.maxActive || !(G || (G = Tasks.gate(g))).check(tp).ok) continue;
       this.issued['ev:' + sp.id] = 1; delete this.issued['evw:' + sp.id];
       const t = Object.assign({ kind: 'dyn', status: 'active', issuedAt: [y, m], streak: 0, coolKey: 'ev:' + sp.id, cityId: sp.id, cause: e.title }, JSON.parse(JSON.stringify(tp)));
       // 锚点可写 [地名, 半径]：按地名表与其他任务的同名锚点定位，找不到地名的不发布
@@ -1531,7 +1722,7 @@
       t.reward = (t.rewardMonths || 1) * g.econ.grantQuota(y, m);
       delete t.months; delete t.rewardMonths;
       if (t.type === 'facShare') { const f = CM.Fac && CM.Fac.byId(t.fac); if (!f) continue; t.fare0 = Tasks.fareLevel(g.econ.fare); if (!t.basis) t.basis = Tasks.facBasis(f); }
-      Tasks.prepare(t, g);
+      Tasks.prepare(t, g, true);
       this.active.push(t);
       out.push({ type: 'issued', task: t });
     }
@@ -1550,7 +1741,7 @@
       if(t.evaluatedYM===ym)continue;
       // 单设施或全部设施均退役时撤销；复合任务只免除退役子项，保留其余目标。
       const retired = function (p) {
-        if (p.type === 'facShare') { const f = CM.Fac && CM.Fac.byId(p.fac); return !f || p.noFac || (f.close != null && g.year() >= f.close); }
+        if (p.type === 'facShare') { const f = CM.Fac && CM.Fac.byId(p.fac); return !f || p.noFac || (f.close != null && g.year() >= f.close) || (Tasks.facState(f, g) === 'on' && Tasks.facUnavailable(f, g)); }
         return p.type === 'combo' && p.parts.length > 0 && p.parts.every(retired);
       };
       if (retired(t)) {
@@ -1628,11 +1819,7 @@
       if (!complete && transit && ym >= U.ymIndex(t.deadline[0], t.deadline[1])) {
         const nd = ym + 1; t.deadline = [Math.floor(nd / 12), nd % 12 + 1]; t.graced = '交通模型升级过渡：期限顺延 1 个月';
       }
-      if (t.kind === 'dyn' && !complete && ym >= U.ymIndex(t.deadline[0], t.deadline[1])) {
-        this.cool = this.cool || {};
-        this.cool[t.coolKey || t.type] = ym + 36;
-        this.cool['type:' + t.type] = ym + 18;
-      }
+      if (complete || ym >= U.ymIndex(t.deadline[0], t.deadline[1])) this.rememberPlace(t, g, complete);
       if (complete) {
         out.push(this.complete(t, g, ev, 1));
       } else if (t.type === 'combo' && ev.coreOk && !ev.dead && ym >= U.ymIndex(t.deadline[0], t.deadline[1])) {
@@ -1667,6 +1854,12 @@
     return out;
   };
 
+  Tasks.prototype.rememberPlace = function (t, g, complete) {
+    if (t.kind === 'opt') return;
+    if (!t.spot) t.spot = Tasks.spotOf(t, g) || undefined;
+    if (t.kind === 'dyn') Tasks.coolDown(this, t, g.ym(), complete);
+    else Tasks.coolPlace(this, t, g.ym(), complete);
+  };
   Tasks.prototype.complete = function (t, g, result, day) {
     const y = g.clock.y, m = g.clock.m, ym = U.ymIndex(y, m);
     t.progress = result; t.status = 'done'; t.closedAt = [y, m]; t.evaluatedYM = ym;
@@ -1674,10 +1867,7 @@
     this.done.push(t);
     if (this.done.length > 60) this.done.shift();
     this.cool = this.cool || {};
-    if (t.kind === 'dyn') {
-      this.cool[t.coolKey || t.type] = ym + 24;
-      this.cool['type:' + t.type] = ym + 6;
-    }
+    this.rememberPlace(t, g, true);
     if (t.kind === 'opt' && t.coolKey) this.cool[t.coolKey] = ym + 36;
     if (g.econ.mode === 'challenge') {
       g.econ.income('reward', t.reward);
@@ -1716,6 +1906,8 @@
     const ym = U.ymIndex(y, m);
     const cool = this.cool || (this.cool = {});
     const active = this.active;
+    const availablePlace = (x, y) => !this.targeted(x, y, g) && !this.cooledNear(x, y, ym);
+    const named = title => !(cool['title:' + title] > ym) && !active.some(t => t.title === title);
     const free = function (key, type) { return !(cool[key] > ym) && !(cool['type:' + type] > ym) && !active.some(function (t) { return (t.coolKey || t.type) === key; }); };
     // 线路、车站拥挤类任务（v2.5 玩家反馈：太多）：明显过载才发布，全局冷却 3 年且同时只有一个；日常的过载由地铁芯提醒处理
     const crowdFree = !(cool.crowd > ym) && !active.some(function (t) { return t.type === 'stationCrowd' || t.type === 'lineCrowd'; });
@@ -1726,7 +1918,7 @@
     let worst=-1,bestPotential=0;
     const zoneOpen=function(z){let n=0,o=0;for(const c of model.zoneCells[z]){if(city.landFrac[c]<.5)continue;n++;if(!city.cellLocked(c)&&!city.regions[city.region[c]].scenic)o++;}return n>0&&o>=n/2;};   // 可建设范围按格判断（v2.2）
     if(model.trafficReady())for(let z=0;z<model.Z;z++){
-      if(model.zPop[z]+model.zJobs[z]<3000||!zoneOpen(z)||!free('cong:'+z,'zoneCong')||g.zoneCong(z)<1.25)continue;
+      if(model.zPop[z]+model.zJobs[z]<3000||!zoneOpen(z)||!free('cong:'+z,'zoneCong')||g.zoneCong(z)<1.25||!availablePlace(model.zCx[z],model.zCy[z])||!named('减少「'+g.zoneName(z)+'」高峰汽车出行'))continue;
       if(G.dist(model.zCx[z],model.zCy[z])>12 || !G.check({ zone: z }).ok)continue;   // v2.4：离运营车站 3 km 以上的片区不发拥堵任务（偏远片区靠覆盖任务）
       const v=model.zoneTraffic(z),potential=model.zoneOpportunity(z)/Math.max(1,v.trips);
       if(v.trips>100&&potential>=.06&&potential>bestPotential){worst=z;bestPotential=potential;}
@@ -1734,20 +1926,20 @@
     if(worst>=0 && rp>=0.5){
       // v2.4 平衡：降幅按可替代的出行估算、更温和（一两处车站或一段延伸就能做到），票价低于发布时的月份不计
       const v=model.zoneTraffic(worst),drop=U.clamp(bestPotential*.12,.008,.03)*ease,target=Math.max(0,v.carShare-drop);
-      cands.push({type:'zoneCong',metric:'carShare',coolKey:'cong:'+worst,zone:worst,start:v.carShare,target,sustain:3,samples:[],fare0:Tasks.fareLevel(g.econ.fare),title:'减少「'+g.zoneName(worst)+'」高峰汽车出行',desc:'让工作日早高峰汽车出行占比降低 '+(drop*100).toFixed(1)+' 个百分点（近 3 个月平均，降价月份不计）。',months:30,reward:90000*ci});   // v3.0：高难任务提高奖励
+      cands.push({type:'zoneCong',metric:'carShare',coolKey:'cong:'+worst,zone:worst,spot:{x:model.zCx[worst],y:model.zCy[worst]},start:v.carShare,target,sustain:3,samples:[],fare0:Tasks.fareLevel(g.econ.fare),title:'减少「'+g.zoneName(worst)+'」高峰汽车出行',desc:'让工作日早高峰汽车出行占比降低 '+(drop*100).toFixed(1)+' 个百分点（近 3 个月平均，降价月份不计）。',months:30,reward:90000*ci});   // v3.0：高难任务提高奖励
     }
     // 覆盖空白：在人口足够且可达的片区中，优先选择人口多、离线网近的片区。
     if (acc) {
       let best = -1, bp = 0, bs = 0;
       for (let z = 0; z < model.Z; z++) {
         const p = model.zPop[z];
-        if (p <= 12000 || acc.zCov[z] >= 0.2 || !zoneOpen(z) || !free('cov:' + z, 'zoneCov')) continue;
+        if (p <= 12000 || acc.zCov[z] >= 0.2 || !zoneOpen(z) || !free('cov:' + z, 'zoneCov') || !availablePlace(model.zCx[z], model.zCy[z]) || !named('为「' + g.zoneName(z) + '」提供地铁服务')) continue;
         const ck = G.check({ zone: z }), s = p * ck.w;
         if (ck.ok && s > bs) { bs = s; bp = p; best = z; }
       }
       if (best >= 0) {
         const target = Math.round((0.35 + 0.15 * rp) * 20) / 20;
-        cands.push({ type: 'zoneCov', coolKey: 'cov:' + best, zone: best, target: target, title: '为「' + g.zoneName(best) + '」提供地铁服务', desc: '该片区人口约 ' + U.fmtPeople(bp) + '，尚无地铁覆盖。使片区 ' + Math.round(target * 100) + '% 以上的居民与岗位步行 15 分钟可达车站。', months: 30, reward: 50000 * ci });
+        cands.push({ type: 'zoneCov', coolKey: 'cov:' + best, zone: best, spot: { x: model.zCx[best], y: model.zCy[best] }, target: target, title: '为「' + g.zoneName(best) + '」提供地铁服务', desc: '该片区人口约 ' + U.fmtPeople(bp) + '，尚无地铁覆盖。使片区 ' + Math.round(target * 100) + '% 以上的居民与岗位步行 15 分钟可达车站。', months: 30, reward: 50000 * ci });
       }
     }
     // 车站拥挤
@@ -1782,7 +1974,7 @@
     if (model.facDaily && model.fn && model.net && g.compiled.stations.length) {
       let best = null;
       for (const f of model.fn.list) {
-        if (!free('fac:' + f.id, 'facShare') || !Tasks.facServable(g.city, f) || (f.close != null && f.close < g.clock.y + 3) || (!f.ext && G.dist(f.x, f.y) > G.reach)) continue;
+        if (!free('fac:' + f.id, 'facShare') || !Tasks.facServable(g.city, f, model.fn) || (f.close != null && f.close < g.clock.y + 3) || (!f.ext && (G.dist(f.x, f.y) > G.reach || !availablePlace(f.x, f.y)))) continue;
         const basis = Tasks.facBasis(f), r = Tasks.facShareOf(model, f, basis);
         if (!r || r.vol < 3000 || r.share > 0.12) continue;
         const dNet = f.ext ? 0 : Tasks.netDist(g, f.x, f.y), score = r.vol * (1 - r.share) / (1 + dNet / 16);
@@ -1795,7 +1987,7 @@
         C0.stations.forEach(function (s, i) { if (C0.serviced[i]) { const d = U.dist(s.x, s.y, f.x, f.y); if (d < nd) { nd = d; ns = i; } } });
         if (ns >= 0) {
           const s = C0.stations[ns], lm = f.lmK >= 0 ? CM.DATA.landmarks[f.lmK] : null, r = (lm ? Math.max(lm.w || 0, lm.d || 0) / 2 / CFG.CELL_M : Math.max(0.5, f.r || 0)) + 2.4;
-          cands.push({ type: 'connect', coolKey: 'fac:' + f.id, fac: f.id, title: '把「' + f.name + '」接入线网',
+          cands.push({ type: 'connect', coolKey: 'fac:' + f.id, fac: f.id, spot: { x: f.x, y: f.y }, title: '把「' + f.name + '」接入线网',
             desc: f.name + '每天约 ' + U.fmtPeople(best.r.vol) + ' 人次到访，离最近的车站约 ' + U.fmtNum(nd * CFG.CELL_M / 1000, 1) + ' km。在附近设站并接入线网即可。',
             anchors: [{ name: f.name, x: f.x, y: f.y, r: +r.toFixed(2) }, { name: s.name, x: s.x, y: s.y, r: 1.2 }], months: 36, reward: 35000 * ci });
         }
@@ -1804,7 +1996,7 @@
         const cs = (model.daily && model.daily.metroShare) || 0;
         const f = best.f, raw = best.dNet > 8 ? best.r.share + 0.05 : Math.max(best.r.share + 0.06, Math.min(0.16, cs + 0.05)), target = Math.round((best.r.share + (raw - best.r.share) * ease) * 100) / 100;
         const what = f.T.hub ? '接驳出行' : '到访出行';
-        cands.push({ type: 'facShare', coolKey: 'fac:' + f.id, fac: f.id, basis: best.basis, start: best.r.share, target: target, fare0: Tasks.fareLevel(g.econ.fare), title: '地铁服务「' + f.name + '」',
+        cands.push({ type: 'facShare', coolKey: 'fac:' + f.id, fac: f.id, spot: f.ext ? undefined : { x: f.x, y: f.y }, basis: best.basis, start: best.r.share, target: target, fare0: Tasks.fareLevel(g.econ.fare), title: '地铁服务「' + f.name + '」',
           desc: f.name + '每天约 ' + U.fmtPeople(best.r.vol) + ' 人次' + what + '，乘地铁只有 ' + U.fmtPct(best.r.share, 0) + '，目标 ' + U.fmtPct(target, 0) + '（降价月份不计）。',
           months: 30, reward: 65000 * ci });
       }
@@ -1817,6 +2009,7 @@
       if (!Tasks.anchorsOpenBy(g, tp.anchors, ym + (tp.months || 0))) continue;   // 地点在截止前开放不了：先不发布，等开放临近时再发
       const c = Object.assign({ coolKey: 'city:' + tp.id, cityId: tp.id }, JSON.parse(JSON.stringify(tp)), { reward: tp.reward * ci });
       delete c.from; delete c.to; delete c.id;
+      const dup = this.dupOf(c); if (dup) { if (dup.done) this.issued['dyn:' + tp.id] = 1; continue; }
       const ck = G.check(c);
       if (!ck.ok || this.evaluate(c, g).ok) continue;
       c.w = 2 * ck.w; cands.push(c);   // 权重加倍，让本城任务更常出现
@@ -1830,7 +2023,7 @@
     if (c.cityId) self.issued['dyn:' + c.cityId] = 1;
     if (c.type === 'stationCrowd') cool.crowd = ym + 36;
     const t = Object.assign({ id: 'd' + (this.seq++), kind: 'dyn', status: 'active', issuedAt: [y, m], deadline: dl(Math.max(Tasks.PACE.dynMin, Math.round((c.months || 24) * Tasks.PACE.dynScale))), streak: 0 }, c);
-    return Tasks.prepare(t, g);
+    return Tasks.prepare(t, g, true);
   };
 
   Tasks.prototype.rebaseCongestion=function(g){
@@ -1911,6 +2104,7 @@
         if (!cr || cr.lf < (s.minLF || 0.95)) continue;
         Object.assign(c, { line: cr.lid, start: cr.lf, target: s.target || 1, sustain: 3, title: s.title.replace('{line}', g.net.lines[cr.lid].name) });
       } else continue;
+      const dup = this.dupOf(c); if (dup) { if (dup.done) this.issued['sc:' + s.id] = 1; continue; }
       if (!(G || (G = Tasks.gate(g))).check(Object.assign({ gate: s.gate }, c), 1.3).ok) continue;
       out.push(c);
     }
@@ -1991,9 +2185,8 @@
       t.desc = (L ? L.name : '这条线') + ' 按市郊线路考核：沿线 1.5 km 内步行 15 分钟可达本线车站的居民从 ' + U.fmtPct(coverage, 1) + ' 提高到 ' + U.fmtPct(t.target, 1) + '。';
       t.tips = ['在沿线居民多、离车站远的地方加站（在轨道上插站）', '把车站挪到住宅区中心，出入口离居民更近', '延伸到线路末端附近新开发的居住区'];
     } else if (t.type === 'lineEff') t.mode = 'urban';
-    if (t.type === 'budgetConnect') t.spent0 = g.econ.built || 0;
     if (t.type === 'combo') for (const p of t.parts) { delete p.base0; delete p.fare0; delete p.spent0; delete p.y0; if (p.gain || p.drop) delete p.target; }
-    Tasks.prepare(t, g);
+    Tasks.prepare(t, g, true);
     this.active.push(t);
     return t;
   };

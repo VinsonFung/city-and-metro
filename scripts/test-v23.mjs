@@ -11,7 +11,7 @@ for(const [,src]of(await readFile(path.join(root,'index.html'),'utf8')).matchAll
  vm.runInContext(await readFile(path.join(root,src),'utf8'),context,{filename:src});if(src==='js/save.js')break;
 }
 const C=context.CM,M=C.Metro;
-assert.match(C.CFG.GAME_VERSION,/^2\./);assert.ok(C.CFG.RULES_REVISION>=4);
+assert.match(C.CFG.GAME_VERSION,/^[23]\./);assert.ok(C.CFG.RULES_REVISION>=4);
 for(const id of C.MAP_ORDER.filter(id=>id!=='tutorial')){
  const m=C.MAPS[id];assert.equal(m.data.scenarios.length,2,id+' must have two city challenges');
  for(const t of m.data.scenarios)for(const a of t.anchors||[]){if(Array.isArray(a))assert.ok(m.data.places.some(p=>(Array.isArray(p)?p[0]:p.name)===a[0]),id+' challenge anchor '+a[0]);else assert.ok(a.x>=0&&a.y>=0&&a.x<m.cfg.W&&a.y<m.cfg.H);}

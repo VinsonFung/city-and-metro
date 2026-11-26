@@ -16,8 +16,8 @@ for(const [,src]of(await readFile(path.join(root,'index.html'),'utf8')).matchAll
 }
 const C=context.CM;
 const sizes = { tutorial:[48,40,1], gz:[152,228,3], hz:[228,152,5], wh:[184,188,5],
-  hk:[184,164,5], tp:[200,172,3], pa:[228,152,4], sh:[224,152,3], bj:[204,172,2],
-  tk:[208,168,4], ld:[212,164,2], sz:[244,144,1], sg:[220,124,1], ny:[188,184,2], sy:[180,164,2] };
+  hk:[184,164,5], tp:[200,172,3], pa:[228,152,4], sh:[280,176,4], bj:[220,200,3],
+  tk:[208,168,4], ld:[212,164,2], sz:[244,144,1], sg:[220,124,1], ny:[188,184,2], sy:[180,164,2], nj:[180,252,2], mi:[120,172,1] };
 for (const [id,[width,height,mapVersion]] of Object.entries(sizes)) {
   const m=C.MAPS[id];assert.equal(m.cfg.W,width);assert.equal(m.cfg.H,height);assert.equal(m.mapVersion,mapVersion);
   assert.ok(m.data.eras.length>=3);

@@ -89,11 +89,15 @@
     const farHot = hot.filter(function (x) { return x.km > 2 && x.vc0 >= 1.35; });
     const maxLF = (r.lineLF || []).reduce(function (m, x) { return Math.max(m, x.lf); }, 0);
     const lineKm = (r.lineLF || []).reduce(function (m, x) { return Math.max(m, x.km || 0); }, 0);
-    const riders = (r.lines || []).reduce(function (s, l) { return s + Math.max(0, (l.after || 0) - (l.before || 0)); }, 0);
+    const riders = (r.lines || []).filter(function (l) { return !l.other; }).reduce(function (s, l) { return s + Math.max(0, (l.after || 0) - (l.before || 0)); }, 0);
+    // 并列显示既有线路减少的上车人次与本次改动线路的增长。换乘可能计入多条线路。
+    const lost = (r.lines || []).filter(function (l) { return l.other && l.after < l.before; }).sort(function (a, b) { return (a.after - a.before) - (b.after - b.before); });
+    const lostSum = lost.reduce(function (s, l) { return s + (l.before - l.after); }, 0);
     const fromCar = k.metro > 1 ? U.clamp(-k.car / k.metro, 0, 1) : 0;
     const congFlat = k.congDelta > -0.003;
 
     const reasons = [], tips = [];
+    if (lostSum > 0.5 && riders > 0.5) reasons.push([lostSum > riders * 0.5 ? 'warn' : 'info', 'route', '既有线日上车人次减少约 ' + U.fmtPeople(lostSum) + '：' + lost.slice(0, 3).map(l => l.name).join('、')]);
     const names = function (list) { return list.slice(0, 3).map(function (s) { return s.name; }).join('」「'); };
     // ---- 正面因素 ----
     if (connects) reasons.push(['good', 'home', dc && dc.share >= 0.08 ? '连接了住宅与就业中心：「' + names(homes) + '」一带的居民可直达「' + names(works) + '」，沿线直达的通勤约占沿线通勤的 ' + U.fmtPct(dc.share, 0) : '连接了住宅与就业中心：「' + names(homes) + '」与「' + names(works) + '」在同一条线上']);

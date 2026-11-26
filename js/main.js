@@ -287,9 +287,10 @@
     cancelLoad();
     if (CM.CarPool) CM.CarPool.onReq = null;
     if (CM.Soundscape) CM.Soundscape.reset();
-    ui.clearCelebrations();
+    ui.clearCelebrations(); ui.clearToasts(); ui._nav = null;
     if (CM.game && CM.game.model) CM.game.model.retired = true;   // 返回主菜单：放弃旧进度尚未发出的交通计算
     CM.game = null;
+    ui._todoCnt = null;
     ui._opsYm = ui._opsDaily = ui._revenueLegend = ui._bgLegend = ui._totCity = ui.voSeen = null;
     if (CM.Voices) CM.Voices.cache = null;
     if (CM.CityLink) CM.CityLink.clear();

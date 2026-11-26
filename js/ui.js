@@ -264,6 +264,11 @@
     }
     CM.Settings.on(function (k) {
       if (k === 'immersive') self.applyImmersive();
+      if (k === 'detail' && self.g()) {
+        self._fitKey = self._ecoT = null;
+        self.updateTop();
+        self.rerenderPage();
+      }
       if (k === 'grid' || k === 'gridSnap' || k === 'peakSlow') self.renderToolbar();
       if (k === 'uiScale') { self.layoutHud(); requestAnimationFrame(function () { self.renderToolbar(); }); }
       if (k === 'theme') { self.renderThemeBtns(); if (AX.enabled()) { self.renderDock(); if (self.stack.length) self.rerenderPage(); } }
@@ -426,7 +431,6 @@
     if (!on) {
       if (this.voApp) this.voApp.close(null, true);   // 「地铁圈」App 随游戏界面一起收起
       if (this.opsApp) this.opsApp.close(null, true);
-      if (this.hideOpsPop) this.hideOpsPop();
       this.closeTimeOptions();
       this.toggleLayerPanel(false);
       this.toggleMetricsMore(false);
@@ -562,16 +566,16 @@
 
   // ======================== 游戏接入 ========================
   UI.prototype.attachGame = function (g) {
+    this._todoCnt = null;
     this._opsYm = null; this._opsDaily = null;
     const self = this;
     this.toggleLayerPanel(false);
     this._tot = null; this._totCity = null; this._popShown = null; this._funds = null; this._congT = 0;
     for (const pill of [this.pills.pop, this.pills.money]) pill.v._tw = null;
-    this.clearCelebrations();
+    this.clearCelebrations(); this.clearToasts(); this._nav = null;
     this.selection = null; this.stack = []; this.closePanel(true);
     this.layer = 'none'; this.R.layer = 'none'; this.renderDock();
     if (this.opsApp) this.opsApp.close(null, true);
-    if (this.hideOpsPop) this.hideOpsPop();
     g.on('toast', function (t) {
       const go = function (tab) { return function () { self.taskTab = tab; self.openPage('tasks', tab, { root: true }); }; };
       if (t.ppp && t.kind === 'good') snd('contract');
@@ -745,7 +749,7 @@
     setH(c.cong.v, cg.toFixed(2) + ' <small>' + CM.Model.congestionNames[congLevel] + '</small>');
     c.cong.badge.className = 'badge ' + ['b-green', 'b-gold', 'b-orange', 'b-red'][congLevel];
     // 城市经济：最近一年的实际增速（尚无完整年度时为本年预测）与经济环境；教程等未启用的地图不显示
-    const hasEco = !!(g.macro && CM.Macro);
+    const hasEco = CM.Settings.get('detail') === 'pro' && !!(g.macro && CM.Macro);
     c.econ.el.classList.toggle('gone', !hasEco);
     if (hasEco && (!this._ecoT || performance.now() - this._ecoT > 1500 || this._ecoRev !== g.macro.rec.length)) {
       this._ecoT = performance.now(); this._ecoRev = g.macro.rec.length;
@@ -769,8 +773,10 @@
       }
     }
     if (this.layer === 'tod' && this.R.layerOpt.todMode === 'rev' && this._revenueLegend !== this.R.stationRevenue() && !this.legendCard.contains(document.activeElement)) this.renderDock();
-    const n = g.tasks.active.length;
-    this.taskCnt.textContent = n; this.taskCnt.style.display = n ? '' : 'none';
+    const todo = CM.Todo.count(g, this), n = todo.n || g.tasks.active.length;
+    if (this.taskCnt.textContent !== String(n)) this.taskCnt.textContent = n;
+    this.taskCnt.dataset.level = todo.n ? (todo.urgent ? 'urgent' : 'warn') : 'active';
+    this.taskCnt.style.display = n ? '' : 'none';
     const s = this.save;
     this.hbtns.menu.classList.toggle('warn-dot', s.state === 'error');
     // 存档状态：保存中在菜单按钮上显示脉动小点；悬停提示注明是否已保存
@@ -854,11 +860,12 @@
     clearTimeout(this._celebrationTimer); active.closing = true; active.box.classList.add('out');
     this._celebrationExitTimer = setTimeout(function () {
       if (self._celebrationActive !== active) return;
-      active.box.remove(); self._celebrationActive = null; self.showNextCelebration();
+      active.box.remove(); self._celebrationActive = null; self.showNextCelebration(); self.pumpToasts();
     }, CM.Settings.reducedMotion() ? 0 : 350);
   };
   UI.prototype.showNextCelebration = function () {
     if (this._celebrationActive || !this._celebrationQueue.length || this.celebrationBlocked()) return;
+    this._activeToast?.close(false);
     const self = this, item = this._celebrationQueue.shift(), title = item.title, sub = item.sub, color = item.color;
     const rm = CM.Settings.reducedMotion() || item.shown;
     const count = h('span', { class: 'celebrate-count', hidden: !this._celebrationQueue.length }, '另有 ' + this._celebrationQueue.length + ' 条');
@@ -1008,18 +1015,57 @@
 
   // ======================== 提示 ========================
   const TOAST = { good: ['check', 'b-green'], bad: ['error', 'b-red'], info: ['info', 'b-blue'], warn: ['warn', 'b-orange'], money: ['coin', 'b-gold'], task: ['flag', 'b-violet'] };
-  // act：可选的操作按钮 { label, fn }（如「查看报告」）；有操作的提示停留更久
+  // 同时只展示一张普通通知，其他提示保留到待办。错误可以立即接替当前提示。
+  UI.prototype.clearToasts = function () {
+    clearTimeout(this._activeToast?.timer);
+    this._activeToast = null; this._toastQ = []; this._noteLog = []; this._toastDropped = 0;
+    this.toasts.replaceChildren();
+  };
   UI.prototype.toast = function (text, kind, act) {
-    const k = TOAST[kind] || TOAST.info;
-    const life = act ? 6500 : (kind === 'bad' ? 4500 : 3400);
-    const close = function () { if (t.classList.contains('out')) return; t.classList.add('out'); setTimeout(function () { t.remove(); }, 320); };
-    const t = h('div', { class: 'toast t-' + (kind || 'info') + (act ? ' has-act' : ''), onclick: close }, h('span', { class: 'badge ' + k[1] }, ic(k[0])), h('span', { class: 'tx' }, text),
-      act ? h('button', { class: 'btn sm toast-act', onclick: function (e) { e.stopPropagation(); close(); act.fn(); } }, act.label) : null,
-      h('i', { class: 'life', style: { animationDuration: life + 'ms' } }));
-    this.toasts.appendChild(t);
-    while (this.toasts.children.length > 4) this.toasts.firstChild.remove();
-    if (kind === 'bad') snd('error'); else if (kind === 'good') snd('good'); else if (kind === 'warn') snd('warn'); else snd('notify');
-    setTimeout(close, life);
+    const item = { text, kind: kind || 'info', act, t: Date.now() };
+    const log = this._noteLog || (this._noteLog = []);
+    log.push({ text: item.text, kind: item.kind, t: item.t });
+    if (log.length > 30) log.shift();
+    if (this._activeToast && !this._activeToast.node.isConnected) {
+      clearTimeout(this._activeToast.timer); this._activeToast = null;
+    }
+    const queue = this._toastQ || (this._toastQ = []);
+    // 操作结果和错误立即可见，进入记录的提示仍可在待办查阅。
+    if ((act || kind === 'bad') && !this._celebrationActive) {
+      this._activeToast?.close(false);
+      queue.unshift(item);
+    } else queue.push(item);
+    if (queue.length > 3) { queue.splice(act || kind === 'bad' ? 1 : 0, 1); this._toastDropped = (this._toastDropped || 0) + 1; }
+    this.pumpToasts();
+  };
+  UI.prototype.pumpToasts = function () {
+    if (this._celebrationActive) return;
+    const queue = this._toastQ;
+    if (!this._activeToast && queue?.length) {
+      const { text, kind, act } = queue.shift(), k = TOAST[kind] || TOAST.info, self = this;
+      const life = act ? 6500 : kind === 'bad' ? 4500 : 3400;
+      const close = function (next = true) {
+        if (self._activeToast?.node !== node) return;
+        clearTimeout(self._activeToast.timer);
+        self._activeToast = null; node.remove();
+        if (next) self.pumpToasts();
+      };
+      const more = h('button', { class: 'toast-more', hidden: true, 'aria-label': '查看刚才的提示', onclick: function (e) {
+        e.stopPropagation(); close(false); queue.length = 0; self._toastDropped = 0;
+        self.taskTab = 'todo'; self.openPage('tasks', 'todo', { root: true });
+        self.rBody.querySelector('.td-notes')?.scrollIntoView({ block: 'nearest' });
+      } });
+      const node = h('div', { class: 'toast t-' + kind + (act ? ' has-act' : ''), onclick: function () { close(); } },
+        h('span', { class: 'badge ' + k[1] }, ic(k[0])), h('span', { class: 'tx' }, text),
+        act ? h('button', { class: 'btn sm toast-act', onclick: function (e) { e.stopPropagation(); close(false); act.fn(); self.pumpToasts(); } }, act.label) : null,
+        more, h('i', { class: 'life', style: { animationDuration: life + 'ms' } }));
+      this.toasts.appendChild(node);
+      this._activeToast = { node, more, close, timer: setTimeout(close, life) };
+      snd(kind === 'bad' ? 'error' : kind === 'good' ? 'good' : kind === 'warn' ? 'warn' : 'notify');
+    }
+    if (!this._activeToast) { this._toastDropped = 0; return; }
+    const count = (queue?.length || 0) + (this._toastDropped || 0), more = this._activeToast.more;
+    more.hidden = !count || !this.g() || !!this.g().tutorial; more.textContent = '+' + count;
   };
   UI.prototype.setTooltip = function (tip, sx, sy) {
     const el = this.tip;
@@ -1920,8 +1966,8 @@
     }
     else if (key === 'tasks') {
       if (open && top.kind === 'tasks') { this.closePanel(); return; }
-      this.taskTab = 'active';
-      this.openPage('tasks', 'active', { root: true });
+      const tab = CM.Todo.count(this.g(), this).n ? 'todo' : 'active';
+      this.openPage('tasks', tab, { root: true });
     }
     else if (key === 'save') this.openPage('saves', null, { toggle: true, root: true });
     else this.openPage('metric', key, { toggle: true, root: true });
@@ -2073,6 +2119,22 @@
   UI.prototype.kv = function (rows) {
     const el = h('div', { class: 'kv' });
     for (const r of rows) { if (!r) continue; el.append(h('div', { class: 'k' }, r[0]), h('div', { class: 'v' + (r[2] ? ' ' + r[2] : '') }, r[1])); }
+    return el;
+  };
+  // 一句话引导（v3.4）：第一次打开某个功能时在顶部出现一句说明，点「知道了」后不再出现（记在设置里，所有存档共用）
+  const TIPS1 = {
+    todo: '需要处理的事都在这里：任务临期、线路过载、招标与财政预警。处理完会自动消失，紧急的排在最前。',
+    ops: '地铁芯集中管理全部线路与车站：改名改色、列车、站台规模、车站商业和票价。建线、建站仍在地图上完成。',
+    fare: '票价跟着物价走最稳：涨得比物价快会掉满意度，定得太高反而收不到钱。调价前先看下方的预估。',
+    trains: '列车越多发车越密。智能调度按客流安排已有列车；不够时去车辆段买车，或开启每月自动购车。',
+    debt: '债券只能用于建设，按期还本付息；每年有发行额度，逾期会停发新债。',
+    ppp: '政府合同：中标后自己设计、出资建设，按期开通拿补助，运营期按服务与拥挤情况收取付费。',
+  };
+  UI.prototype.tip1 = function (key) {
+    const seen = CM.Settings.get('seenTips') || [], text = TIPS1[key];
+    if (!text || seen.indexOf(key) >= 0) return null;
+    const el = h('div', { class: 'tip1', role: 'note' }, ic('info'), h('span', null, text),
+      h('button', { onclick: function () { CM.Settings.set('seenTips', (CM.Settings.get('seenTips') || []).concat([key])); el.remove(); snd('soft'); } }, '知道了'));
     return el;
   };
   UI.prototype.stat = function (k, v, d, dcls, icon) {
@@ -2710,6 +2772,7 @@
       },
       game: function () {
         return [group('进度'),
+          row('info', '信息详略', seg('detail', [['simple', '简洁'], ['pro', '专业']]), '简洁：只显示关键数字，详细说明可展开。专业：显示完整信息。'),
           row('save', '自动保存', toggle('autosave'), '暂停、每月结算与每次建设后自动保存'),
           group('时间'),
           row('clock', '停运时段快速掠过', toggle('nightFast'), '地铁停运的 00:00–06:00 按所选速度的 ' + CFG.time.nightFast + ' 倍推进，一天更快过去；结算与客流不受影响'),
@@ -3138,9 +3201,11 @@
     this.showReport(r);
     this.rerenderPage();
   };
+  // 推进报告（v3.4 重新设计，玩家反馈：要易读、美观）：先给结论——三项核心指标大字对比、几句要点；其余指标写成「原值 → 新值」的对照行，
+  // 没变化的并成一行；财政用收入与支出两根条对比；任务按完成、未完成、新发布分组；大事按年份分组。颜色只用主题变量，深浅色自动适配
   UI.prototype.showReport = function (r) {
-    const g = this.g(), self = this, b = r.before, a = r.after, free = g.econ.isFree();
-    const fromYm = U.ymIndex(r.from[0], r.from[1]), toYm = U.ymIndex(r.to[0], r.to[1]), months = Math.max(1, toYm - fromYm);
+    const g = this.g(), self = this, b = r.before, a = r.after, free = g.econ.isFree(), pro = CM.Settings && CM.Settings.get('detail') === 'pro';
+    const fromYm = U.ymIndex(r.from[0], r.from[1]), toYm = U.ymIndex(r.to[0], r.to[1]), months = Math.max(0, toYm - fromYm);
     const evs = g.events.filter(function (e, i) { const ym = U.ymIndex(e.y, e.m); return (ym > fromYm && ym <= toYm) || (ym === fromYm && i >= b.events); });
     const cat = function (e) {
       if (e.kind === 'econ') return ['econ', '经济', '#7c5cd6'];
@@ -3150,77 +3215,138 @@
       if (e.tag === '模拟') return ['sim', '模拟', '#8a7ad6'];
       return ['hist', '史实', '#c46a2a'];
     };
+    const showDay = !months && Number.isFinite(r.from[2]) && Number.isFinite(r.to[2]);
+    const date = a => a[0] + '年' + a[1] + '月' + (showDay ? a[2] + '日' : '');
+    const span = !months ? (showDay ? Math.max(0, r.to[2] - r.from[2]) + ' 天' : '') : months % 12 === 0 ? (months / 12) + ' 年' : (months > 12 ? Math.floor(months / 12) + ' 年 ' + (months % 12) + ' 个月' : months + ' 个月');
+    // 变化：数值、方向（好 / 坏 / 持平）
+    const trend = function (x0, x1, betterUp, fmt) { const d = x1 - x0, flat = Math.abs(d) < Math.abs(x0) * 1e-4 + 1e-9 || (fmt && fmt(x0) === fmt(x1)); return { d: d, cls: flat ? 'is-flat' : ((d > 0) === betterUp ? 'is-good' : 'is-bad'), flat: flat }; };
+    const pctTxt = function (x0, d) { return Math.abs(x0) > 1e-9 && Math.abs(d / x0) >= 0.001 ? '（' + (d >= 0 ? '+' : '−') + (Math.abs(d / x0) * 100).toFixed(1) + '%）' : ''; };
+    const chip = function (t, txt) { return h('span', { class: 'jr-chg ' + t.cls }, t.flat ? '持平' : h('b', null, t.d > 0 ? '▲' : '▼'), t.flat ? null : txt); };
+    const pp = function (x) { return (x * 100).toFixed(1) + ' 个百分点'; };
+    const F = {
+      pop: U.fmtPeople, riders: U.fmtPeople, share: function (x) { return U.fmtPct(x); }, cong: function (x) { return x.toFixed(2); },
+      commute: function (x) { return U.fmtNum(x, 1) + ' 分钟'; }, sat: function (x) { return String(Math.round(x)); }, n: function (x) { return x + ' 个'; }, st: function (x) { return x + ' 座'; }
+    };
+    // ---- 核心指标 ----
+    const kpi = function (icon, label, x0, x1, fmt, dfmt, extra) {
+      const t = trend(x0, x1, true, fmt);
+      return h('div', { class: 'jr-kpi ' + t.cls },
+        h('div', { class: 'jk-k' }, ic(icon, 15), label),
+        h('div', { class: 'jk-v num' }, fmt(x1)),
+        h('div', { class: 'jk-f' }, chip(t, ' ' + (dfmt || fmt)(Math.abs(t.d)) + (extra ? pctTxt(x0, t.d) : '')), h('span', { class: 'jk-from' }, '原 ' + fmt(x0))));
+    };
+    const hero = h('div', { class: 'jr-hero' },
+      kpi('people', '人口', b.pop, a.pop, F.pop, null, true),
+      kpi('metro', '日均地铁客运', b.riders, a.riders, F.riders, null, true),
+      kpi('train', '地铁分担率', b.share, a.share, F.share, pp));
+    // ---- 要点 ----
+    const status = { '任务完成': 'ok', '任务未完成': 'bad', '新任务': 'new', '任务撤销': 'withdrawn' };
+    const tState = e => status[e.title.split(/[:：]/, 1)[0]];
+    const tName = function (e) { return e.title.replace(/^(新任务|任务完成|任务未完成|任务撤销)[:：]\s*/, ''); };
+    const tMap = new Map(); for (const e of evs) if (e.tag === '任务' && tState(e)) { const k = tName(e), o = tMap.get(k); if (!o || tState(e) !== 'new') tMap.set(k, e); }
+    const tEv = Array.from(tMap.values());
+    const nOk = tEv.filter(function (e) { return tState(e) === 'ok'; }).length, nBad = tEv.filter(function (e) { return tState(e) === 'bad'; }).length, nNew = tEv.filter(e => tState(e) === 'new').length;
+    const pills = [];
+    const pill = function (cls, icon, txt) { pills.push(h('span', { class: 'jr-pill p-' + cls }, ic(icon, 14), h('span', null, txt))); };
+    if (a.stations > b.stations) pill('acc', 'station', '新开 ' + (a.stations - b.stations) + ' 座车站');
+    if (a.regions > b.regions) pill('good', 'map', '开放 ' + (a.regions - b.regions) + ' 个新区域');
+    if (nOk) pill('good', 'check', '完成 ' + nOk + ' 项任务');
+    if (nBad) pill('bad', 'close', nBad + ' 项任务未完成');
+    if (nNew) pill('acc', 'flag', '新发布 ' + nNew + ' 项任务');
+    if (!free && Math.abs(a.funds - b.funds) > 1e-7) pill(a.funds >= b.funds ? 'good' : 'warn', 'coin', '资金' + (a.funds >= b.funds ? '增加 ' : '减少 ') + U.fmtMoney(Math.abs(a.funds - b.funds), undefined, r.money));
     // ---- 期间时间轴 ----
     const tl = h('div', { class: 'jr-tl' });
+    const usedCats = new Map();
     for (let k = 0; k <= months; k++) {
       const ym = fromYm + k, y = Math.floor(ym / 12), m = ym % 12 + 1;
       const here = evs.filter(function (e) { return U.ymIndex(e.y, e.m) === ym; });
-      const cats = Array.from(new Set(here.map(function (e) { return cat(e)[0]; })));
+      const cats = Array.from(new Set(here.map(function (e) { const c = cat(e); usedCats.set(c[0], c); return c[0]; })));
       tl.appendChild(h('div', { class: 'jr-m' + (k === 0 ? ' first' : '') + (k === months ? ' last' : ''), 'data-tip': here.length ? y + '年' + m + '月：' + here.map(function (e) { return e.title; }).slice(0, 4).join('；') : null },
         h('i', { class: 'jr-dot' + (here.length ? ' on' : '') }, cats.slice(0, 3).map(function (c) { const e = here.find(function (x) { return cat(x)[0] === c; }); return h('b', { style: { background: cat(e)[2] } }); })),
-        // 标签：起点、终点，以及与两端相距 3 个月以上的每年 1 月（避免相互重叠）
         (k === 0 || k === months || (m === 1 && k >= 3 && months - k >= 3)) ? h('span', null, y + '.' + m) : null));
     }
-    // ---- 指标卡 ----
-    const tile = function (icon, label, x0, x1, fmt, betterUp, dfmt) {
-      const d = x1 - x0, eps = Math.abs(x0) * 1e-6 + 1e-9, flat = Math.abs(d) < eps;
-      const cls = flat ? 'muted' : ((d > 0) === betterUp ? 'good' : 'bad');
-      return h('div', { class: 'jr-tile' }, h('div', { class: 'jt-k' }, ic(icon, 15), label), h('div', { class: 'jt-v num' }, fmt(x1)),
-        h('div', { class: 'jt-d ' + cls }, flat ? '持平' : (d > 0 ? '▲ ' : '▼ ') + (dfmt || fmt)(Math.abs(d))), h('div', { class: 'jt-b' }, '原 ' + fmt(x0)));
+    const legend = usedCats.size ? h('div', { class: 'jr-legend' }, Array.from(usedCats.values()).map(function (c) { return h('span', null, h('i', { style: { background: c[2] } }), c[1]); })) : null;
+    const parts = [];
+    const sec = function (icon, title, link, body, note) {
+      return h('section', { class: 'jr-box' }, h('div', { class: 'jr-sec' }, ic(icon, 15), h('span', null, title), note ? h('em', null, note) : null,
+        link ? h('button', { class: 'linkbtn', onclick: function () { self.closeScreen(); link(); } }, '查看', ic('chev', 13)) : null), body);
     };
-    const pp = function (x) { return (x * 100).toFixed(1) + ' 个百分点'; };
-    const grid = h('div', { class: 'jr-grid' },
-      tile('people', '人口', b.pop, a.pop, U.fmtPeople, true),
-      tile('briefcase', '就业岗位', b.jobs, a.jobs, U.fmtPeople, true),
-      tile('metro', '日均地铁客运', b.riders, a.riders, U.fmtPeople, true),
-      tile('train', '地铁分担率', b.share, a.share, function (x) { return U.fmtPct(x); }, true, pp),
-      tile('car', '拥堵指数', b.cong, a.cong, function (x) { return x.toFixed(2); }, false),
-      tile('timer', '平均通勤', b.commute, a.commute, function (x) { return U.fmtNum(x, 1) + ' 分'; }, false),
-      tile('smile', '满意度', b.sat, a.sat, function (x) { return String(Math.round(x)); }, true, function (x) { return x.toFixed(1); }),
-      tile('map', '已开放区域', b.regions, a.regions, function (x) { return x + ' 个'; }, true, function (x) { return x + ' 个'; }));
-    const parts = [h('div', { class: 'jr-sec' }, ic('building', 15), '城市与交通'), grid];
+    // ---- 城市与交通：对照行 ----
+    const rowsDef = [
+      ['briefcase', '就业岗位', b.jobs, a.jobs, F.pop, true],
+      ['car', '拥堵指数', b.cong, a.cong, F.cong, false],
+      ['timer', '平均通勤', b.commute, a.commute, F.commute, false],
+      ['smile', '满意度', b.sat, a.sat, F.sat, true, function (x) { return x.toFixed(1); }],
+      ['station', '车站', b.stations, a.stations, F.st, true],
+      ['map', '已开放区域', b.regions, a.regions, F.n, true]
+    ];
+    if (pro && b.coverage != null) rowsDef.splice(4, 0, ['lyCover', '步行可达覆盖', b.coverage, a.coverage, F.share, true, pp]);
+    const changed = [], flat = [];
+    for (const d of rowsDef) { const t = trend(d[2], d[3], d[5], d[4]); (t.flat ? flat : changed).push([d, t]); }
+    const rows = h('div', { class: 'jr-rows' }, changed.map(function (x) {
+      const d = x[0], t = x[1];
+      return h('div', { class: 'jr-row' }, h('span', { class: 'jr-rk' }, ic(d[0], 15), d[1]), h('span', { class: 'jr-rv num' }, h('i', null, d[4](d[2])), ic('arrowR', 12), h('b', null, d[4](d[3]))), chip(t, ' ' + (d[6] || d[4])(Math.abs(t.d))));
+    }));
+    const flatLine = flat.length ? h('div', { class: 'jr-flat' }, h('span', null, '持平'), flat.map(function (x) { return h('span', null, x[0][1] + ' ' + x[0][4](x[0][3])); })) : null;
+    parts.push(sec('building', '城市与交通', function () { self.openStats(); }, h('div', null, changed.length ? rows : null, flatLine)));
+    // ---- 财政（经营挑战）：期间实际发生的收支 ----
+    if (r.finance) {
+      const f = r.finance, money = function (v) { return U.fmtMoney(v, undefined, r.money); };
+      const outs = [['ops', '运营', f.ops], ['contract', '合同', f.contractOut], ['build', '建设', f.build], ['debt', '偿债', f.debt]].filter(function (x) { return x[2] > 1e-7; });
+      const outSum = outs.reduce(function (s, x) { return s + x[2]; }, 0), top = Math.max(f.income, outSum, 1);
+      const bar = function (cls, label, total, segs) {
+        return h('div', { class: 'jr-fbar' }, h('span', { class: 'jf-l' }, label), h('div', { class: 'jf-track' }, h('div', { class: 'jf-fill', style: { width: (total / top * 100).toFixed(1) + '%' } },
+          segs.map(function (s) { return h('i', { class: 'jf-' + s[0], style: { flex: String(Math.max(s[2], 1e-6)) }, 'data-tip': s[1] + ' ' + money(s[2]) }); }))), h('b', { class: 'jf-v num ' + cls }, (cls === 'good' ? '+' : '−') + money(total)));
+      };
+      const ft = trend(b.funds, a.funds, true, money);
+      const fbody = h('div', { class: 'jr-fin2' },
+        h('div', { class: 'jr-fund' }, h('span', null, '一般资金'), h('span', { class: 'jr-rv num' }, h('i', null, money(b.funds)), ic('arrowR', 12), h('b', { class: a.funds < 0 ? 'bad' : null }, money(a.funds))), chip(ft, ' ' + money(Math.abs(ft.d)))),
+        bar('good', '收入', f.income, [['inc', '财政收入', f.income]]),
+        outSum > 1e-7 ? bar('warn', '支出', outSum, outs) : null,
+        h('div', { class: 'jr-flegend' }, outs.map(function (x) { return h('span', null, h('i', { class: 'jf-' + x[0] }), x[1] + ' ' + money(x[2])); }),
+          f.bond > 1e-7 ? h('span', null, h('i', { class: 'jf-bond' }), '债券募集 +' + money(f.bond)) : null,
+          f.capexUse > 1e-7 ? h('span', { class: 'muted' }, '建设中由专项资金支付 ' + money(f.capexUse)) : null));
+      parts.push(sec('coin', '财政收支', function () { self.openTop('money'); }, fbody));
+    }
+    // ---- 任务 ----
+    if (tEv.length) {
+      const order = { ok: 0, bad: 1, new: 2, withdrawn: 3 }, lab = { ok: '完成', bad: '未完成', new: '新任务', withdrawn: '已撤销' }, icn = { ok: 'check', bad: 'close', new: 'flag', withdrawn: 'info' };
+      const list = tEv.slice(-10).sort(function (x, y) { return order[tState(x)] - order[tState(y)]; });
+      parts.push(sec('flag', '任务', function () { self.openTop('tasks'); }, h('div', { class: 'jr-tasks' }, list.map(function (e) {
+        const s = tState(e);
+        return h('div', { class: 'jr-task st-' + s }, h('span', { class: 'jt-i' }, ic(icn[s], 13)), h('span', { class: 'jt-t' }, tName(e)), h('em', null, lab[s]));
+      })), [nOk ? nOk + ' 项完成' : null, nBad ? nBad + ' 项未完成' : null, nNew ? nNew + ' 项新发布' : null].filter(Boolean).map(function (x, i) { return h('span', null, (i ? ' · ' : ''), h('span', null, x)); })));
+    }
     // ---- 城市经济 ----
-    if (g.macro && CM.Macro) {
+    if (g.macro && CM.Macro && (pro || g.macro.rec.length > (b.macroRecs || 0))) {
       const mv = CM.Macro.view(g), recs = g.macro.rec.slice(b.macroRecs || 0);
       const box = h('div', { class: 'jr-econ' });
       if (recs.length) for (const rc of recs) box.appendChild(h('div', { class: 'je-row' }, h('b', null, rc.y + ' 年'), h('span', null, 'GDP ' + UI.fmtBig(rc.nom)), h('span', { class: rc.growth == null ? 'muted' : (rc.growth >= 0 ? 'good' : 'bad') }, '实际增长 ' + UI.pctS(rc.growth)), h('span', { class: 'muted' }, '价格 ' + UI.pctS(rc.infl))));
       else box.appendChild(h('div', { class: 'small muted' }, '期间没有年度结算（每年 1 月结算上一年）。本年预测：GDP 约 ' + UI.fmtBig(mv.fc.nom) + (mv.fc.growth != null ? '，实际增长约 ' + UI.pctS(mv.fc.growth) : '') + '。'));
       box.appendChild(h('div', { class: 'je-env' }, h('span', { class: 'env-chip ' + mv.env.cls }, ic('pulse', 13), '经济环境：' + mv.env.label), h('span', { class: 'env-chip ' + (mv.te.eff >= 1 ? 'good' : 'warn') }, ic('metro', 13), '交通对经济 ' + UI.pctS(mv.te.eff - 1)),
         !free && Math.abs(a.fiscF - b.fiscF) > 1e-6 ? h('span', { class: 'env-chip ' + (a.fiscF >= b.fiscF ? 'good' : 'warn') }, ic('bank', 13), '财力系数 ×' + b.fiscF.toFixed(2) + ' → ×' + a.fiscF.toFixed(2)) : null));
-      parts.push(h('div', { class: 'jr-sec' }, ic('trend', 15), '城市经济', h('button', { class: 'linkbtn', onclick: function () { self.closeScreen(); self.openTop('econ'); } }, '查看', ic('chev', 13))), box);
+      parts.push(sec('trend', '城市经济', function () { self.openTop('econ'); }, box));
     }
-    // ---- 财政（经营挑战）：期间实际发生的收支 ----
-    if (r.finance) {
-      const f = r.finance, money = function (v) { return U.fmtMoney(v, undefined, r.money); };
-      const fb = h('div', { class: 'jr-fin' },
-        h('div', null, h('small', null, '财政收入'), h('b', { class: 'good' }, '+' + money(f.income))),
-        h('div', null, h('small', null, '运营成本'), h('b', { class: 'warn' }, '−' + money(f.ops))),
-        f.contractOut > 0.5 ? h('div', null, h('small', null, '合同支出'), h('b', { class: 'warn' }, '−' + money(f.contractOut))) : null,
-        f.build > 0.5 ? h('div', null, h('small', null, '建设支出'), h('b', { class: 'warn' }, '−' + money(f.build)), f.capexUse > 0.5 ? h('small', null, '其中由专项资金支付', ' ' + money(f.capexUse)) : null) : null,
-        f.debt > 0.5 ? h('div', null, h('small', null, '偿债'), h('b', { class: 'bad' }, '−' + money(f.debt))) : null,
-        f.bond > 0.5 ? h('div', null, h('small', null, '债券募集'), h('b', null, '+' + money(f.bond))) : null,
-        h('div', { class: 'jf-net' }, h('small', null, '一般资金'), h('b', { class: a.funds >= b.funds ? 'good' : 'bad' }, money(b.funds) + ' → ' + money(a.funds))));
-      parts.push(h('div', { class: 'jr-sec' }, ic('coin', 15), '财政收支', h('button', { class: 'linkbtn', onclick: function () { self.closeScreen(); self.openTop('money'); } }, '查看', ic('chev', 13))), fb);
-    }
-    // ---- 任务 ----
-    const tEv = evs.filter(function (e) { return e.tag === '任务'; });
-    if (tEv.length) {
-      const chip = function (e) { const ok = e.title.indexOf('任务完成') === 0, bad = e.title.indexOf('任务未完成') === 0; return h('div', { class: 'jr-task ' + (ok ? 'ok' : (bad ? 'bad' : 'new')) }, ic(ok ? 'check' : (bad ? 'close' : 'flag'), 14), h('span', null, e.title.replace(/^(新任务|任务完成|任务未完成)[:：]\s*/, '')), h('em', null, ok ? '完成' : (bad ? '未完成' : '新任务'))); };
-      parts.push(h('div', { class: 'jr-sec' }, ic('flag', 15), '任务', h('button', { class: 'linkbtn', onclick: function () { self.closeScreen(); self.openTop('tasks'); } }, '查看', ic('chev', 13))), h('div', { class: 'jr-tasks' }, tEv.slice(-8).map(chip)));
-    }
-    // ---- 期间大事（不含任务） ----
-    const other = evs.filter(function (e) { return e.tag !== '任务'; });
+    // ---- 期间大事（不含任务），按年份分组 ----
+    const other = evs.filter(function (e) { return e.tag !== '任务' || !tState(e); });
     if (other.length) {
-      parts.push(this.sec('jr-ev', '期间大事', other.length + ' 条', function () {
-        const x = h('div', { class: 'jr-evs' });
-        for (const e of other.slice(-40).reverse()) { const c = cat(e); x.appendChild(h('div', { class: 'jr-ev' }, h('span', { class: 'jr-ed' }, e.y + '.' + e.m), h('span', { class: 'jr-ec', style: { color: c[2], borderColor: c[2] } }, c[1]), h('span', { class: 'grow' }, e.title))); }
-        return x;
-      }, other.length <= 8, 'tasks'));
+      // 最近的在前，按年份分组；超过 6 条时先收起，点「展开」看全部（最多 40 条）
+      const list = other.slice(-40).reverse(), x = h('div', { class: 'jr-evs' + (list.length > 6 ? ' clip' : '') }); let yr = null;
+      list.forEach(function (e, i) {
+        if (e.y !== yr) { yr = e.y; x.appendChild(h('div', { class: 'jr-evy' + (i >= 6 ? ' more' : '') }, yr + ' 年')); }
+        const c = cat(e);
+        x.appendChild(h('div', { class: 'jr-ev' + (i >= 6 ? ' more' : '') }, h('span', { class: 'jr-ed' }, e.m + ' 月'), h('span', { class: 'jr-ec', style: { color: c[2], background: c[2] + '1a' } }, c[1]), h('span', { class: 'grow' }, e.title)));
+      });
+      const more = list.length > 6 ? h('button', { class: 'linkbtn jr-more', onclick: function () { x.classList.remove('clip'); more.remove(); } }, '展开全部 ' + list.length + ' 条', ic('chev', 13)) : null;
+      parts.push(sec('tasks', '期间大事', null, h('div', null, x, more), other.length + ' 条'));
     }
-    const card = h('div', { class: 'card jr' },
-      h('div', { class: 'card-head' }, h('span', { class: 'badge ' + (r.failed ? 'b-red' : 'b-green') }, ic(r.failed ? 'error' : 'report')), h('div', { class: 'grow' }, h('h2', null, r.failed ? '推进中止：经营挑战失败' : '推进完成'), h('div', { class: 'tiny muted' }, r.from[0] + '年' + r.from[1] + '月 → ' + r.to[0] + '年' + r.to[1] + '月 · ' + months + ' 个月' + (evs.length ? ' · ' + evs.length + ' 件大事' : ''))),
+    const failBox = r.failed ? this.callout('bad', 'error', h('div', null, h('b', null, '经营挑战失败'), (r.failed.reasons || []).map(function (x) { return h('div', null, '· ' + x); }))) : null;
+    const card = h('div', { class: 'card jr' + (r.failed ? ' failed' : '') },
+      h('div', { class: 'card-head' }, h('span', { class: 'badge ' + (r.failed ? 'b-red' : 'b-green') }, ic(r.failed ? 'error' : 'report')),
+        h('div', { class: 'grow' }, h('h2', null, r.failed ? '推进中止' : '推进完成'),
+          h('div', { class: 'jr-when' }, h('b', null, date(r.from)), ic('arrowR', 12), h('b', null, date(r.to)), span ? h('span', { class: 'jr-span' }, span) : null)),
         h('button', { class: 'iconbtn', 'data-tip': '关闭', 'data-key': 'Esc', onclick: function () { self.closeScreen(); } }, ic('close'))),
-      h('div', { class: 'jr-scroll' }, tl, parts),
+      h('div', { class: 'jr-scroll' }, failBox, hero, pills.length ? h('div', { class: 'jr-pills' }, pills) : null, h('div', { class: 'jr-tlw' }, tl, legend), parts),
       h('div', { class: 'modal-actions' }, h('button', { class: 'btn', onclick: function () { self.closeScreen(); self.openStats(); } }, ic('chart'), '查看统计'), h('button', { class: 'btn primary', onclick: function () { self.closeScreen(); } }, '继续')));
     this.openScreen(card, function () { self.closeScreen(); });
   };

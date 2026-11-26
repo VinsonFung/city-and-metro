@@ -128,51 +128,115 @@
       F.route.set(x.id, r);
     }
   }
-  // 播放进度 ↔ 时间：有变化（新建、拆除、贯通、拆开）的月份多给时间，没有变化的月份较快过去（约 0.15 秒一个月）。
-  // 总时长按变化的多少定：一个有变化的月份约 1.4–3 秒，最短 30 秒、最长 150 秒
-  const IDLE = 0.15;
-  function timeWarp(H) {
-    // 当前月也要完整播放，才能画完当月新建的线网。末帧日期仍停在当前月。
-    const m0 = Math.round(H.T0 * 12), m1 = Math.round(H.T1 * 12) + 1, n = Math.max(1, m1 - m0), w = new Float64Array(n);
-    const mon = function (t) { return U.clamp(Math.floor(t * 12 + 1e-6) - m0, 0, n - 1); };
-    const bump = function (t) { if (!isFinite(t)) return; const k = mon(t); w[k] += w[k] ? 0.4 : 1.4; };
-    for (const x of H.segs) { if (!x.relabel || !w[mon(x.t0)]) bump(x.t0); if (!x.relabel) bump(x.t1); }
-    for (let i = 0; i < n; i++) w[i] = w[i] ? Math.min(w[i], 3) : IDLE;
+  // 播放进度 ↔ 时间（v3.4 玩家反馈：以前上一条线还没画完就切到下一条）：按真实秒数排。每个镜头依次是「镜头到位约 1.1 秒 → 按里程生长 2.6–9 秒
+  // → 长完停留约 1.4 秒」，下一个镜头在这个镜头全部结束后才开始；同一个月的几个镜头首尾相接，没有变化的月份约 0.06 秒一个月掠过。
+  // 总时长就是这些秒数之和（最短 30 秒）；超过 10 分钟时整体压缩，但每个镜头最多压到一半
+  const IDLE = 0.06, SHOT = { lead: 1.1, hold: 1.4 };
+  function growSec(gp) { return gp.instant ? 0 : gp.kind === 'build' ? U.clamp(2.2 + gp.km * 0.28, 2.6, 9) : gp.kind === 'relabel' ? U.clamp(1.6 + gp.km * 0.16, 2, 5.5) : 1.6; }
+  function groupSec(gp) { return gp.instant ? 0.4 : SHOT.lead + growSec(gp) + SHOT.hold; }
+  // 成长回放的「镜头」（v3.4）：每次变化是一组——同一条线在同一个月的新建（开通、延伸、开通支线）、改归（贯通、拆开）或停运；
+  // 一组一个镜头，镜头只跟这一条线。同一个月有几组时依次排开（新建在前、按线路顺序），不再几条线同时长出来；
+  // 新线从一端按里程匀速长到另一端，延伸从原来的终点向外、支线从分叉的车站长出（与实际先接上既有车站、再向外修一致）；插站引起的少量替换不单独成镜头
+  function changeGroups(H) {
+    const groups = new Map(), byBase = new Map();
+    for (const x of H.segs) { let l = byBase.get(x.base); if (!l) byBase.set(x.base, l = []); l.push(x); }
+    const km = function (x) { const a = H.stations[x.a], b = H.stations[x.b]; return a && b ? Math.hypot(a.x - b.x, a.y - b.y) * CM.CFG.CELL_M / 1000 : 0; };
+    const add = function (kind, line, t, x) {
+      const k = kind + '|' + line + '|' + Math.round(t * 12);
+      let gp = groups.get(k); if (!gp) groups.set(k, gp = { kind: kind, line: line, t: t, m: Math.round(t * 12), segs: [], km: 0 });
+      gp.segs.push(x); gp.km += km(x);
+    };
+    const goneAt = new Set(), builtAt = new Set();
+    for (const x of H.segs) {
+      if (isFinite(x.t1)) goneAt.add(x.line + '|' + Math.round(x.t1 * 12));
+      if (!x.relabel) builtAt.add(x.line + '|' + Math.round(x.t0 * 12));
+      add(x.relabel ? 'relabel' : 'build', x.line, x.t0, x);
+    }
+    // 停运：区段消失、之后也没有改归到别的线路，同一个月同一条线也没有新区段接替（插站、改线不算停运）
+    for (const x of H.segs) {
+      if (!isFinite(x.t1)) continue;
+      const ps = byBase.get(x.base); if (ps[ps.indexOf(x) + 1]) continue;
+      if (builtAt.has(x.line + '|' + Math.round(x.t1 * 12))) continue;
+      add('close', x.line, x.t1, x);
+    }
+    groups.forEach(function (gp) { gp.instant = gp.kind === 'build' && (gp.segs.every(x => x.rewired) || (goneAt.has(gp.line + '|' + gp.m) && gp.segs.length <= 3)); });
+    return Array.from(groups.values());
+  }
+  const KIND_ORDER = { build: 0, relabel: 1, close: 2 };
+  function timeWarp(H, G = changeGroups(H)) {
+    // 当前月也要完整播放，才能画完当月新建的线网。末帧日期仍停在当前月。每个月的秒数是这个月各镜头的秒数之和
+    const m0 = Math.round(H.T0 * 12), m1 = Math.round(H.T1 * 12), n = Math.max(1, m1 - m0), w = new Float64Array(n);
+    for (const gp of G) { const k = U.clamp(gp.m - m0, 0, n - 1); w[k] += groupSec(gp); }
+    for (let i = 0; i < n; i++) w[i] = w[i] || IDLE;
     const acc = new Float64Array(n + 1); for (let i = 0; i < n; i++) acc[i + 1] = acc[i] + w[i];
     const tot = acc[n] || 1;
     return {
-      dur: U.clamp(tot, 30, 150),
+      dur: tot > 600 ? Math.max(600, tot * 0.5) : Math.max(30, tot),
       t2p: function (t) { const f = U.clamp(t * 12 - m0, 0, n), i = Math.min(n - 1, Math.floor(f)); return (acc[i] + w[i] * (f - i)) / tot; },
-      p2t: function (p) { const v = U.clamp(p, 0, 1) * tot; let lo = 0, hi = n; while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (acc[mid] <= v) lo = mid; else hi = mid; } return Math.min(H.T1, (m0 + lo + (v - acc[lo]) / w[lo]) / 12); },
+      p2t: function (p) { const v = U.clamp(p, 0, 1) * tot; let lo = 0, hi = n; while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (acc[mid] <= v) lo = mid; else hi = mid; } return Math.min(H.now, (m0 + lo + (v - acc[lo]) / w[lo]) / 12); },
     };
   }
-  // 同一天开通的同一条线沿线路方向依次长出来；插站造成的替换不重新生长
-  function schedule(H, W) {
-    const groups = new Map();
-    for (const x of H.segs) { const k = x.line + '|' + Math.round(x.t0 * 12); let l = groups.get(k); if (!l) groups.set(k, l = []); l.push(x); }
-    const goneAt = new Set(); for (const x of H.segs) if (isFinite(x.t1)) goneAt.add(x.line + '|' + Math.round(x.t1 * 12));
-    const earlier = function (sid, t0) { for (const x of H.segs) if ((x.a === sid || x.b === sid) && x.t0 < t0 - 1e-6 && x.t1 > t0) return true; return false; };
-    groups.forEach(function (list, k) {
-      // 改归线路（贯通、拆开）只换颜色，不重新生长；插站造成的少量替换也不重新生长
-      const t0 = list[0].t0, p0 = W.t2p(t0), instant = list.every(function (x) { return x.relabel; }) || (goneAt.has(k) && list.length <= 3), n = list.length;
-      const gd = Math.min(U.clamp(2.4 / n, 0.2, 0.6) / W.dur, (Math.max(0, W.t2p(t0 + 1 / 12) - p0)) * 0.98 / n);
-      const at = new Map(); for (const x of list) { for (const sid of [x.a, x.b]) { let l = at.get(sid); if (!l) at.set(sid, l = []); l.push(x); } }
-      const starts = []; at.forEach(function (l, sid) { if (earlier(sid, t0)) starts.push(sid); });
-      if (!starts.length) { at.forEach(function (l, sid) { if (l.length === 1) starts.push(sid); }); if (starts.length > 1) starts.length = 1; if (!starts.length) starts.push(list[0].a); }
-      const seen = new Set(), order = [], q = starts.slice(), visited = new Set(starts);
-      for (let i = 0; i < q.length; i++) for (const x of at.get(q[i]) || []) { if (seen.has(x)) continue; seen.add(x); x.from = q[i]; order.push(x); const o = x.a === q[i] ? x.b : x.a; if (!visited.has(o)) { visited.add(o); q.push(o); } }
-      for (const x of list) if (!seen.has(x)) { x.from = x.a; order.push(x); }
-      // 一段长完再长下一段，不会在前面出现断开的小段；从多处同时开始时各走各的
-      const depth = new Map(); for (const sid of starts) depth.set(sid, 0);
-      for (const x of order) { const o = x.a === x.from ? x.b : x.a, dep = depth.get(x.from) || 0, now = instant || x.relabel || x.rewired; x.p0 = now ? p0 : p0 + dep * gd; x.gd = now ? 0 : gd; if (!depth.has(o) || depth.get(o) > dep + 1) depth.set(o, dep + 1); }
+  // 排时间：每个月按各组的秒数切成几段，一组占一段（镜头到位 → 生长 → 停留）；组内沿线路方向按里程匀速生长。返回车站出现的进度与镜头清单
+  function schedule(H, W, G = changeGroups(H)) {
+    const lineOrd = M.sortIds(Object.keys(H.lines)), ord = function (l) { const i = lineOrd.indexOf(l); return i < 0 ? 999 : i; };
+    const byMonth = new Map(); for (const gp of G) { let l = byMonth.get(gp.m); if (!l) byMonth.set(gp.m, l = []); l.push(gp); }
+    const shots = [], byStation = new Map();
+    for (const x of H.segs) for (const sid of [x.a, x.b]) {
+      let edges = byStation.get(sid); if (!edges) byStation.set(sid, edges = []);
+      edges.push(x);
+    }
+    // 同一条线此前已有的车站：延伸从原终点、支线从分叉站长出；新线即使经过别的线路的车站，也从一端开始（新线是整条开通的）
+    const earlier = function (sid, t0, line) { for (const x of byStation.get(sid)) if (x.line === line && x.t0 < t0 - 1e-6 && x.t1 > t0) return true; return false; };
+    const len = function (x) { const a = H.stations[x.a], b = H.stations[x.b]; return a && b ? Math.max(0.05, Math.hypot(a.x - b.x, a.y - b.y)) : 0.3; };
+    // 改归时仍在运营、与这一组相接的别的区段（拆开后留在原线上的部分）
+    const touch = function (sid, t0) { for (const x of byStation.get(sid)) if (x.t0 < t0 - 1e-6 && x.t1 > t0 + 1e-6) return true; return false; };
+    byMonth.forEach(function (list, m) {
+      list.sort(function (a, b) { return (KIND_ORDER[a.kind] - KIND_ORDER[b.kind]) || (ord(a.line) - ord(b.line)); });
+      const P0 = W.t2p(m / 12), P1 = W.t2p((m + 1) / 12), span = Math.max(1e-6, P1 - P0), tw = list.reduce(function (s, gp) { return s + groupSec(gp); }, 0) || 1;
+      let at = P0;
+      for (const gp of list) {
+        const sec = groupSec(gp), wl = span * sec / tw, k = wl / sec, w0 = at, g0 = gp.instant ? at : at + SHOT.lead * k, w1 = g0 + growSec(gp) * k; at += wl;
+        gp.w0 = w0; gp.g0 = g0; gp.w1 = w1; gp.we = at;   // 镜头开始、开始生长、长完、镜头结束（之后才轮到下一个镜头）
+        if (gp.kind === 'close') { for (const x of gp.segs) x.p1 = g0 + (w1 - g0) * 0.5; shots.push(gp); continue; }
+        const segs = gp.segs;
+        if (gp.instant) { for (const x of segs) { x.from = x.a; x.p0 = g0; x.gd = 0; } continue; }
+        // 生长起点：接在既有线网上的车站（延伸、支线）；新线取一端
+        const adj = new Map(); for (const x of segs) for (const sid of [x.a, x.b]) { let l = adj.get(sid); if (!l) adj.set(sid, l = []); l.push(x); }
+        const starts = []; adj.forEach(function (l, sid) { if (earlier(sid, gp.t, gp.line)) starts.push(sid); });
+        // 改归（v3.4，贯通、拆开、拆出支线）：贯通从两线相接的车站、拆开从与原线分开的车站起，新颜色沿线路铺过去，旧颜色等铺满再撤
+        if (!starts.length && gp.kind === 'relabel') adj.forEach(function (l, sid) { if (touch(sid, gp.t)) starts.push(sid); });
+        if (!starts.length) {
+          adj.forEach(function (l, sid) { if (l.length === 1) starts.push(sid); });
+          starts.sort(function (p, q) { const A = H.stations[p], B = H.stations[q]; return A && B ? (A.x - B.x) || (A.y - B.y) : 0; });
+          starts.length = Math.min(1, starts.length); if (!starts.length) starts.push(segs[0].a);
+        }
+        gp.starts = starts;
+        // 按里程排：起点距离 0，沿生长树累加区段长度；全组按最长的一支匀速长完
+        const dist = new Map(), seen = new Set(), q = starts.slice(); for (const sid of starts) dist.set(sid, 0);
+        for (let i = 0; i < q.length; i++) for (const x of adj.get(q[i]) || []) { if (seen.has(x)) continue; seen.add(x); x.from = q[i]; x._d0 = dist.get(q[i]); const o = x.a === q[i] ? x.b : x.a; if (!dist.has(o)) { dist.set(o, x._d0 + len(x)); q.push(o); } }
+        for (const x of segs) if (!seen.has(x)) { x.from = x.a; x._d0 = 0; }
+        const total = Math.max(1e-6, segs.reduce(function (mx, x) { return Math.max(mx, x._d0 + len(x)); }, 0)), sc = (w1 - g0) / total;
+        for (const x of segs) { x.p0 = x.rewired ? g0 : g0 + x._d0 * sc; x.gd = x.rewired ? 0 : len(x) * sc; }
+        shots.push(gp);
+      }
     });
-    for (const x of H.segs) { x.p1 = isFinite(x.t1) ? W.t2p(x.t1) : Infinity; }
+    // 区段结束的时刻接上接替它的那一组：改归（贯通、拆开）在换色的镜头开始时换，插站与改线在同一条线新区段开始生长时换，画面上不会断开
+    const byBase = new Map(); for (const x of H.segs) { let l = byBase.get(x.base); if (!l) byBase.set(x.base, l = []); l.push(x); }
+    const startOf = new Map(); for (const gp of G) if (gp.kind !== 'close' && gp.w0 != null) { const k = gp.line + '|' + gp.m; startOf.set(k, Math.min(startOf.has(k) ? startOf.get(k) : Infinity, gp.w0)); }
+    for (const x of H.segs) {
+      if (x.p1 != null) continue;
+      if (!isFinite(x.t1)) { x.p1 = Infinity; continue; }
+      const ps = byBase.get(x.base), nx = ps[ps.indexOf(x) + 1], k = x.line + '|' + Math.round(x.t1 * 12);
+      x.p1 = nx && nx.p0 != null ? nx.p0 + (nx.relabel ? nx.gd || 0 : 0) : (startOf.has(k) ? startOf.get(k) : W.t2p(x.t1));
+    }
     const st = new Map();
+    // 虚拟节点不画站点
     for (const x of H.segs) {
       const a0 = x.from === x.b ? x.p0 + x.gd : x.p0, b0 = x.from === x.b ? x.p0 : x.p0 + x.gd;
-      for (const e of [[x.a, a0], [x.b, b0]]) { if (H.stations[e[0]].v) continue; let v = st.get(e[0]); if (!v) st.set(e[0], v = { p0: Infinity, p1: -Infinity, name: H.stations[e[0]].name }); v.p0 = Math.min(v.p0, e[1]); v.p1 = Math.max(v.p1, x.p1); }
+      for (const e of [[x.a, a0], [x.b, b0]]) { if (H.stations[e[0]] && H.stations[e[0]].v) continue; let v = st.get(e[0]); if (!v) st.set(e[0], v = { p0: Infinity, p1: -Infinity, name: H.stations[e[0]].name }); v.p0 = Math.min(v.p0, e[1]); v.p1 = Math.max(v.p1, x.p1); }
     }
-    return st;
+    shots.sort(function (a, b) { return a.w0 - b.w0; });
+    return { st: st, shots: shots };
   }
   // 播报：线路开通、延伸、开通支线、贯通、拆开（拆出支线）、停运，按播放进度排好
   function newsList(H, W) {
@@ -182,20 +246,20 @@
       if (!last.has(x.line) || x.t1 > last.get(x.line)) last.set(x.line, x.t1);
       let l = byBase.get(x.base); if (!l) byBase.set(x.base, l = []); l.push(x);
     }
-    const name = function (l) { return H.lines[l] ? H.lines[l].name : ''; }, push = function (t, text, l) { out.push({ p: W.t2p(t) + 1e-4, text: text, line: l }); };
+    const name = function (l) { return H.lines[l] ? H.lines[l].name : ''; }, push = function (t, text, l, kind = 'build') { out.push({ p: W.t2p(t) + 1e-4, text: text, line: l, month: Math.round(t * 12), kind: kind }); };
     // 某条线某一时刻之前的车站度数（判断是延伸还是开支线）
     const degBefore = function (l, sid, t) { let d = 0; for (const x of H.segs) if (x.line === l && x.t0 < t - eps && x.t1 >= t - eps && (x.a === sid || x.b === sid)) d++; return d; };
     first.forEach(function (t, l) {
       const born = H.segs.filter(function (x) { return x.line === l && Math.abs(x.t0 - t) < eps; });
       const src = born.filter(function (x) { return x.relabel; }).map(function (x) { const ps = byBase.get(x.base); return ps[ps.indexOf(x) - 1]; }).filter(Boolean);
-      if (src.length && src.length >= born.length / 2) push(t, '从 ' + name(src[0].line) + ' 拆出 ' + name(l), l);
+      if (src.length && src.length >= born.length / 2) push(t, '从 ' + name(src[0].line) + ' 拆出 ' + name(l), l, 'relabel');
       else push(t, name(l) + ' 开通', l);
     });
     last.forEach(function (t, l) {
       if (!isFinite(t)) return;
       const ended = H.segs.filter(function (x) { return x.line === l && Math.abs(x.t1 - t) < eps; });
       const to = ended.map(function (x) { const ps = byBase.get(x.base); return ps[ps.indexOf(x) + 1]; }).filter(Boolean);
-      if (to.length) push(t, name(l) + ' 与 ' + name(to[0].line) + ' 贯通', to[0].line); else push(t, name(l) + ' 停运', l);
+      if (to.length) push(t, name(l) + ' 与 ' + name(to[0].line) + ' 贯通', to[0].line, 'relabel'); else push(t, name(l) + ' 停运', l, 'close');
     });
     // 已有线路在之后的月份增加新区段：从中间车站分出去是开通支线，否则是延伸
     const grp = new Map();
@@ -210,7 +274,10 @@
     return out.sort(function (a, b) { return a.p - b.p; });
   }
   function prepare(g) {
-    const H = collect(g), eras = eraList(), W = timeWarp(H), stInfo = schedule(H, W), news = newsList(H, W);
+    const H = collect(g), eras = eraList(), groups = changeGroups(H), W = timeWarp(H, groups), { st: stInfo, shots } = schedule(H, W, groups), news = newsList(H, W);
+    const shotByChange = new Map(shots.map(q => [q.kind + '|' + q.line + '|' + q.m, q]));
+    for (const e of news) { const shot = shotByChange.get(e.kind + '|' + e.line + '|' + e.month); if (shot) e.p = shot.w0; }
+    news.sort((x, y) => x.p - y.p);
     const all = { stations: H.stations, segments: {}, lines: H.lines }; for (const x of H.segs) all.segments[x.id] = x.s;
     let F;
     if (A.geographic()) {
@@ -236,7 +303,7 @@
       const C = g.compiled; if (C && C.segs) C.segs.forEach(function (cs) { if (cs.g) km.set(cs.seg.id, cs.g.lenM / 1000); });
       M.withSegIndex([all], function () { for (const x of H.segs) if (!km.has(x.base)) km.set(x.base, M.segGeom(all, x.s, g.city).lenM / 1000); });
     } catch (e) { kmOK = false; }
-    return { H: H, eras: eras, W: W, stInfo: stInfo, layout: F, km: km, kmOK: kmOK, news: news };
+    return { H: H, eras: eras, W: W, stInfo: stInfo, shots, layout: F, km: km, kmOK: kmOK, news: news };
   }
 
   // ---------------- 绘制 ----------------
@@ -272,6 +339,15 @@
     c.moveTo(x - gs, y - h0); c.lineTo(x + gs, y - h0); c.lineTo(x + gs - hd, y - h0 - hd);
     c.moveTo(x + gs, y + h0); c.lineTo(x - gs, y + h0); c.lineTo(x - gs + hd, y + h0 + hd); c.stroke();
   }
+  function shotAt(D, p) {
+    const L = D.shots, gap = 1.6 / D.W.dur;
+    for (let i = 0; i < L.length; i++) {
+      const q = L[i];
+      if (p < q.w0) return q.w0 - p < gap ? q : null;
+      if (p < q.we) return q;
+    }
+    return null;
+  }
   function paint(dt) {
     const D = S.D, cv = S.cv, c = S.ctx, host = A.canvas(); if (!host) return;
     const cw = host.clientWidth, ch = host.clientHeight, dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -292,16 +368,26 @@
       const reached = g >= 1;
       for (const e of [[x.a, x.from === x.a || reached], [x.b, x.from === x.b || reached]]) { if (!e[1]) continue; let l = stLines.get(e[0]); if (!l) stLines.set(e[0], l = []); if (l.indexOf(x.line) < 0) l.push(x.line); }
     }
-    // 镜头跟随线网生长
-    const V = A.view();
+    // 运镜（v3.4）：有变化时镜头只跟这一组（一条线），跟着生长的线头平移、逐渐收进整段新线，变化结束后稍作停留；
+    // 两次变化之间退回能看见全部已建线网的远景。玩家拖动或缩放后不再自动运镜
+    const V = A.view(), shot = shotAt(D, p);
     S.cameraMoving = false;
     if (S.follow && V) {
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      stLines.forEach(function (l, sid) { const q = stationPos(sid); if (!q) return; x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]); });
+      const addP = function (q) { if (!q) return; x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]); };
+      if (shot) {
+        for (const sid of shot.starts || []) addP(stationPos(sid));
+        for (const x of shot.segs) {
+          if (shot.kind !== 'close' && p < x.p0) continue;
+          const from = x.from === x.b ? x.b : x.a, to = from === x.a ? x.b : x.a, gg = shot.kind !== 'close' && x.gd ? U.clamp((p - x.p0) / x.gd, 0, 1) : 1, A0 = stationPos(from), B0 = stationPos(to);
+          addP(A0); if (A0 && B0) addP([A0[0] + (B0[0] - A0[0]) * gg, A0[1] + (B0[1] - A0[1]) * gg]);
+        }
+        if (x0 === Infinity) for (const x of shot.segs) { addP(stationPos(x.a)); break; }
+      } else stLines.forEach(function (l, sid) { addP(stationPos(sid)); });
       if (x0 < Infinity) {
-        const pad = 150, minW = 1200, bw = Math.max(minW, x1 - x0 + pad * 2), bh = Math.max(minW * ch / cw, y1 - y0 + pad * 2), sc = Math.min(cw / bw, Math.max(120, ch - 96) / bh), tw = cw / sc, th = ch / sc, tx = (x0 + x1) / 2 - tw / 2, ty = (y0 + y1) / 2 - th / 2 + 34 / sc;
+        const pad = shot ? 140 : 150, minW = shot ? 900 : 1200, bw = Math.max(minW, x1 - x0 + pad * 2), bh = Math.max(minW * ch / cw, y1 - y0 + pad * 2), sc = Math.min(cw / bw, Math.max(120, ch - 96) / bh), tw = cw / sc, th = ch / sc, tx = (x0 + x1) / 2 - tw / 2, ty = (y0 + y1) / 2 - th / 2 + 34 / sc;
         S.cameraMoving = !S.snap && Math.max(Math.abs(tx - V.x), Math.abs(ty - V.y), Math.abs(tw - V.w), Math.abs(th - V.h)) > tw * 0.0001;
-        const k = S.snap || !S.cameraMoving || (CM.Settings && CM.Settings.reducedMotion()) ? 1 : 1 - Math.exp(-dt * 2.4);
+        const k = S.snap || !S.cameraMoving || CM.Settings.reducedMotion() ? 1 : 1 - Math.exp(-dt * (shot ? 2.2 : 1.3));
         if (k === 1) S.cameraMoving = false;
         V.x += (tx - V.x) * k; V.y += (ty - V.y) * k; V.w += (tw - V.w) * k; V.h += (th - V.h) * k; S.snap = false;
         A.setView(S.cameraMoving);
@@ -310,7 +396,8 @@
     const sc = Math.min(cw / V.w, ch / V.h), ox = (cw - V.w * sc) / 2 - V.x * sc, oy = (ch - V.h * sc) / 2 - V.y * sc;
     c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, cw, ch);
     c.setTransform(dpr * sc, 0, 0, dpr * sc, dpr * ox, dpr * oy);
-    const geo = A.geographic(), LW = geo ? 8.5 : 11;
+    const kz = Math.min(1, (cw / 1200) / sc);
+    const geo = A.geographic(), LW = (geo ? 8.5 : 11) * kz;
     if (!geo) drawWater(c, F.water, P);
     // 路线
     const trace = function (o) {
@@ -322,14 +409,27 @@
       return true;
     };
     c.lineCap = 'round'; c.lineJoin = 'round';
-    c.strokeStyle = P.casing; c.lineWidth = LW + 3;
+    // 改归的旧色留在底下，直到新区段的颜色铺完。
+    vis.sort((a, b) => Number(a.x.relabel) - Number(b.x.relabel));
+    c.strokeStyle = P.casing; c.lineWidth = LW + 3 * kz;
     for (const o of vis) if (trace(o)) c.stroke();
     for (const o of vis) {
       if (!trace(o)) continue;
+      c.globalAlpha = shot && S.follow && shot.line !== o.x.line ? 0.55 : 1;
       c.strokeStyle = lineColor(H.lines[o.x.line]); c.lineWidth = LW; c.setLineDash([]); c.stroke();
       const ty = o.x.s.type;
       if (ty === 'elevated') { c.strokeStyle = P.elev; c.lineWidth = 2.2; c.stroke(); }
       else if (ty === 'surface') { c.strokeStyle = P.elev; c.lineWidth = 3; c.setLineDash([2, 5]); c.lineCap = 'butt'; c.stroke(); c.setLineDash([]); c.lineCap = 'round'; }
+    }
+    c.globalAlpha = 1;
+    // 改归的接点（v3.4）：新颜色开始铺开时，接点泛起两圈新线路颜色的光圈
+    if (!CM.Settings.reducedMotion() && shot && shot.kind === 'relabel' && shot.starts && shot.w1 > shot.g0) {
+      const u = (p - shot.g0) / (shot.w1 - shot.g0);
+      if (u > 0 && u < 1.25) for (const sid of shot.starts) {
+        const q = stationPos(sid); if (!q) continue;
+        for (const d of [0, 0.3]) { const v = U.clamp((u - d) / 0.9, 0, 1); if (v <= 0 || v >= 1) continue; c.globalAlpha = (1 - v) * 0.85; c.strokeStyle = lineColor(H.lines[shot.line]); c.lineWidth = 3 * kz; c.beginPath(); c.arc(q[0], q[1], LW * 0.6 + v * 40 * kz, 0, Math.PI * 2); c.stroke(); }
+      }
+      c.globalAlpha = 1;
     }
     // 站标
     const labels = [];
@@ -340,16 +440,16 @@
       const pop = ease((p - info.p0) / 0.006), scale = 0.4 + 0.6 * pop;
       if (ls.length > 1) {
         const hub = F.hub.get(sid), hx = hub ? hub.x : q[0], hy = hub ? hub.y : q[1], gr = hub ? hub.r : (geo ? 11 : 12.5);
-        drawHub(c, hx, hy, gr * scale, ls.map(function (l) { return lineColor(H.lines[l]); }), P);
-        labels.push({ sid: sid, x: hx, y: hy, r: gr * 1.15, hub: 1, name: info.name, a: pop });
+        drawHub(c, hx, hy, gr * scale * kz, ls.map(function (l) { return lineColor(H.lines[l]); }), P);
+        labels.push({ sid: sid, x: hx, y: hy, r: gr * 1.15 * kz, hub: 1, name: info.name, a: pop });
       } else {
-        const r = (geo ? 6.5 : 7.2) * scale;
+        const r = (geo ? 6.5 : 7.2) * scale * kz;
         c.fillStyle = '#fff'; c.strokeStyle = lineColor(H.lines[ls[0]]); c.lineWidth = P.stW; c.beginPath(); c.arc(q[0], q[1], r, 0, 7); c.fill(); c.stroke();
         labels.push({ sid: sid, x: q[0], y: q[1], r: r, hub: 0, name: info.name, a: pop });
       }
     });
     // 站名：字小到看不清时只留换乘站，再小就都不写
-    const px = 20 * sc;
+    const px = 20 * kz * sc, fs = 20 * kz;
     if (px >= 6.2) {
       labels.sort(function (m, n) { return n.hub - m.hub; });
       const boxes = [], hit = function (b) { for (const o of boxes) if (b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]) return true; return false; };
@@ -358,8 +458,9 @@
       for (const l of labels) {
         if (!l.hub && px < 9) continue;
         if (l.x < x0 || l.x > x1 || l.y < y0 || l.y > y1) continue;
-        c.font = (l.hub ? '700 ' : '500 ') + '20px ' + font;
-        const name = CM.I18n ? CM.I18n.text(String(l.name)) : l.name, w = S.tw.get(name + l.hub) || (S.tw.set(name + l.hub, c.measureText(name).width), S.tw.get(name + l.hub)), gap = l.r + 6;
+        c.font = (l.hub ? '700 ' : '500 ') + fs.toFixed(1) + 'px ' + font;
+        const name = CM.I18n ? CM.I18n.text(String(l.name)) : l.name, key = name + '|' + l.hub + '|' + fs.toFixed(1);
+        const w = S.tw.get(key) || (S.tw.set(key, c.measureText(name).width), S.tw.get(key)), gap = l.r + 6 * kz;
         const sides = [[l.x + gap, l.y, 'left'], [l.x, l.y - gap - 11, 'center'], [l.x - gap, l.y, 'right'], [l.x, l.y + gap + 11, 'center']], dir = stDir.get(l.sid), natural = dir && Math.abs(dir[1]) * 2.4 < Math.abs(dir[0]) ? 1 : 0, pref = S.side.has(l.sid) ? S.side.get(l.sid) : natural;
         let placed = false;
         for (let k = 0; k < 4 && !placed; k++) {
@@ -379,7 +480,9 @@
       if (er && er !== S.lastEra) { S.lastEra = er; S.hud.era.textContent = er.name; S.hud.era.classList.remove('flash'); void S.hud.era.offsetWidth; S.hud.era.classList.add('flash'); }
       if (CM.I18n) { CM.I18n.localize(S.hud.box); }
     }
-    const lineSet = new Set(); let km = 0; for (const o of vis) { lineSet.add(o.x.line); km += (D.km.get(o.x.base) || 0) * o.g; }
+    const lineSet = new Set(), spans = new Map();
+    for (const o of vis) { lineSet.add(o.x.line); spans.set(o.x.base, Math.max(spans.get(o.x.base) || 0, o.g)); }
+    let km = 0; for (const [id, progress] of spans) km += (D.km.get(id) || 0) * progress;
     const stat = lineSet.size + ' 条线路 · ' + stLines.size + ' 座车站' + (D.kmOK ? ' · ' + km.toFixed(0) + ' km' : '');
     if (stat !== S.lastStat) { S.lastStat = stat; S.hud.stat.textContent = stat; if (CM.I18n) CM.I18n.localize(S.hud.stat); }
     // 播报：播放经过的事件；拖动进度时只跳过，不补报

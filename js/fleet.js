@@ -24,6 +24,11 @@
   };
   const M = function (o) { return Object.assign({ maps: null, max: 8, life: 30, kmh: 80 }, o, { look: Object.assign({}, LOOK[o.look] || LOOK.steel, o.lookX || {}) }); };
   const MODELS = F.MODELS = [
+    M({ id: 'mi-budd', maps: ['mi'], name: '迈阿密地铁不锈钢列车（巴德）', short: '巴德车', from: 1983, to: 2017, cap: 260, price: 330, ops: 0.98, life: 35, max: 6, look: 'steel', lookX: { band: '#f37021' }, desc: '高架地铁开通时的不锈钢车厢，车身两侧是橙绿色带，两节一组编组' }),
+    M({ id: 'mi-hitachi', maps: ['mi'], name: '迈阿密地铁新一代列车（日立）', short: '日立车', from: 2017, to: 9999, cap: 270, price: 420, ops: 0.86, max: 6, look: 'whiteNew', lookX: { band: '#00a651' }, desc: '2017 年起替换旧车的新一代列车，有空调和车厢内的动态线路图' }),
+    M({ id: 'nj-a1', maps: ['nj'], name: '南京地铁 A 型（阿尔斯通·浦镇）', short: '一号线 A 型', from: 2005, to: 2014, cap: 310, price: 540, ops: 0.96, max: 6, look: 'white', lookX: { band: '#3a8dde' }, desc: '1 号线开通时的 A 型车，6 节编组，由阿尔斯通与南京浦镇合作生产' }),
+    M({ id: 'nj-a2', maps: ['nj'], name: '南京地铁 A 型（国产化）', short: '国产 A 型', from: 2010, to: 9999, cap: 310, price: 420, ops: 0.89, look: 'whiteNew', desc: '南京浦镇生产的国产化 A 型车，2 号线、3 号线等主干线都在用' }),
+    M({ id: 'nj-b', maps: ['nj'], name: '南京地铁郊区线 B 型快车', short: '郊区快车', from: 2014, to: 9999, cap: 240, price: 400, ops: 0.88, kmh: 100, max: 6, look: 'paint', desc: '机场线等郊区线路用的 B 型车，最高时速 100 km' }),
     // 悉尼：城铁双层列车与全自动地铁
     M({ id: 'sy-millennium', maps: ['sy'], name: '千禧双层列车', short: '千禧列车', from: 2002, to: 2011, cap: 280, price: 430, ops: 1.02, life: 35, max: 8, kmh: 100, look: 'steel', lookX: { band: '#e8b400' }, desc: '城铁在 2000 年代初订造的双层车，座位多，但上下车慢' }),
     M({ id: 'sy-waratah', maps: ['sy'], name: '沃拉塔双层列车', short: '沃拉塔', from: 2011, to: 9999, cap: 290, price: 460, ops: 0.95, life: 35, max: 8, kmh: 115, look: 'whiteNew', lookX: { band: '#f2a900' }, desc: '有空调的新一代双层车，城铁的主力车型' }),
@@ -664,6 +669,7 @@
   // 线路详情「列车运营」分页
   const sfx = function (n) { if (CM.Sound) CM.Sound.play(n); };
   UI.prototype.lineOpsTab = function (el, lid) {
+    const tip = this.tip1('trains'); if (tip) el.appendChild(tip);
     const g = this.g(), self = this, fl = g.fleet, o = fl.ops[lid] || { mode: 'auto' }, manual = o.mode === 'manual', info = F.lineInfo(g, lid) || [];
     const done = function () { self.markUnsaved(); self.scheduleAutosave(); self.rerenderPage(); };
     el.appendChild(h('div', { class: 'fo-mode' },

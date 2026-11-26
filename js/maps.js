@@ -46,18 +46,11 @@
     },
   };
   // 其他地图（教程与新增城市）由各自的数据文件登记为 CM.MAP_LIST；未写的配置项沿用广州样本
-  // 交通小区边长（v2.6）：交通计算量随小区数的平方增长。现有地图都是 4 格（约 1 km）；更大的地图没有指定时自动放大，
-  // 让全图小区数保持在同一量级（约 2000 个以内），跳月速度与内存不随地图面积成倍增长。边长须能整除地图宽高
-  const autoZone = function (W, H) {
-    for (const z of [4, 6, 8, 10, 12, 16, 20, 24]) if (W % z === 0 && H % z === 0 && W * H / (z * z) <= 2200) return z;
-    return 4;
-  };
-  CM.autoZone = autoZone;
+  // 每格 250 m，所有地图的交通小区统一为 4×4 格。
   for (const m of CM.MAP_LIST || []) {
     const cfg = Object.assign({}, GZ_CFG);
     if (m.econ) Object.assign(cfg, CM.deriveChoice(m.econ.devOffset || 0, m.econ.money || 1));
     Object.assign(cfg, m.cfg);
-    if (m.cfg.ZONE == null) cfg.ZONE = autoZone(cfg.W, cfg.H);
     // 超大型站（v2.7）：各图的造价与运营费表只写到大型，按大型的倍数补齐（造价约 1.6 倍、运营费约 1.7 倍）。
     // 早期巴黎、伦敦的单价很小，这里保留有效数字而不是小数位，否则会被舍成 0
     { const CS = cfg.cost && cfg.cost.station, OP = cfg.ops && cfg.ops.stationDaily;
@@ -203,27 +196,76 @@
       for (const find of p.finds || []) { find.x += dx; find.yy += dy; }
       // 片区编号
       const oZW = oW / ZN, nZW = W / ZN, zmap = function (z) { return ((z / oZW) | 0) * nZW + (z % oZW) + dx / ZN + (dy / ZN) * nZW; };
-      const fixTask = function (t) { if (!t) return; if (t.anchors) t.anchors.forEach(sh); if (typeof t.zone === 'number') t.zone = zmap(t.zone); if (typeof t.coolKey === 'string') t.coolKey = t.coolKey.replace(/^(cong|cov):(\d+)$/, function (s0, a, z) { return a + ':' + zmap(+z); }); for (const part of t.parts || []) fixTask(part); };
-      const T = p.tasks;
-      for (const list of [T.active, T.done, T.failed, T.offers]) (list || []).forEach(fixTask);
-      if (T.cool) { const nc = {}; for (const k in T.cool) nc[k.replace(/^(cong|cov):(\d+)$/, function (s0, a, z) { return a + ':' + zmap(+z); })] = T.cool[k]; T.cool = nc; }
-      // 地铁公司的招标与合同（v2.5）：片区位置、锚点与片区编号；冷却记录 z:片区（v2.9 补）
-      const cp = p.corp;
-      if (cp) {
-        for (const t of [].concat(cp.tenders || [], cp.contracts || [], cp.closed || [])) { if (!t) continue; sh(t.area); if (t.anchors) t.anchors.forEach(sh); if (typeof t.zone === 'number') t.zone = zmap(t.zone); }
-        if (cp.cool) { const nc = {}; for (const k in cp.cool) nc[k.replace(/^z:(\d+)$/, function (s0, z) { return 'z:' + zmap(+z); })] = cp.cool[k]; cp.cool = nc; }
-      }
-      // 地铁圈关注的市民（v2.3）：存下的动态按片区编号定位（v2.9 补）
-      const vf = p.voices && p.voices.follow;
-      if (vf) for (const h in vf) for (const q of (vf[h] && vf[h].posts) || []) if (q && q.at && typeof q.at.zone === 'number') q.at.zone = zmap(q.at.zone);
+      const shiftCool = function (key) {
+        return key.replace(/^at:(-?[\d.]+),(-?[\d.]+)$/, (s, x, y) => 'at:' + (+x + dx).toFixed(1) + ',' + (+y + dy).toFixed(1));
+      };
+      migrateZoneRefs(p, zmap, sh, shiftCool);
       // 城市经济：载入后按新增范围调整统计口径（连续迁移时原范围随后续步骤平移）
       if (p.macro) { const ar = p.macro.areaRebase; if (ar && ar.oldBox && from > from0) { ar.oldBox[0] += dx; ar.oldBox[1] += dy; } else p.macro.areaRebase = { from: from, oldBox: [dx, dy, oW, oH] }; }
       const prevNote = p.mapUpgrade && from > from0 ? p.mapUpgrade.note : '';
       p.mapUpgrade = { from: from0, to: m.mapVersion, at: [p.clock.y, p.clock.m, p.clock.d], note: (prevNote ? prevNote + '；' : '') + (spec.note || '') };
     }
   }
+  // 地图平移与小区细分共用存档里的小区引用。细分不移动格坐标或按坐标记录的冷却。
+  function migrateZoneRefs(p, zmap, move = () => {}, shiftCool = key => key) {
+    const taskKey = key => key.replace(/^(cong|cov):(\d+)$/, (_, kind, z) => kind + ':' + zmap(+z));
+    const fixTask = function (t) {
+      if (!t) return;
+      if (typeof t.zone === 'number') t.zone = zmap(t.zone);
+      if (typeof t.coolKey === 'string') t.coolKey = taskKey(t.coolKey);
+      (t.anchors || []).forEach(move);
+      move(t.spot);
+      (t.parts || []).forEach(fixTask);
+    };
+    const tasks = p.tasks || {};
+    for (const list of [tasks.active, tasks.done, tasks.failed, tasks.offers, tasks.adjusted]) (list || []).forEach(fixTask);
+    if (tasks.cool) tasks.cool = Object.fromEntries(Object.entries(tasks.cool).map(([key, until]) => [shiftCool(taskKey(key)), until]));
+    const corp = p.corp;
+    if (corp) {
+      for (const t of [].concat(corp.tenders || [], corp.contracts || [], corp.closed || [])) {
+        if (!t) continue;
+        move(t.area);
+        fixTask(t);
+      }
+      if (corp.cool) corp.cool = Object.fromEntries(Object.entries(corp.cool).map(([key, until]) => [
+        key.replace(/^z:(\d+)$/, (_, z) => 'z:' + zmap(+z)), until,
+      ]));
+    }
+    for (const reader of Object.values(p.voices?.follow || {})) for (const post of reader?.posts || []) {
+      if (Number.isInteger(post?.at?.zone)) post.at.zone = zmap(post.at.zone);
+    }
+    const people = p.folks?.list;
+    for (const person of Array.isArray(people) ? people : []) {
+      if (!person) continue;
+      for (const place of [person.home, person.dest, person.kid?.school]) {
+        if (!place) continue;
+        move(place);
+        if (Number.isInteger(place.z)) place.z = zmap(place.z);
+      }
+    }
+  }
+
+  function zoneMigration(m, specs) {
+    return function (p, from) {
+      const spec = specs.find(entry => entry.from === from);
+      if (!spec) throw new Error('不支持从第 ' + from + ' 版迁移');
+      const { W, H, ZONE } = m.cfg, oldZone = spec.oldZone, oldWidth = W / oldZone;
+      const oldCount = oldWidth * (H / oldZone), width = W / ZONE;
+      const zmap = function (z) {
+        if (!Number.isInteger(z) || z < 0 || z >= oldCount) return z;
+        const x = (z % oldWidth + 0.5) * oldZone, y = (Math.floor(z / oldWidth) + 0.5) * oldZone;
+        return Math.floor(y / ZONE) * width + Math.floor(x / ZONE);
+      };
+      migrateZoneRefs(p, zmap);
+      delete p.congRef;
+      p.mapUpgrade = { from, to: m.mapVersion, at: [p.clock.y, p.clock.m, p.clock.d], note: spec.note, zoneOnly: true };
+      return p;
+    };
+  }
+
   // 声明了范围扩展（extent）的地图：旧版本存档按扩展规格迁移
   for (const id in MAPS) if (MAPS[id].extent && !MAPS[id].migrate) MAPS[id].migrate = CM.extentMigration(MAPS[id].extent);
+  for (const m of Object.values(MAPS)) if (m.zoneChange && !m.migrate) m.migrate = zoneMigration(m, m.zoneChange);
   // 杭州、武汉：第 2→3 版只调整了展示（格网、区域编号与玩家线网不变），第 2 版存档按第 3 版继续迁移；
   // v2.2 起第 3→4 版向外扩大（萧山机场、天河机场，见各自的 extent）
   for (const id of ['hz','wh']) {

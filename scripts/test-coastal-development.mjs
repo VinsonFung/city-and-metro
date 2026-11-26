@@ -229,3 +229,93 @@ assert.equal(BG.ferries.length, 0, 'the historical Seine service has retired');
 assert.ok(C.BgNet.stops(1900, paris).some(p => p.kind === 'ferry'));
 assert.ok(C.BgNet.stops(1935, paris).every(p => p.kind !== 'ferry'));
 console.log('PASS historical Seine service remains visible and retires on schedule');
+
+
+C.useMap('tutorial');
+const sampleCity = (people, jobs, secondPlan = 'res') => {
+  const vector = values => Float32Array.from(values), ones = vector([1, 1]);
+  return Object.assign(new C.City(), {
+    N: 2, W: 2, H: 1, landFrac: ones, taken: vector([0, 0]),
+    pop: vector(people), jobs: vector(jobs), lu: Uint8Array.of(C.LU.MIX, C.LU.MIX),
+    region: Uint8Array.of(0, 1), regionOpen: Uint8Array.of(1, 1), regions: [{plan:'res', open:2000}, {plan: secondPlan, open:2000}],
+    street: Uint8Array.of(1, 1), urbanYear: Uint16Array.of(2000, 2000), bh: vector([20, 20]), heightFor: () => 20,
+    roadAccess: () => Uint8Array.of(1, 1), updateStreets: () => {},
+    hillLimits: () => ({ homes: ones, jobs: ones }),
+  });
+};
+const planned = sampleCity([1760, 0], [2800, 0], 'newtown');
+assert.equal(planned.newAreaK().k[0], 1);
+assert.equal(planned.newAreaK().k[1], 2.5);
+assert.equal(planned.newAreaK(2015).k[1], 2.5);
+assert.equal(planned.newAreaK(2017.5).k[1], 1.75);
+assert.equal(planned.newAreaK(2020).k[1], 1);
+assert.equal(planned.newAreaK(2000, Uint8Array.of(1, 0)).k[1], 1);
+planned.regionOpen[1] = 0;
+assert.equal(planned.newAreaK().k[1], 1, 'Development waits until the district opens');
+
+for (const full of [true, false]) {
+  const testCity = sampleCity([1760, full ? 1760 : 500], [2800, full ? 2800 : 900]);
+  const before = testCity.totals();
+  const growth = C.CFG.growth, previous = [growth.popCurve, growth.jobsRatio];
+  growth.popCurve = [[2000, before.pop]];
+  growth.jobsRatio = [[2000, before.jobs / before.pop]];
+  try {
+    testCity.growMonth({ year: 2000, monthIndex: 24000, cellWalk: Float32Array.of(Infinity, 100), pull: { M: 1, w: 0, field: Float32Array.of(0, 1) } });
+  } finally { [growth.popCurve, growth.jobsRatio] = previous; }
+  assert.ok(Math.abs(testCity.totals().pop - before.pop) < 0.01);
+  assert.ok(Math.abs(testCity.totals().jobs - before.jobs) < 0.01);
+  if (full) {
+    assert.equal(testCity.pop[0], 1760);
+    assert.equal(testCity.jobs[0], 2800);
+  } else {
+    assert.ok(testCity.pop[0] < 1760 && testCity.pop[1] > 500);
+    assert.ok(testCity.jobs[0] < 2800 && testCity.jobs[1] > 900);
+  }
+}
+console.log('PASS development age, road access and capacity-safe relocation to served areas');
+
+for (const destinationFull of [true, false]) {
+  const city = sampleCity([59, destinationFull ? 1760 : 100], [59, destinationFull ? 2800 : 100]);
+  city.urbanYear[0] = 2001;
+  city.roadAccess = () => Uint8Array.of(0, 1);
+  const before = city.totals();
+  const growth = C.CFG.growth, previous = [growth.popCurve, growth.jobsRatio];
+  // Hold the city total still. Only relocation should affect the fixture.
+  growth.popCurve = [[2000, before.pop]];
+  growth.jobsRatio = [[2000, before.jobs / before.pop]];
+  try {
+    // Use a completely full destination on the capacity check: 2000-era mixed use at 80% capacity.
+    city.growMonth({ year: 2000, monthIndex: 24000 });
+  } finally { [growth.popCurve, growth.jobsRatio] = previous; }
+  assert.ok(Math.abs(city.totals().pop - before.pop) < 0.01);
+  assert.ok(Math.abs(city.totals().jobs - before.jobs) < 0.01);
+  if (destinationFull) {
+    assert.equal(city.pop[0], 59);
+    assert.equal(city.jobs[0], 59);
+  } else {
+    assert.ok(city.pop[0] < 59 && city.jobs[0] < 59);
+    assert.equal(city.street[0], 0);
+    assert.equal(city.lu[0], C.LU.RURAL);
+  }
+}
+
+C.useMap('hk');
+const growthCity = new C.City();
+for (const _ of growthCity.generateGen(19700101, 1970, { deferGraphs: true })) { /* drive generation */ }
+const k = growthCity.growRoads.find(i => !growthCity.roadsBuilt[i] && growthCity.roadGroups[i].cells.length);
+assert.notEqual(k, undefined, 'There must be undated secondary roads waiting for development');
+const year = growthCity.roadGroups[k].year;
+const snapshot = growthCity.monthCheckpoint(year);
+const roadVersion = growthCity.roadVersion;
+for (const cell of growthCity.roadGroups[k].cells) growthCity.street[cell] = 1;
+assert.ok(growthCity.openGrowRoads(year));
+assert.equal(growthCity.roadsBuilt[k], 1);
+assert.equal(growthCity.roadVersion, roadVersion, 'Opening a visual secondary road keeps the car graph');
+assert.equal(snapshot.roadsBuilt[k], 0);
+assert.ok(growthCity.roadGrowthVersion > snapshot.roadGrowthVersion);
+growthCity.street.fill(0);
+const roadSave = growthCity.serialize(), reopened = new C.City();
+for (const _ of reopened.generateGen(19700101, 1970, { deferGraphs: true })) { /* drive generation */ }
+reopened.restore(roadSave, year);
+assert.equal(reopened.roadsBuilt[k], 1, 'A previously opened road remains open after urban retreat and reload');
+console.log('PASS road growth checkpoint, lasting opening and unchanged traffic graph');

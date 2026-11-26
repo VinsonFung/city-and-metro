@@ -26,16 +26,12 @@
     const dwell = t.t >= L.T, hold = t.t < 0;
     const water = g.city.waterAt(p.x, p.y) ? g.city.riverNameAt(p.x, p.y) : null;
     const rg = g.city.regionAt(p.x, p.y);
-    let lf = 0;
-    const model = g.model, W = A.W, f = W ? model.freqAt(t.g.r, W, rt.loop ? (L.rev ? 1 : 0) : null) : 0, capR = model.capOf(t.g.r, net);
-    if (f > 0 && net.rideEdge[t.g.r]) lf = model.edgeLoadAt(net.rideEdge[t.g.r][2 * L.k + (L.rev ? 1 : 0)], W) / (f * capR);
-    // 本列车的定员（v2.5 车队：按它的车型与编组）；车上人数按区间平均每列载客
-    const capT = t.mdl ? t.mdl.cap * (t.cars || rt.cars) : rt.cap;
+    const pax = A.trainPassengers(t), capT = CM.Agents.trainCapacity(t);
     return {
       x: p.x, y: p.y, h: hh, rt: rt, line: rt.line, type: type, v: v, dwell: dwell, hold: hold, water: water,
       next: C.stations[nextIdx], prev: C.stations[prevIdx], term: term, loopDir: rt.loop ? (t.g.dir === 0 ? '顺行' : '逆行') : null,
-      toNext: Math.abs(L.d1 - pos.d) * CFG.CELL_M, region: rg ? rg.name.replace(/（.*）/, '') : '', lf: capT > 0 ? lf * capR / capT : lf, cars: t.cars || rt.cars,
-      pax: lf * capR, cap: capT, model: t.mdl ? CM.Fleet.shortOf(t.mdl) + ' · ' + (t.cars || rt.cars) + ' 节' : null,
+      toNext: Math.abs(L.d1 - pos.d) * CFG.CELL_M, region: rg ? rg.name.replace(/（.*）/, '') : '', lf: capT > 0 ? pax / capT : 0, cars: t.cars || rt.cars,
+      pax: pax, cap: capT, model: t.mdl ? CM.Fleet.shortOf(t.mdl) + ' · ' + (t.cars || rt.cars) + ' 节' : null,
     };
   }
   const stn = function (s) { return /站$/.test(s.name) ? s.name : s.name + '站'; };

@@ -2,9 +2,9 @@
 // 全局参数。PRD 中标注"待确认"的数值在此给出可调整的默认值（DEFAULT），评审确认后只需修改本文件。
 (function (CM) {
   CM.CFG = {
-    GAME_VERSION: '2.9.6',
+    GAME_VERSION: '3.0.0',
     TRAFFIC_MODEL: 6,      // 背景交通与共用区段采用新模型，旧可重建缓存作废。
-    RULES_REVISION: 18,    // 任务、接管铁路和站名修订，加载前保留原存档备份。
+    RULES_REVISION: 23,    // 区段预算与接驳口径更新，载入旧档前保留原存档备份。
     SAVE_FORMAT: 'city-metro-save',
     SAVE_VERSION: 2,
     SAVE_MIN_VERSION: 2,   // 1.1 起地图改为真实地理，旧版存档的城市数据与之不兼容
@@ -236,9 +236,14 @@
     // metroLed 地铁带动发展：每座运营车站对半径 radius 格内产生吸引，强度 = base + 每多一条线 xfer + 客流（flowFull 人次/日取满）flow
     // + 车站商业开发 tod[等级]，开通后约 years 年形成。线网成熟度按地铁覆盖比例（cov0 起、cov1 满）：成熟度越高，车站吸引的权重
     // 越大（wMin → 1），历史阶段预设的片区增长权重越弱（flatten），车站周边可容纳的人口 / 岗位也提高（capR / capJ）。只重新分配增长，不改变全城总量
+    // newArea 新区开发（v3.4 玩家反馈：新城、新中心、新填海的需求增长太慢，后期修地铁拉动不明显）：规划为新市镇（newtown）或中心（cbd）的片区、
+    // 以及填海形成的土地，按「已有人口岗位 ÷ 可容纳量」判断还在开发中（不到 full），增长权重最多提高 boost 倍。增长沿道路、已有城区与车站展开，加成按开放或成陆年份逐步结束。
+    // churnP / churnJ 地铁带动迁居：线网成熟后（metroLed 的成熟度），每月有这一比例住在离车站较远处（步行 1.1 km 以外、不在车站吸引范围）的居民与岗位
+    // 迁走，按增长权重落到车站周边与新区；全城总量仍按人口曲线
+    newArea: { boost: 1.5, full: 0.6, years: 15, fade: 5, churnP: 0.0006, churnJ: 0.001 },
     metroLed: { radius: 4, years: 4, base: 0.3, xfer: 0.5, flow: 0.6, flowFull: 60000, tod: [0, 0.15, 0.4, 0.8], cov0: 0.08, cov1: 0.45, wMin: 0.25, res: 1.0, jobs: 1.8, flatten: 0.6, capR: 0.35, capJ: 0.9 },
     saves: { prefix: 'cm1.', maxManual: 12 },
     // 动态对象上限（代表性展示）：汽车、车站行人、街道行人、列车上下车乘客（每帧）；声音：列车声部与同时播放的环境短音
-    perf: { solverInputMs: 1.5, solverBudgetMs: 5, solverBudgetMaxMs: 10, frameTargetMs: 13, jumpSliceMs: 10, jumpRenderMs: 250, chunkBudgetMs: 6, sharpBudgetMs: 8, movingBudgetMs: 3, prefetchMs: 2, warmBudgetMs: 10, cacheMaxPx: 24e6, maxCars: 320, maxPeds: 180, maxWalkers: 120, maxRiders: 120, trainVoices: 3, maxOneShots: 6 },
+    perf: { solverInputMs: 1.5, solverBudgetMs: 5, solverBudgetMaxMs: 10, frameTargetMs: 13, jumpSliceMs: 10, trafficBuildMs: 8, jumpRenderMs: 250, chunkBudgetMs: 6, sharpBudgetMs: 8, movingBudgetMs: 3, prefetchMs: 2, warmBudgetMs: 10, cacheMaxPx: 24e6, maxCars: 320, maxPeds: 180, maxWalkers: 120, maxRiders: 120, trainVoices: 3, maxOneShots: 6 },
   };
 })(window.CM);

@@ -55,6 +55,9 @@ assert.ok(recentH.segs.every(s=>s.p0+s.gd<=1),'A line built this month must fini
 R.useAPI(C.testMapAPI);
 for(const geographic of[true,false]){C.testMapMode(geographic);const prepared=R.prepare(g);assert.ok(prepared.km.get(endSeg.id)>0,'Retired track length must be included in historical mileage');}
 const fixed=R.prepare(g);assert.equal(fixed.layout.route.size,R.collect(g).segs.length);assert.ok(fixed.W.dur>=30&&fixed.W.dur<=150);
+assert.ok(fixed.shots.some(s=>s.kind==='relabel'&&s.starts.length&&s.w0<s.g0&&s.g0<s.w1&&s.w1<s.we));
+assert.ok(fixed.shots.every((s,i)=>i===0||s.w0+1e-9>=fixed.shots[i-1].we),'Camera shots must play without overlap');
+for(const x of fixed.H.segs.filter(x=>x.relabel)){const prev=fixed.H.segs.find(s=>s.base===x.base&&s.t1===x.t0);assert.ok(prev&&prev.p1>=x.p0+x.gd-1e-9,'Old track color remains until repaint completes');}
 console.log('PASS current-month construction finishes in replay and demolished track lengths survive in both layouts');
 for(const[id,year]of[['ld',1992],['sz',2002]]){const state={mapId:id,clock:{y:year-1},ym:()=>year*12,econ:{mode:'challenge'},compiled:{stations:[],routes:[]},net:{lines:{},stations:{},segments:{}},model:{trafficReady:()=>true}};C.useMap(id);const before=C.Corp.unlockState(state);assert.equal(before.ok,false);state.clock.y=year;assert.equal(C.Corp.flavor(state).from,year);assert.equal(C.Corp.enabled(state),true);}
 console.log('PASS London PFI and Shenzhen PPP');

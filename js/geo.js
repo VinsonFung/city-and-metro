@@ -91,6 +91,68 @@
     Geo.src = G; Geo.ready = true;
     return Geo;
   };
+  // 去台阶（v3.4 玩家反馈：有些地图的小岛、岸线近看有格子状锯齿）：较早生成的地图（香港、纽约、新加坡、迈阿密、悉尼、深圳、台北、上海等）
+  // 海面是从栅格描出来的，环上满是 1/R 格的直角台阶；巴黎、东京的部分林地与公园也是。只给画面用一份平滑后的副本（Geo.view）：
+  // 台阶多的环先把短的轴向边换成中点（直角切成斜边，长直边保留两端点，人工岸线与地图外框的角不被切掉），再平滑三遍、略作简化。
+  // 模拟（水域栅格、林地覆盖、填海）仍用原始数据，存档与交通模型不受影响
+  const STAIR_MIN = 0.12;   // 台阶拐点占比超过这个值的环才处理
+  Geo.smoothRing = function (p, outer) {
+    const n = p.length / 2; if (n < 8) return p;
+    let st = 0; const ax = [];
+    for (let i = 0; i < n; i++) {
+      const a = (i + n - 1) % n, c = (i + 1) % n, ux = p[2 * i] - p[2 * a], uy = p[2 * i + 1] - p[2 * a + 1], vx = p[2 * c] - p[2 * i], vy = p[2 * c + 1] - p[2 * i + 1];
+      const lu = Math.abs(ux) + Math.abs(uy), lv = Math.abs(vx) + Math.abs(vy), axU = ux === 0 || uy === 0, axV = vx === 0 || vy === 0;
+      if (axU && lu <= 0.3) ax.push(lu);
+      if (axU && axV && lu <= 0.3 && lv <= 0.3 && ux * vx + uy * vy === 0) st++;
+    }
+    if (st < n * STAIR_MIN || !ax.length) return p;
+    ax.sort(function (a, b) { return a - b; });
+    const step = Math.max(1 / 64, ax[ax.length >> 1]), short = Math.max(step * 2.5, 0.3), m = [];
+    const put = function (x, y) { const l = m.length; if (l && Math.abs(m[l - 2] - x) < 1e-6 && Math.abs(m[l - 1] - y) < 1e-6) return; m.push(x, y); };
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n, x0 = p[2 * i], y0 = p[2 * i + 1], x1 = p[2 * j], y1 = p[2 * j + 1];
+      if ((x0 === x1 || y0 === y1) && Math.abs(x1 - x0) + Math.abs(y1 - y0) <= short) put((x0 + x1) / 2, (y0 + y1) / 2);
+      else { put(x0, y0); put(x1, y1); }
+    }
+    const k = m.length / 2; if (k < 4) return p;
+    // 切成斜边后仍是 45° 的锯齿（台阶粗的地图约 60 m 一个）：拉普拉斯平滑三遍，短边上的点向两邻点的平均靠拢，长直边的端点不动
+    const lim = short * 1.2, fixed = new Uint8Array(k);
+    for (let i = 0; i < k; i++) { const a = (i + k - 1) % k, c = (i + 1) % k; if (Math.hypot(m[2 * i] - m[2 * a], m[2 * i + 1] - m[2 * a + 1]) > lim || Math.hypot(m[2 * c] - m[2 * i], m[2 * c + 1] - m[2 * i + 1]) > lim) fixed[i] = 1; }
+    for (let it = 0; it < 3; it++) {
+      const q = m.slice();
+      for (let i = 0; i < k; i++) { if (fixed[i]) continue; const a = (i + k - 1) % k, c = (i + 1) % k; q[2 * i] = 0.25 * m[2 * a] + 0.5 * m[2 * i] + 0.25 * m[2 * c]; q[2 * i + 1] = 0.25 * m[2 * a + 1] + 0.5 * m[2 * i + 1] + 0.25 * m[2 * c + 1]; }
+      for (let i = 0; i < m.length; i++) m[i] = q[i];
+    }
+    // 闭合环的道格拉斯—普克：从离首点最远的点切成两段分别简化（容差很小，只去掉平滑后多余的点）
+    const tol = U.clamp(step * 0.15, 0.01, 0.03), keep = new Uint8Array(k);
+    let far = 0, fd = -1; for (let i = 1; i < k; i++) { const d = (m[2 * i] - m[0]) ** 2 + (m[2 * i + 1] - m[1]) ** 2; if (d > fd) { fd = d; far = i; } }
+    const dp = function (a, b) {   // a、b 为环上的下标（b 可以绕回），保留两端，递归保留偏离最大的点
+      const st2 = [[a, b]];
+      while (st2.length) {
+        const q = st2.pop(), i0 = q[0], i1 = q[1]; if (i1 - i0 < 2) continue;
+        const A = i0 % k, B = i1 % k, axx = m[2 * A], ayy = m[2 * A + 1], dx = m[2 * B] - axx, dy = m[2 * B + 1] - ayy, L = Math.hypot(dx, dy) || 1e-9;
+        let bi = -1, bd = tol;
+        for (let i = i0 + 1; i < i1; i++) { const I = i % k, d = Math.abs((m[2 * I] - axx) * dy - (m[2 * I + 1] - ayy) * dx) / L; if (d > bd) { bd = d; bi = i; } }
+        if (bi >= 0) { keep[bi % k] = 1; st2.push([i0, bi], [bi, i1]); }
+      }
+    };
+    keep[0] = keep[far] = 1; dp(0, far); dp(far, k);
+    const out = []; for (let i = 0; i < k; i++) if (keep[i]) out.push(m[2 * i], m[2 * i + 1]);
+    return out.length >= 6 ? orient(new Float32Array(out), outer) : p;
+  };
+  const viewCache = new WeakMap();
+  Geo.view = function (key) {
+    const src = Geo[key]; if (!src || !src.length) return src || [];
+    let v = viewCache.get(src); if (v) return v;
+    v = src.map(function (f) {
+      let ch = false;
+      const rings = f.rings.map(function (r) { const q = Geo.smoothRing(r.p, r.outer); if (q === r.p) return r; ch = true; return { outer: r.outer, p: q }; });
+      if (!ch) return f;
+      let bb = null; for (const r of rings) bb = bboxOf(r.p, bb);
+      return Object.assign({}, f, { rings: rings, bbox: bb });
+    });
+    viewCache.set(src, v); return v;
+  };
   // 丢掉某一数据源的解码结果（v3.0 内存）：该地图的完整地理数据被释放时（maps.js releaseGeo）一并释放，正在使用的不动
   Geo.forget = function (G) { if (G !== Geo.src) cache.delete(G); };
 

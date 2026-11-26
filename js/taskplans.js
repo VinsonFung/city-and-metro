@@ -228,7 +228,7 @@
     bj: {
       bj1: { base: 'direct', parts: [hub('西单', 2)] },
       bj2: { parts: [km(['elevated', 'surface'], 12), cost(0.9)], desc: '回龙观、上地与望京的居民需要进城。连接西直门、五道口、上地、回龙观与东直门。北部空地多，可以像城市铁路那样走地面和高架，把造价压下来。' },
-      bj3: { parts: [km(['elevated', 'surface'], 6), regCov(['tongzhou'], '通州', 0.15)] },
+      bj3: { parts: [km(['elevated', 'surface'], 6), regCov(['tongzhou'], '通州', 0.14)] },
       bj4: { base: 'direct', parts: [load(1.2)] },
       bj5: { parts: [fac('bj_olypark', 0.15)] },
       bj6: { base: 'direct', parts: [speed(100), fac('bj_pek', 0.15)] },

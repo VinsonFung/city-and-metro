@@ -457,6 +457,53 @@
     if (!fwd) pts.reverse();
     return (fwd ? s.a + '|' + s.b : s.b + '|' + s.a) + '|' + s.type + (s.curve === 'smooth' ? '|s' : s.curve === 'arc' ? '|a' : '') + '|' + pts.map(function (p) { return p[0].toFixed(3) + ',' + p[1].toFixed(3); }).join(';');
   };
+  // 建设凭证随车站和物理轨道保存。编号标识同一笔费用，复制到共线区段时只计一次。
+  function mergeBuildPayments(list, overlap) {
+    const merged = new Map();
+    for (const part of list) {
+      const local = new Map();
+      for (const [seq, ref, amount] of part || []) {
+        const key = seq + ":" + ref, prev = local.get(key);
+        local.set(key, [seq, ref, (prev?.[2] || 0) + amount]);
+      }
+      for (const [key, [seq, ref, amount]] of local) {
+        const prev = merged.get(key)?.[2] || 0;
+        merged.set(key, [seq, ref, overlap ? Math.max(prev, amount) : prev + amount]);
+      }
+    }
+    return Array.from(merged.values());
+  }
+  M.recordBuildPayments = function (net, items, seq) {
+    const charges = new Map();
+    const add = (ref, amount) => {
+      if (amount > 0 && (net.segments[ref] || net.stations[ref])) charges.set(ref, (charges.get(ref) || 0) + amount);
+    };
+    for (const { ref, amount, trackShares } of items) {
+      if (trackShares) for (const [id, share] of trackShares) add(id, amount * share);
+      else add(ref, amount);
+    }
+    for (const [ref, amount] of charges) {
+      const asset = net.segments[ref] || net.stations[ref];
+      asset.buildPayments = (asset.buildPayments || []).concat([[seq, ref, amount]]);
+    }
+    const shared = new Map();
+    for (const seg of Object.values(net.segments)) {
+      const key = M.trackKey(seg);
+      let parts = shared.get(key);
+      if (!parts) shared.set(key, parts = []);
+      parts.push(seg);
+    }
+    for (const parts of shared.values()) {
+      if (parts.length < 2 || !parts.some(seg => seg.buildPayments?.length)) continue;
+      const paid = mergeBuildPayments(parts.map(seg => seg.buildPayments), true);
+      for (const seg of parts) seg.buildPayments = paid;
+    }
+  };
+  function splitBuildPayments(seg, first, second, share) {
+    if (!seg.buildPayments?.length) return;
+    first.buildPayments = seg.buildPayments.map(([seq, ref, amount]) => [seq, ref, amount * share]);
+    second.buildPayments = seg.buildPayments.map(([seq, ref, amount]) => [seq, ref, amount - amount * share]);
+  }
   // 与 seg 共用轨道的其他线路区段；rev 表示其方向与 seg 相反
   M.coTrackSegs = function (net, seg) {
     if (!seg) return [];
@@ -805,6 +852,9 @@
     net.segments[g2] = { id: g2, line: seg.line, a: sid, b: seg.b, pts: after, type: seg.type, base: base };
     if (curve) net.segments[g1].curve = net.segments[g2].curve = curve;
     preserveRail(seg, origin, [g1, g2]);
+    const total = g.cum.at(-1), cut = g.cum[si] + st * (g.cum[si + 1] - g.cum[si]);
+    const share = total > 0 ? U.clamp(cut / total, 0, 1) : 0.5;
+    splitBuildPayments(seg, net.segments[g1], net.segments[g2], share);
     const cp = function (list, rev) { const out = list.map(function (p) { return [p[0], p[1]]; }); return rev ? out.reverse() : out; };
     for (const c of co) {
       const m = net.segments[c.id]; if (!m) continue;
@@ -815,6 +865,7 @@
       net.segments[x2] = { id: x2, line: m.line, a: sid, b: m.b, pts: cp(c.rev ? before : after, c.rev), type: m.type, base: mb };
       if (curve) net.segments[x1].curve = net.segments[x2].curve = curve;
       preserveRail(m, source, [x1, x2]);
+      splitBuildPayments(m, net.segments[x1], net.segments[x2], c.rev ? 1 - share : share);
     }
     // 插入的车站按所在轨道设站台（地下轨道上为地下站台）；绘线接入的新线路另设自己的站台层（天地换乘）
     if (seg.type !== net.stations[sid].type) {
@@ -863,6 +914,7 @@
           }
           net.segments[id] = { id: id, line: lid, a: o1, b: o2, pts: p1.concat([[st.x, st.y]], p2), type: type, base: Array.from(new Set(base)) };
           if (s1.curve && s1.curve === s2.curve) net.segments[id].curve = s1.curve;
+          if (s1.buildPayments || s2.buildPayments) net.segments[id].buildPayments = mergeBuildPayments([s1.buildPayments, s2.buildPayments]);
         }
       } else {
         for (const s of segs) delete net.segments[s.id];
@@ -900,6 +952,7 @@
       const lv = M.platType(A, lid); if (lv !== M.platType(B, lid)) { B.lv = Object.assign({}, B.lv || {}); B.lv[lid] = lv; }
       if (A.pd && A.pd[lid] != null) { B.pd = Object.assign({}, B.pd || {}); B.pd[lid] = A.pd[lid]; }
     }
+    if (A.buildPayments?.length) B.buildPayments = mergeBuildPayments([A.buildPayments, B.buildPayments]);
     if ((SIZE_RANK[A.size] || 0) > (SIZE_RANK[B.size] || 0)) B.size = A.size;
     const seen = new Set();
     for (const id in net.segments) {
@@ -977,7 +1030,7 @@
   // 车站命名
   M.suggestName = function (net, x, y, city) {
     const used = new Set(Object.values(net.stations).map(function (s) { return s.name; }));
-    const cands = D.places.map(function (p) { return { n: p[0], d: U.dist(x, y, p[1], p[2]), x: p[1], y: p[2], kind: p[3] }; }).sort(function (a, b) { return a.d - b.d || a.kind - b.kind; });
+    const cands = D.places.map(function (p) { return { n: U.stationLabel(p[0]), d: U.dist(x, y, p[1], p[2]), x: p[1], y: p[2], kind: p[3] }; }).sort(function (a, b) { return a.d - b.d || a.kind - b.kind; });
     for (const c of cands) { if (c.d > 3.2) break; if (!used.has(c.n)) return c.n; }
     const c0 = cands[0];
     if (c0 && c0.d < 7) {
@@ -1293,9 +1346,9 @@
   function evaluate(draft, off, city, year) {
     const res = { items: [], total: 0, byKind: { construction: 0, demolition: 0, upgrade: 0, relocation: 0 }, conflicts: [], warnings: [], demolitions: [], changes: { add: [], mod: [], del: [] }, affectedLines: new Set(), notes: [] };
     const C = CFG.cost, ci = costIndex(year);
-    const item = function (kind, label, amount, ref) {
+    const item = function (kind, label, amount, ref, trackShares) {
       if (amount <= 0.5) return;
-      res.items.push({ kind: kind, label: label, amount: amount, ref: ref });
+      res.items.push({ kind: kind, label: label, amount: amount, ref: ref, trackShares });
       res.total += amount; res.byKind[kind] += amount;
     };
     // 冲突：类型、位置、涉及对象、原因说明、解决办法与一键修复
@@ -1550,8 +1603,15 @@
       // 运营中的机场（台北松山）：跑道与航站区只能地下穿越
       if (site && g.airM > 1 && s.type !== 'underground') conflict({ type: 'airport', kind: 'seg', ref: id, x: g.airHit[0], y: g.airHit[1], msg: lbl + '：' + (D.airport.name || '机场') + '照常运营，范围内不能建地面或高架轨道', how: '机场范围内只能以隧道穿越。把这段轨道改为地下，或调整线形绕开机场。', fixes: [toUnder, editSeg] });
       // 地面铁路（v1.9）：新建或改动的地面轨道不能与运营中的地面铁路平交；既有的交叉保留
-      const crossings = site && s.type === 'surface' && g.railS > 0 ? g.railSurf.filter(p =>
-        !s.tk || !(base || []).some(b => off.segments[b].tk === s.tk && U.distToPoly(p[0], p[1], offGeom[b].pts) <= 0.32)) : [];
+      const crossings = site && s.type === 'surface' && g.railS > 0 ? g.railSurf.filter(p => {
+        if (s.tk && (base || []).some(b => off.segments[b].tk === s.tk && U.distToPoly(p[0], p[1], offGeom[b].pts) <= 0.32)) return false;
+        return ![s.a, s.b].some(sid => {
+          const station = draft.stations[sid];
+          if (!station || U.dist(p[0], p[1], station.x, station.y) * CFG.CELL_M > CFG.metro.platformHalfM + 30) return false;
+          // 从接管站接出地面线时，站台范围内的交点属于原铁路走廊。
+          return !!station.tk || segsBySt.get(sid)?.some(track => retainedRail.has(track.id));
+        });
+      }) : [];
       if (crossings.length) {
         const p = crossings[0];
         conflict({ type: 'rail', kind: 'seg', ref: id, x: p[0], y: p[1], msg: lbl + '：地面轨道与铁路平面交叉（' + crossings.length + ' 处）', how: '地铁不能与铁路平交。把这段轨道改为高架（上跨铁路）或地下（下穿铁路），每处交叉会增加相应的跨越费用；也可以调整线形，在铁路的高架段下方通过。', fixes: [{ label: '改为高架', op: 'segType', seg: id, value: 'elevated' }, toUnder, editSeg] });
@@ -1649,8 +1709,10 @@
           const pseudo = { lenM: extra, waterM: Math.max(0, dWater - baseWater), hillM: Math.max(0, dHill - baseHill), protM: Math.max(0, dProt - baseProt), railS: Math.max(0, dRS - baseRS), railV: Math.max(0, dRV - baseRV) };
           const acc = Math.abs(extra - step) > 1 ? '（含此前免费调整累计 ' + U.fmtKm(extra - step) + '）' : '';
           res.changes.mod.push('调整线形 ' + gr.lbl + '：增加 ' + U.fmtKm(extra) + acc);
-          item('construction', '延长/调整轨道 ' + gr.lbl + '（+' + U.fmtKm(extra) + acc + '）', M.trackCost(pseudo, gr.type, year), gr.segs[0].s.id);
-          if (pseudo.hillM > 1) item('construction', '风景区环境保护费 · ' + gr.lbl + '（景区内 +' + U.fmtKm(pseudo.hillM) + '）', M.envTrackFee(pseudo, gr.type, year), gr.segs[0].s.id);
+          // 一笔调线费用可能覆盖多段轨道，预算按各段长度分摊，建设账单仍保留一项。
+          const trackShares = gr.segs.length > 1 && dLen > 0 ? gr.segs.map(x => [x.s.id, x.g.lenM / dLen]) : null;
+          item('construction', '延长/调整轨道 ' + gr.lbl + '（+' + U.fmtKm(extra) + acc + '）', M.trackCost(pseudo, gr.type, year), gr.segs[0].s.id, trackShares);
+          if (pseudo.hillM > 1) item('construction', '风景区环境保护费 · ' + gr.lbl + '（景区内 +' + U.fmtKm(pseudo.hillM) + '）', M.envTrackFee(pseudo, gr.type, year), gr.segs[0].s.id, trackShares);
           for (const x of gr.segs) {
             const dm = M.trackDemolition(city, x.g, gr.type, year, U.clamp(extra / Math.max(1, dLen), 0, 1));
             item('demolition', '沿线拆迁 ' + gr.lbl, dm.cost, x.s.id);

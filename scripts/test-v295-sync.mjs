@@ -91,3 +91,39 @@ C.useMap('tk');
 C.I18n.apply('zh-TW');
 assert.equal(C.I18n.text('冰川台'), '冰川台');
 console.log('PASS default station names, conservative old-save repair and localized filenames');
+
+
+const T = C.Tasks, dedup = new T(), xy = (x, y = 0) => ({ x, y });
+const routeTask = (anchors, kind) => ({ type: 'connect', kind, anchors });
+const historicalRoute = routeTask([xy(10), xy(25)], 'hist');
+const variant = routeTask([xy(25.1), xy(10.3)], 'dyn');
+const extension = routeTask([xy(10.3), xy(25.1), xy(38)], 'dyn');
+assert.equal(T.sameAnchors([xy(10), xy(7)], [xy(9), xy(13)]), 2, 'Anchor assignment must find both matches even when the first anchor has two candidates');
+dedup.active.push(historicalRoute);
+assert.equal(dedup.dupOf(variant).done, false);
+assert.ok(dedup.targeted(10.1, 0));
+dedup.done.push(dedup.active.pop());
+assert.equal(dedup.dupOf(variant).done, true);
+assert.equal(dedup.dupOf(extension), null);
+dedup.failed.push(dedup.done.pop());
+assert.equal(dedup.dupOf(variant).done, true);
+T.coolPlace(dedup, { anchors: [xy(10), ['missing old anchor'], null], spot: xy(25) }, 100, false);
+assert.ok(dedup.cooledNear(10.1, 0, 219));
+assert.ok(dedup.cooledNear(25.1, 0, 219));
+assert.equal(dedup.cooledNear(25.1, 0, 220), false);
+
+const metroCheck = C.Metro.checkSite;
+try {
+  C.Metro.checkSite = () => ({ ok: true });
+  const siteCity = { uid: 'access-test', VW: 20, terrainVer: 1, lockVer: 1, walk: { deg: new Uint8Array(400) } };
+  const f = { id: 'test-stadium', x: 6.5, y: 6.5, lmK: -1 };
+  const links = { ids: [f.id], link: Uint8Array.of(1) };
+  assert.equal(T.facServable(siteCity, f, links), false, 'Legal station site without walkable streets must fail');
+  siteCity.walk = { deg: new Uint8Array(400) };
+  siteCity.walk.deg[126] = 1;
+  assert.equal(T.facServable(siteCity, f, links), true, 'Rebuilt walk network must invalidate task eligibility cache');
+  links.link[0] = 0;
+  assert.equal(T.facServable(siteCity, f, links), false, 'Facility entrance must reach the walk network');
+  assert.equal(T.facServable(siteCity, { ...f, ext: true }, links), true, 'Off-map interchange is still eligible');
+} finally { C.Metro.checkSite = metroCheck; }
+console.log('PASS duplicate task anchors, regional cooldown and facility entrance accessibility');

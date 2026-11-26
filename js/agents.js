@@ -69,7 +69,6 @@
     this.vt += dtv;
     const model = game.model;
     const W = model.weights(game.clock.minute);
-    this.W = W;
     if (model.net !== this.netRef) this.syncNetwork(model.net);
     this.updateTrains(dtv, dt, model, W);
     if (CM.BgTransit) CM.BgTransit.update(dt, game);   // 背景交通的列车与渡轮（只用于画面）
@@ -187,16 +186,24 @@
       if (t.dying || !t.g) continue;
       const g = t.g;
       let rem = dtv;
+      const current = g.legs[t.leg];
+      if (t.passengers == null) t.passengers = this.legPassengers(t, current, model, W);
+      if (t.t >= current.T && t.nextPassengers == null) {
+        t.nextPassengers = this.legPassengers(t, g.legs[(t.leg + 1) % g.legs.length], model, W);
+      }
       let guard = 0;
       while (rem > 0 && guard++ < 50) {
         const L = g.legs[t.leg];
-        const end = L.T + L.dwell;
+        const end = L.T + L.dwell, nextLeg = (t.leg + 1) % g.legs.length;
+        if (t.t < 0 && t.t + rem >= 0) t.passengers = this.legPassengers(t, L, model, W);
+        if (t.t + rem >= L.T && t.nextPassengers == null) t.nextPassengers = this.legPassengers(t, g.legs[nextLeg], model, W);
         if (t.t + rem < end) { t.t += rem; rem = 0; break; }
         rem -= end - t.t;
+        t.passengers = t.nextPassengers; t.nextPassengers = null;
         t.leg++; t.t = 0;
         if (t.leg >= g.legs.length) {
           t.leg = 0;
-          if (g.count > g.need) { t.dying = true; g.count--; t.t = 0; t.leg = g.legs.length - 1; t.t = g.legs[t.leg].T + g.legs[t.leg].dwell; rem = 0; break; }
+          if (g.count > g.need) { t.dying = true; g.count--; t.t = 0; t.leg = g.legs.length - 1; t.t = g.legs[t.leg].T + g.legs[t.leg].dwell; t.passengers = 0; rem = 0; break; }
           // 发车间隔控制：在控制点等候
           const due = g.lastDep + g.h;
           if (vt < due) { t.t = -(due - vt); }
@@ -252,11 +259,19 @@
   // 代表性乘客人数：只按满载率决定（每次停站最多 8 人），不逐人模拟客流
   function paxCount(lf) { return lf <= 0.004 ? 0 : Math.min(8, Math.max(1, Math.round(lf * 6))); }
   Agents.paxCount = paxCount;
-  Agents.prototype.legLoad = function (t, L, model, W) {
+  Agents.prototype.legPassengers = function (t, L, model, W) {
     const net = this.netRef, re = net && net.rideEdge && net.rideEdge[t.g.r];
-    if (!model || !re || !W) return 0;
+    if (!model || !re || !L || !W) return 0;
     const f = model.freqAt(t.g.r, W, t.g.rt.loop ? (L.rev ? 1 : 0) : null);
-    return f > 0 ? model.edgeLoadAt(re[2 * L.k + (L.rev ? 1 : 0)], W) / (f * model.capOf(t.g.r, net)) : 0;
+    return f > 0 ? (model.edgeLoadAt(re[2 * L.k + (L.rev ? 1 : 0)], W) || 0) / f : 0;
+  };
+  Agents.trainCapacity = function (t) {
+    const rt = t.g.rt;
+    return t.mdl ? t.mdl.cap * (t.cars || rt.cars) : rt.cap;
+  };
+  // 发车前与到站时采样。区间内仍显示本趟列车携带的人数，不追随客流模型的时段插值。
+  Agents.prototype.trainPassengers = function (t) {
+    return (t.nextPassengers ?? t.passengers) || 0;
   };
   // 两种视图共用外观、门位及上下车动作；这些对象不进入存档或交通求解。
   Agents.DOOR_FRACTIONS = [0.3, 0.7];
@@ -296,9 +311,12 @@
     lk.window=night?'#ffe496':lf>1?'#ffc8c8':lk.win;
     return lk;
   };
-  Agents.prototype.trainRiders = function (t, ph, nCar, model, W, out) {
-    out=out||[];out.length=0;const L=t.g.legs[t.leg];if(!L||ph.door<=0||nCar<=1)return out;
-    const next=ph.state==='hold'?L:t.g.legs[(t.leg+1)%t.g.legs.length],nA=ph.state==='dwell'?paxCount(this.legLoad(t,L,model,W)):0,nB=paxCount(this.legLoad(t,next,model,W)),stop=t.id*131+t.leg*17,pal=this.pal||PED_COLORS;
+  Agents.prototype.trainRiders = function (t, ph, nCar, out) {
+    out = out || []; out.length = 0;
+    if (ph.door <= 0 || nCar <= 1) return out;
+    const cap = Math.max(1, Agents.trainCapacity(t));
+    const nA = ph.state === 'dwell' ? paxCount((t.passengers || 0) / cap) : 0;
+    const nB = paxCount(this.trainPassengers(t) / cap), stop = t.id * 131 + t.leg * 17, pal = this.pal || PED_COLORS;
     for(let j=0;j<nA+nB;j++){
       const board=j>=nA,jj=board?j-nA:j,p=board?1-(ph.until-(DOOR.closeLead+.4+jj*DOOR.gap))/DOOR.walk:(ph.since-(DOOR.delay+DOOR.open*.5+jj*DOOR.gap))/DOOR.walk;
       if(p<=0||p>=1)continue;
@@ -308,8 +326,6 @@
   Agents.prototype.drawTrains = function (ctx, R, ui) {
     const net = this.netRef; if (!net) return;
     const z = R.z, under = U.smooth(R.cam.under), game = R.game;
-    const model = game && !game.preview ? game.model : null;
-    const W = this.W;
     const tmp = {}, sp = {}, ph = {}, q = {};
     const width = U.clamp(z * 0.075, 2.4, 7.5);
     const v = R.view, hl = ui && ui.highlightLine, night = !!(R.th && R.th.night);
@@ -351,9 +367,9 @@
       if (hl && hl !== rt.lineId) alpha *= 0.3;
       ctx.globalAlpha = alpha;
       this.phase(t,t.animation||(t.animation={}));Object.assign(ph,t.animation);t.door=ph.door;t.state=ph.state;
-      const L=t.g.legs[t.leg],lf=z>=14&&L?this.legLoad(t,L,model,W):0,look=this.trainLook(t,R,lf);
+      const lf = z >= 14 ? this.trainPassengers(t) / Math.max(1, Agents.trainCapacity(t)) : 0, look = this.trainLook(t, R, lf);
       const riders=t.riders||(t.riders=[]);riders.length=0;
-      if(showPax&&paxBudget>0)this.trainRiders(t,ph,nCar,model,W,riders);
+      if(showPax&&paxBudget>0)this.trainRiders(t,ph,nCar,riders);
       if(riders.length>paxBudget)riders.length=paxBudget;paxBudget-=riders.length;t.riderFrame=R.frame;
       // 跟随中的列车：脉动圆环
       if (R.follow === t) {

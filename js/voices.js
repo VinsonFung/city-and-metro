@@ -291,6 +291,7 @@
     const show = function (s, top) {
       st.view = s.view; st.post = s.post || null; st.user = s.user || null;
       navs.home.classList.toggle('on', st.root === 'feed'); navs.fol.classList.toggle('on', st.root === 'following'); navs.sat.classList.toggle('on', st.root === 'sat');
+      navs.story.classList.toggle('on', st.root === 'stories'); navs.route.classList.toggle('on', st.root === 'nav');
       app.classList.remove('side-open'); draw(); tl.scrollTop = top || 0;
     };
     const setView = function (v) { st.root = v; st.hist = []; show({ view: v }); };
@@ -305,14 +306,20 @@
     const navs = {
       home: nav('home', '首页', function () { st.f = 'all'; st.topic = ''; st.q = ''; search.value = ''; setView('feed'); }, st.view === 'feed'),
       fol: nav('people', '关注的人', function () { setView('following'); }, st.view === 'following'),
+      story: nav('book', '市民故事', function () { setView('stories'); }, st.view === 'stories'),
+      route: nav('route', '导航', function () { setView('nav'); }, st.view === 'nav'),
       sat: nav('smile', '满意度', function () { setView('sat'); }, st.view === 'sat'),
     };
-    // 「关注」上的蓝色角标：关注的市民在上次查看之后发的新动态数
+    // 「关注」上的蓝色角标：关注的市民在上次查看之后发的新动态数；「市民故事」上的角标：上次查看之后的新故事
     const folBadge = h('i', { class: 'vx-badge' }); navs.fol.appendChild(folBadge);
-    const updBadge = function () { const n = CM.Voices.newCount(g); folBadge.textContent = n > 9 ? '9+' : (n ? String(n) : ''); folBadge.style.display = n ? '' : 'none'; };
+    const storyBadge = h('i', { class: 'vx-badge' }); navs.story.appendChild(storyBadge);
+    const updBadge = function () {
+      const n = CM.Voices.newCount(g); folBadge.textContent = n > 9 ? '9+' : (n ? String(n) : ''); folBadge.style.display = n ? '' : 'none';
+      const s = CM.Folks && st.view !== 'stories' ? CM.Folks.newCount(g) : 0; storyBadge.textContent = s > 9 ? '9+' : (s ? String(s) : ''); storyBadge.style.display = s ? '' : 'none';
+    };
     const rail = h('nav', { class: 'vx-rail' },
       h('div', { class: 'vx-logo' }, h('span', { class: 'vx-mark' }, ic('metro', 20)), h('b', null, '地铁圈')),
-      navs.home, navs.fol, navs.sat,
+      navs.home, navs.fol, navs.story, navs.route, navs.sat,
       // 窄窗口收起右栏时，「探索」切换显示搜索、满意度、热议话题与推荐关注
       h('button', { class: 'vx-nav vx-explore', 'aria-label': '探索', onclick: function () { app.classList.toggle('side-open'); } }, ic('search', 22), h('span', null, '探索')),
       h('span', { class: 'grow' }),
@@ -526,7 +533,279 @@
       feed.replaceChildren.apply(feed, nodes);
       I18(head); I18(feed);
     };
+    // ---------------- 市民故事与导航（v3.4） ----------------
+    const J = CM.Journey, FK = CM.Folks;
+    const WALK = SVG('<circle cx="13.5" cy="4.6" r="1.7"/><path d="M10.6 21l1.7-6-2.2-2.4.9-4.4 3.3 2.5 2.6.4"/><path d="M12.3 15l2.7 2.3.9 3.7"/><path d="M11 8.6l-3.2 1.7-.9 3.3"/>');
+    const modeIcon = function (mode, s) { return mode === 'walk' ? h('span', { class: 'fk-walk', html: WALK }) : ic(mode === 'metro' ? 'metro' : mode === 'bus' ? 'bus' : 'car', s || 16); };
+    const fmtM = function (v) { return J.fmtMin(v); };
+    // 标记上的字：中文用「家 / 工 / 学 / 医 / 去 / 起 / 终」，英文界面用字母（单字没法翻译）
+    const PIN = { home: ['家', 'H'], work: ['工', 'W'], school: ['学', 'S'], hosp: ['医', '+'], go: ['去', 'G'], a: ['起', 'A'], b: ['终', 'B'] };
+    const pinCh = function (k) { return PIN[k][isEnglish() ? 1 : 0]; };
+    const pinHome = function (c) { return { x: c.home.x, y: c.home.y, ch: pinCh('home'), color: '#2f9e44', label: c.home.name }; };
+    const pinDest = function (c, to) { const d = to || c.dest; return { x: d.x, y: d.y, ch: pinCh(d.type === 'school' || d.type === 'primary' || d.type === 'uni' ? 'school' : (d.type === 'hosp' ? 'hosp' : (c.kind === 'retiree' ? 'go' : 'work'))), color: '#1e6fd9', label: d.name }; };
+    const AVF = function (c) { return h('span', { class: 'fk-face-w', 'data-no-i18n': '', html: FK.avatar(c) }); };   // 代码生成的插画头像（folks.js）
+    // 选中方式的路线：地铁用各段，开车 / 公交用道路路线，步行用一条直线
+    const tripRoute = function (P, mode) {
+      if (mode === 'metro' && P.metro) return { legs: P.metro.legs };
+      if ((mode === 'car' || mode === 'bus') && P.car && P.car.pts) return { legs: [{ k: 'car', pts: P.car.pts }] };
+      return { legs: [{ k: 'walk', pts: [[P.from.x, P.from.y], [P.to.x, P.to.y]] }] };
+    };
+    const legBar = function (m) {
+      return h('div', { class: 'nv-bar' }, m.legs.map(function (L) { return h('i', { class: 'k-' + L.k, style: { flexGrow: String(Math.max(0.35, L.min)), background: L.k === 'ride' ? L.color : null } }); }));
+    };
+    const legRow = function (L) {
+      let icon, title, sub;
+      if (L.k === 'walk') { icon = h('span', { class: 'fk-walk', html: WALK }); title = L.to ? '步行到' + L.to + '站' : '步行到终点'; sub = Math.round(L.m) + ' 米'; }
+      else if (L.k === 'wait') { icon = ic('clock', 15); title = '在' + L.st + '站候车'; sub = L.label; }
+      else if (L.k === 'ride') { icon = ic('metro', 15); title = '乘坐 ' + L.label; sub = L.from + ' → ' + L.to + ' · ' + L.stops + ' 站'; }
+      else { icon = ic('route', 15); title = L.inSt ? '在' + L.st + '站换乘' : '从' + L.st + '站步行到' + L.to + '站换乘'; sub = L.inSt ? '站内通道' : Math.round(L.m || 0) + ' 米'; }
+      return h('div', { class: 'nv-leg k-' + L.k, style: L.color ? { '--c': L.color } : null }, h('span', { class: 'nv-li' }, icon), h('div', { class: 'nv-lt' }, h('b', null, title), h('small', null, sub)), h('span', { class: 'nv-lm' }, fmtM(L.min) + ' 分钟'));
+    };
+    // 四种方式的对比：最快的标「最快」，chosen 为这位市民实际选的方式
+    const optList = function (P, chosen, noCar) {
+      const rows = [];
+      const opt = function (mode, min, sub, off) {
+        const best = !off && P.best === mode, pick = chosen === mode;
+        return h('div', { class: 'nv-opt' + (best ? ' best' : '') + (pick ? ' pick' : '') + (off ? ' off' : '') }, h('span', { class: 'nv-oi' }, modeIcon(mode, 17)),
+          h('div', { class: 'nv-ot' }, h('b', null, J.modeName[mode]), h('small', null, sub)),
+          h('div', { class: 'nv-om' }, off ? h('b', null, '—') : [h('b', null, fmtM(min)), h('small', null, '分钟')]),
+          pick ? h('em', { class: 'pick' }, '他的选择') : (best ? h('em', null, '最快') : null));
+      };
+      const m = P.metro;
+      rows.push(opt('metro', m ? m.min : null, m ? ((m.xfers > 0 ? '换乘 ' + m.xfers + ' 次' : '直达') + ' · 票价约 ' + money(U.cur(m.fare))) : (P.why || '暂时无法乘坐'), !m));
+      if (P.bus) rows.push(opt('bus', P.bus.min, (P.bus.name ? P.bus.name : '路面公交') + ' · 含候车 ' + Math.round(P.bus.wait || 0) + ' 分钟', false));
+      if (P.car) rows.push(opt('car', P.car.min, noCar ? '家里没有车' : '含停车取车 ' + Math.round(P.car.park) + ' 分钟 · 油费停车约 ' + money(U.cur(P.car.cost)), !!noCar));
+      rows.push(opt('walk', P.walk.min, U.fmtNum(P.km * 1.3, 1) + ' km', P.walk.min > 90));
+      return h('div', { class: 'nv-opts' }, rows);
+    };
+    const openFolk = function (id) { open({ view: 'folk', user: id }); };
+    // 一条市民故事：头像、名字与月份，正文，有通勤变化时附一枚「通勤 58 → 23 分钟」的标签；点任意处进他的主页
+    const TONE = { good: '好消息', bad: '吐槽' };
+    const storyEl = function (p, isNew) {
+      const c = FK.byId(g, p.fid); if (!c) return null;
+      const m = p.meta || {}, dl = m.a != null && m.b != null && Math.abs(m.a - m.b) >= 1;
+      return h('article', { class: 'fk-st t-' + p.tone + (isNew ? ' new' : ''), onclick: function () { openFolk(c.id); } },
+        h('span', { class: 'fk-st-ava', style: { background: c.color } }, AVF(c)),
+        h('div', { class: 'fk-st-body' },
+          h('div', { class: 'fk-st-who' }, h('b', null, c.nick), h('span', null, ymText(p.ym)), isNew ? h('i', { class: 'fk-new' }, '新') : null, h('span', { class: 'grow' }), TONE[p.tone] ? h('em', null, TONE[p.tone]) : null),
+          h('p', null, p.text),
+          dl ? h('div', { class: 'fk-chg ' + (m.b < m.a ? 'good' : 'bad') }, h('span', null, '通勤'), h('s', null, fmtM(m.a)), ic('arrowR', 11), h('b', null, fmtM(m.b) + ' 分钟'), m.mode ? h('small', null, J.modeName[m.mode]) : null) : null));
+    };
+    // 顶部的一排市民：头像外环是他现在的通勤方式（地铁蓝、公交绿、开车褐、步行橙），角标是单程分钟
+    const castItem = function (c) {
+      const cur = c.cur;
+      return h('button', { class: 'fk-who', onclick: function () { openFolk(c.id); }, 'data-tip': c.home.name + ' → ' + c.dest.name },
+        h('span', { class: 'fk-ring m-' + (cur ? cur.mode : 'none') }, h('span', { class: 'fk-ava', style: { background: c.color } }, AVF(c)), cur ? h('i', null, fmtM(cur.min) + '′') : null),
+        h('b', null, c.role), h('small', null, c.home.name));
+    };
+    const storiesView = function () {
+      const old = g.folks, seq = old && old.seq;
+      const S = FK ? FK.sync(g) : null;
+      head.replaceChildren(h('div', { class: 'vx-ht' }, h('b', null, '市民故事'), h('small', null, S ? S.list.length + ' 位市民 · ' + CM.DATA.city : CM.DATA.city)));
+      const nodes = [];
+      if (!S) nodes.push(h('div', { class: 'vx-empty' }, ic('book', 28), h('b', null, '还没有市民故事'), h('span', null, '城市的交通数据准备好后，这里会出现几位住在城市不同角落的市民。')));
+      else {
+        const seen = S.seen;
+        nodes.push(h('section', { class: 'fk-castbox' },
+          h('div', { class: 'fk-cast' }, S.list.map(castItem)),
+          h('div', { class: 'fk-legend' }, ['metro', 'bus', 'car', 'walk'].map(function (k) { return h('span', { class: 'm-' + k }, h('i'), J.modeName[k]); }), h('span', { class: 'grow' }), h('small', null, '点头像，看他每天怎么走'))));
+        const ps = FK.posts(g);
+        let yr = null;
+        for (const p of ps.slice(0, 80)) {
+          const y = Math.floor(p.ym / 12);
+          if (y !== yr) { yr = y; nodes.push(h('div', { class: 'fk-year' }, h('span', null, String(y)))); }
+          const el = storyEl(p, p.ym > seen); if (el) nodes.push(el);
+        }
+        if (!ps.length) nodes.push(h('div', { class: 'vx-empty' }, h('b', null, '交通数据正在更新'), h('span', null, '稍后再来看看他们每天怎么出门。')));
+        nodes.push(h('div', { class: 'vx-end' }, '市民故事由模拟数据生成：每位市民的通勤按交通模型的结果计算（步行、候车、乘车、换乘，以及开车与公交），只读取、不影响客流与满意度。线网变化让通勤明显变快变慢、家门口开了新站或天天挤车时，他们会发动态；几年里也会搬家、换工作、孩子上学。'));
+        FK.markSeen(g);
+        if (S !== old || S.seq !== seq || S.seen !== seen) { g.touch(); self.markUnsaved(); self.scheduleAutosave(); }
+      }
+      feed.replaceChildren.apply(feed, nodes);
+      I18(head); I18(feed);
+    };
+    // 四种方式并排对比：他选的那种高亮，最快的加一个小标，坐不了、开不了的画成灰色
+    const cmpRow = function (P, chosen, noCar) {
+      const can = [['metro', P.metro && P.metro.min], ['bus', P.bus && P.bus.min], ['car', !noCar && P.car && P.car.min], ['walk', P.walk.min <= 90 && P.walk.min]].filter(function (x) { return x[1] > 0; }).sort(function (a, b) { return a[1] - b[1]; }), fast = can.length ? can[0][0] : null;
+      const it = function (mode, min, off, note) {
+        return h('div', { class: 'fk-cmp-i' + (chosen === mode ? ' on' : '') + (off ? ' off' : '') }, h('span', { class: 'fk-cmp-ic m-' + mode }, modeIcon(mode, 15)), h('small', null, J.modeName[mode]),
+          h('b', null, off ? '—' : fmtM(min)), h('em', null, note || (off ? '' : (fast === mode ? '最快' : '分钟'))));
+      };
+      return h('div', { class: 'fk-cmp' }, it('metro', P.metro && P.metro.min, !P.metro, !P.metro ? '坐不了' : null), it('bus', P.bus && P.bus.min, !P.bus), it('car', P.car && P.car.min, noCar || !P.car, noCar ? '没有车' : null), it('walk', P.walk.min, P.walk.min > 90, P.walk.min > 90 ? '太远' : null));
+    };
+    // 地铁各段的分钟：彩色分段条 + 图例
+    const segLegend = function (m) {
+      const parts = [['walk', '步行', m.walk], ['wait', '候车', m.wait], ['ride', '乘车', m.ride], ['xfer', '换乘', m.xfer]].filter(function (x) { return x[2] >= 0.5; });
+      const r0 = m.legs.find(function (L) { return L.k === 'ride'; });
+      return h('div', { class: 'fk-segs' }, legBar(m), h('div', { class: 'fk-segl' }, parts.map(function (x) { return h('span', { class: 'k-' + x[0] }, h('i', x[0] === 'ride' && r0 ? { style: { background: r0.color } } : null), h('span', null, x[1]), ' ' + fmtM(x[2])); }), h('span', { class: 'grow' }), h('small', null, '分钟')));
+    };
+    // 市民主页：他是谁、住哪、去哪；每天的路（路线条、地图、各段分钟、换乘步骤与四种方式对比）、孩子上学、历年通勤时间与他的动态
+    const folkView = function () {
+      const c = FK && FK.byId(g, st.user), ym = g.ym();
+      head.replaceChildren(h('div', { class: 'vx-ht' }, backBtn(), h('div', { class: 'vx-nm' }, h('b', null, c ? c.nick : '市民'), h('small', null, c ? c.role : ''))));
+      if (!c) { feed.replaceChildren(h('div', { class: 'vx-empty' }, h('b', null, '找不到这位市民'))); I18(head); I18(feed); return; }
+      const nodes = [];
+      nodes.push(h('section', { class: 'vx-prof fk-prof' },
+        h('div', { class: 'vx-banner', style: { '--c': c.color } }),
+        h('div', { class: 'vx-prow' }, h('span', { class: 'vx-ava xl', style: { background: c.color } }, AVF(c)), h('span', { class: 'grow' })),
+        h('b', { class: 'vx-pn' }, c.nick), h('div', { class: 'vx-hd' }, c.handle),
+        h('p', { class: 'vx-bio' }, '住在' + c.home.name + '，' + (c.kind === 'retiree' ? '常去' + c.dest.name : '在' + c.dest.name + FK.purpose(c)) + '。'),
+        h('div', { class: 'fk-tags' }, h('span', null, c.role + ' · ' + FK.age(c, ym) + ' 岁'), h('span', null, c.car ? '家里有车' : '家里没有车'), h('span', null, ymText(c.since) + ' 起'))));
+      const P = J.ready(g) ? FK.plan(g, c) : null, cur = c.cur;
+      const sec = h('section', { class: 'fk-sec' }, h('h4', null, '每天的路', h('small', null, J.PER[FK.perOf(c)][0] + ' · 单程')));
+      if (P && cur) {
+        const mode = cur.mode, route = tripRoute(P, mode), pd = pinDest(c), pins = [pinHome(c), pd];
+        sec.appendChild(h('div', { class: 'fk-rib m-' + mode },
+          h('div', { class: 'fk-rib-end' }, h('i', { class: 'fk-pin home', 'data-no-i18n': '' }, pinCh('home')), h('span', null, c.home.name)),
+          h('div', { class: 'fk-rib-mid' }, h('span', { class: 'fk-rib-tag' }, modeIcon(mode, 14), h('b', null, fmtM(cur.min)), h('small', null, '分钟'))),
+          h('div', { class: 'fk-rib-end r' }, h('span', null, c.dest.name), h('i', { class: 'fk-pin dest', 'data-no-i18n': '' }, pd.ch))));
+        if (mode === 'metro' && cur.labels && cur.labels.length) sec.appendChild(h('div', { class: 'fk-lines' }, cur.labels.map(function (l, i) { return [i ? ic('chev', 11) : null, h('span', null, l)]; })));
+        const mv = activeMap = J.mapView(g, { cls: 'fk-map' }); mv.setPins(pins); mv.setRoute(route, { color: c.color });
+        sec.appendChild(mv.el);
+        sec.appendChild(h('div', { class: 'fk-mapbar' }, h('small', null, '小点沿路线移动：他每天就这样走'), h('span', { class: 'grow' }),
+          h('button', { class: 'btn sm', onclick: then(function () { J.showOnMap(self, route, pins, c.nick); }) }, ic('locate', 13), '在城市地图上看')));
+        if (mode === 'metro' && P.metro) { sec.appendChild(segLegend(P.metro)); sec.appendChild(h('div', { class: 'nv-legs' }, P.metro.legs.map(legRow))); }
+        sec.appendChild(h('h5', null, '换一种走法'));
+        sec.appendChild(cmpRow(P, mode, !c.car));
+        if (!P.metro && P.why) sec.appendChild(h('p', { class: 'fk-note' }, '坐地铁：' + P.why));
+      } else sec.appendChild(h('div', { class: 'vx-empty' }, h('span', null, '交通数据正在更新，稍后再来看看。')));
+      nodes.push(sec);
+      if (c.kid && c.kid.trip && c.kid.school) nodes.push(h('section', { class: 'fk-sec' }, h('h4', null, '孩子上学'),
+        h('div', { class: 'fk-rib sm m-' + c.kid.trip.mode }, h('div', { class: 'fk-rib-end' }, h('i', { class: 'fk-pin home', 'data-no-i18n': '' }, pinCh('home')), h('span', null, c.home.name)),
+          h('div', { class: 'fk-rib-mid' }, h('span', { class: 'fk-rib-tag' }, modeIcon(c.kid.trip.mode, 13), h('b', null, fmtM(c.kid.trip.min)), h('small', null, '分钟'))),
+          h('div', { class: 'fk-rib-end r' }, h('span', null, c.kid.school.name), h('i', { class: 'fk-pin dest', 'data-no-i18n': '' }, pinCh('school'))))));
+      // 历年通勤时间
+      if (c.hist.length) {
+        const ser = []; let k = 0; const y0 = c.hist[0][0];
+        for (let t = y0; t <= ym && ser.length < 720; t++) { while (k + 1 < c.hist.length && c.hist[k + 1][0] <= t) k++; ser.push(c.hist[k][1]); }
+        if (ser.length < 2) ser.push(ser[0]);
+        const evs = c.hist.filter(function (x) { return x[3]; });
+        const EVN = { move: '搬家', job: '换工作', kid: '孩子上学', kid2: '孩子升学', grad: '毕业工作', uni: '上大学', retire: '退休', routine: '换了去处' };
+        const first = ser[0], last = ser[ser.length - 1];
+        nodes.push(h('section', { class: 'fk-sec' }, h('h4', null, '通勤时间', h('small', null, ymText(y0) + ' 至今')),
+          h('div', { class: 'fk-trend' }, h('div', null, h('small', null, Math.floor(y0 / 12) + ''), h('b', null, first + ' 分钟')), ic('arrowR', 14), h('div', null, h('small', null, g.clock.y + ''), h('b', { class: last < first ? 'good' : (last > first ? 'bad' : '') }, last + ' 分钟'))),
+          self.spark(ser, { color: c.color }),
+          evs.length ? h('div', { class: 'fk-evs' }, evs.slice(-8).map(function (x) { return h('span', null, h('b', null, String(Math.floor(x[0] / 12))), EVN[x[3]] || ''); })) : null));
+      }
+      const ps = FK.posts(g, c.id);
+      nodes.push(h('div', { class: 'fk-year' }, h('span', null, '他的动态 · ' + ps.length)));
+      for (const p of ps) { const el = storyEl(p, false); if (el) nodes.push(el); }
+      feed.replaceChildren.apply(feed, nodes);
+      I18(head); I18(feed);
+    };
+    // 导航：在小地图上点起点和终点，列出居民会怎么走（时段可选），可在城市地图上看路线
+    const navName = function (x, y) {
+      const C = g.model.net && g.model.net.C; let sb = null, sd = 1e9;
+      if (C) C.stations.forEach(function (s, k) { if (!C.serviced[k]) return; const d = U.dist(x, y, s.x, s.y); if (d < sd) { sd = d; sb = s.name; } });
+      if (sb && sd < 1.6) return (/站$/.test(sb) ? sb : sb + '站') + '附近';
+      let best = null, bd = 1e9; for (const p of CM.DATA.places || []) { const d = U.dist(x, y, p[1], p[2]); if (d < bd) { bd = d; best = p[0]; } }
+      if (best && bd < 6) return best + '附近';
+      const rg = g.city.regionAt ? g.city.regionAt(x, y) : null; return rg ? rg.name.replace(/（.*）/, '') : '地图上的一点';
+    };
+    // 导航搜索（v3.4 玩家反馈）：车站、设施与地名，按名称（英文界面也认译名）查找；选中后设为当前要选的起点或终点
+    const navIndex = function (N) {
+      const key = [g.netVersion, g.city.terrainVer, g.ym(), CM.I18n && CM.I18n.get()].join(':');
+      if (N.idx && N.idx.key === key) return N.idx.list;
+      const list = [], seen = new Map(), S = CM.I18n && CM.I18n.search ? CM.I18n.search : function (s) { return String(s).toLowerCase(); };
+      // 同名、相距 1.5 km 以内的车站、设施与地名只留一条（按车站、设施、地名的顺序取先到的）
+      const add = function (name, x, y, kind) { if (!name || !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x >= g.city.W || y >= g.city.H) return; const l = seen.get(name); if (l && l.some(function (q) { return Math.hypot(q.x - x, q.y - y) < 6; })) return; const it = { name: name, x: x, y: y, kind: kind, key: S(name).normalize('NFC') }; if (l) l.push(it); else seen.set(name, [it]); list.push(it); };
+      for (const id in g.net.stations) { const s = g.net.stations[id]; if (!s.virtual) add(s.name, s.x, s.y, 'st'); }
+      for (const f of CM.Fac ? CM.Fac.list(g.city) : []) if (!f.ext) add(f.label || f.name, f.x, f.y, 'fac');
+      for (const p of CM.DATA.places || []) add(p[0], p[1], p[2], 'pl');
+      N.idx = { key: key, list: list }; return list;
+    };
+    const stName = function (it) { return it.kind === 'st' && !/站$/.test(it.name) ? it.name + '站' : it.name; };
+    const navFind = function (N, q) {
+      q = String(q || '').normalize('NFC').trim().toLowerCase(); if (!q) return [];
+      const ord = { st: 0, fac: 1, pl: 2 }, out = [];
+      for (const it of navIndex(N)) { const i = it.key.indexOf(q); if (i >= 0) out.push({ it: it, sc: (i === 0 ? 0 : 10) + ord[it.kind] + it.name.length * 0.01 }); }
+      out.sort(function (a, b) { return a.sc - b.sc; });
+      return out.slice(0, 8).map(function (o) { return o.it; });
+    };
+    let activeMap = null;
+    const closeMap = function () { if (activeMap) { activeMap.destroy(); activeMap = null; } };
+    const navView = function () {
+      closeMap();
+      const N = self._nav && self._nav.g === g ? self._nav : (self._nav = { g: g, a: null, b: null, per: 0, next: 'a', view: {} });
+      head.replaceChildren(h('div', { class: 'vx-ht' }, h('b', null, '导航'), h('small', null, '搜索或在地图上点两个地方，看居民会怎么走')));
+      const nodes = [], res = h('div', { class: 'nv-res' });
+      const pins = function () { const out = []; if (N.a) out.push({ x: N.a.x, y: N.a.y, ch: pinCh('a'), color: '#2f9e44', label: N.a.name }); if (N.b) out.push({ x: N.b.x, y: N.b.y, ch: pinCh('b'), color: '#e03131', label: N.b.name }); return out; };
+      let mv = null;
+      const chip = function (k) {
+        const p = N[k];
+        return h('button', { class: 'nv-pt' + (N.next === k ? ' on' : '') + (p ? '' : ' empty'), onclick: function () { N.next = k; navView(); } },
+          h('span', { class: 'nv-dot k-' + k, 'data-no-i18n': '' }, pinCh(k)), h('span', { class: 'grow' }, p ? p.name : (k === 'a' ? '点地图选择起点' : '点地图选择终点')));
+      };
+      const bar = h('div', { class: 'nv-top' }, chip('a'),
+        h('button', { class: 'btn sm ghost nv-swap', 'aria-label': '交换起终点', onclick: function () { const t = N.a; N.a = N.b; N.b = t; navView(); } }, ic('route', 14)),
+        chip('b'),
+        h('button', { class: 'btn sm ghost', onclick: function () { N.a = N.b = null; N.next = 'a'; navView(); } }, '清除'));
+      // 搜索框：输入时只更新下拉列表（不重画整页，输入框不丢焦点）；回车选第一项，上下键移动
+      const KIND = { st: ['train', '车站'], fac: ['building', '设施'], pl: ['locate', '地名'] };
+      const sIn = h('input', { class: 'nv-sin', type: 'search', placeholder: N.next === 'a' ? '搜索起点：车站、地名、设施' : '搜索终点：车站、地名、设施', 'aria-label': '搜索车站、地名、设施', autocomplete: 'off', spellcheck: 'false' });
+      const sList = h('div', { class: 'nv-slist', role: 'listbox' });
+      let hits = [], hi = 0;
+      const choose = function (it) {
+        if (!it) return;
+        const other = N.next === 'a' ? 'b' : 'a'; N[N.next] = { x: it.x, y: it.y, name: stName(it) };
+        if (!N[other]) { N.next = other; N.centerPending = { x: it.x, y: it.y }; } else N.fitPending = true;
+        sfx('tap'); navView();
+      };
+      const showHits = function () {
+        hits = navFind(N, sIn.value); hi = Math.min(hi, Math.max(0, hits.length - 1));
+        if (!sIn.value.trim()) { sList.replaceChildren(); sList.classList.remove('on'); return; }
+        sList.replaceChildren.apply(sList, hits.length ? hits.map(function (it, i) {
+          return h('button', { class: 'nv-sopt' + (i === hi ? ' on' : ''), role: 'option', onpointerdown: function (e) { if (e.pointerType === 'mouse') e.preventDefault(); }, onclick: function () { choose(it); } },
+            h('span', { class: 'nv-sk k-' + it.kind }, ic(KIND[it.kind][0], 13)), h('span', { class: 'grow' }, stName(it)), h('small', null, KIND[it.kind][1]));
+        }) : [h('div', { class: 'nv-snone' }, '没有找到相符的车站、地名或设施')]);
+        sList.classList.add('on'); I18(sList);
+      };
+      sIn.addEventListener('input', function () { hi = 0; showHits(); });
+      sIn.addEventListener('keydown', function (e) {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (hits.length) { hi = (hi + (e.key === 'ArrowDown' ? 1 : hits.length - 1)) % hits.length; showHits(); } }
+        else if (e.key === 'Enter') { e.preventDefault(); choose(hits[hi]); }
+        else if (e.key === 'Escape') { if (sIn.value) { e.stopPropagation(); sIn.value = ''; showHits(); } }
+        e.stopPropagation();   // 输入时不触发游戏快捷键
+      });
+      sIn.addEventListener('blur', function () { setTimeout(function () { sList.classList.remove('on'); }, 120); });
+      sIn.addEventListener('focus', function () { if (sIn.value.trim()) showHits(); });
+      const sBox = h('div', { class: 'nv-search' }, h('span', { class: 'nv-sicon' }, ic('search', 14)), sIn, sList);
+      const pers = h('div', { class: 'seg-ctl sm nv-per' }, J.PER.map(function (p) { return h('button', { class: N.per === p[1] ? 'on' : '', onclick: function () { N.per = p[1]; navView(); } }, p[0]); }));
+      mv = activeMap = J.mapView(g, { cls: 'nv-map', state: N.view, hint: N.a && N.b ? null : (N.next === 'a' ? '点地图选择起点' : '点地图选择终点'), onPick: function (pt) {
+        pt.name = navName(pt.x, pt.y); const other = N.next === 'a' ? 'b' : 'a'; N[N.next] = pt;
+        if (!N[other]) N.next = other; else N.fitPending = true;
+        sfx('tap'); navView();
+      } });
+      mv.setPins(pins());
+      if (N.centerPending) { const c = N.centerPending; N.centerPending = null; requestAnimationFrame(function () { mv.center(c.x, c.y, Math.max((N.view && N.view.s) || 0, 6), true); }); }
+      nodes.push(h('section', { class: 'nv-panel' }, sBox, bar, mv.el, h('div', { class: 'nv-sub' }, pers, h('small', { class: 'muted' }, '工作日 · 按本月交通模型'))));
+      if (N.a && N.b) {
+        const P = J.plan(g, N.a, N.b, { per: N.per, geom: true });
+        if (!P.ok && P.why) res.appendChild(h('div', { class: 'vx-empty' }, h('b', null, P.why)));
+        else {
+          const best = P.best;
+          res.appendChild(h('div', { class: 'nv-head' }, h('b', null, '居民会怎么走'), h('small', null, '直线 ' + U.fmtNum(P.km, 1) + ' km')));
+          if (P.share != null) res.appendChild(h('p', { class: 'nv-share' }, '这两个地方之间，约 ' + U.fmtPct(P.share, 0) + ' 的人会坐地铁，其余开车、坐公交或步行。'));
+          res.appendChild(optList(P, null, false));
+          if (P.metro) {
+            res.appendChild(h('div', { class: 'nv-head' }, h('b', null, '地铁路线'), h('small', null, '步行 ' + fmtM(P.metro.walk) + ' · 候车 ' + fmtM(P.metro.wait) + ' · 乘车 ' + fmtM(P.metro.ride) + (P.metro.xfer > 0.05 ? ' · 换乘 ' + fmtM(P.metro.xfer) : '') + ' 分钟')));
+            res.appendChild(legBar(P.metro));
+            res.appendChild(h('div', { class: 'nv-legs' }, P.metro.legs.map(legRow)));
+          }
+          const route = tripRoute(P, P.metro ? 'metro' : (best === 'walk' ? 'walk' : 'car'));
+          if (P.car && P.car.pts && P.metro) route.car = P.car;
+          mv.setRoute(Object.assign({ showCar: !!P.metro }, route, { car: P.car }));
+          if (N.fitPending) { N.fitPending = false; requestAnimationFrame(function () { mv.fit(true, true); }); }
+          res.appendChild(h('div', { class: 'fk-mapbar' }, h('small', { class: 'muted' }, P.metro ? '彩色线是地铁路线，灰线是开车路线' : '灰线是开车路线'), h('span', { class: 'grow' }),
+            h('button', { class: 'btn sm', onclick: then(function () { J.showOnMap(self, route, pins(), N.a.name + ' → ' + N.b.name); }) }, ic('locate', 13), '在城市地图上看')));
+        }
+      } else res.appendChild(h('div', { class: 'vx-empty nv-tip' }, ic('route', 26), h('b', null, N.a ? '再点一下选择终点' : '先点一下选择起点'), h('span', null, '可拖动地图，用双指或滚轮缩放。结果按本月的交通模型计算：步行进站、候车、乘车、换乘，并和开车、公交、步行对比。')));
+      nodes.push(res);
+      feed.replaceChildren.apply(feed, nodes);
+      I18(head); I18(feed);
+    };
     const draw = function () {
+      closeMap();
       if (st.topic) st.q = search.value = topicText(st.topic);
       list = CM.Voices.generate(g);
       const counts = { all: list.length, bad: 0, good: 0, idea: 0 }; for (const p of list) counts[p.kind]++;
@@ -555,7 +834,8 @@
         (function () { const r = st.view === 'following' && !Object.keys(CM.Voices.follows(g)).length ? [] : recs(3); return r.length ? h('section', { class: 'vx-card vx-who2' }, h('h4', null, '推荐关注的市民'), r.map(accRow), st.root === 'following' ? null : h('button', { class: 'vx-more', onclick: function () { setView('following'); } }, '查看关注的人', ic('chev', 13))) : null; })(),
         h('div', { class: 'vx-foot' }, '地铁圈 · ' + (g.econ.mode === 'challenge' ? '满意度影响每月拨款' : '满意度仅供参考'))].filter(Boolean));
       I18(head); I18(side);
-      if (st.view === 'sat') satView(); else if (st.view === 'post') threadView(); else if (st.view === 'user') userView(); else if (st.view === 'following') followingView(); else drawFeed();
+      if (st.view === 'sat') satView(); else if (st.view === 'post') threadView(); else if (st.view === 'user') userView(); else if (st.view === 'following') followingView();
+      else if (st.view === 'stories') storiesView(); else if (st.view === 'folk') folkView(); else if (st.view === 'nav') navView(); else drawFeed();
       updBadge();
       self.voSeen = { g: g, n: CM.Voices.badCount(g), key: CM.Voices.cache && CM.Voices.cache.key };
       self.updateSatDock(g);
@@ -569,6 +849,7 @@
     const key = function (e) { self.appKey(e, app, close); };
     const close = function (after, instant) {
       if (closing) return; closing = true;
+      closeMap();
       document.removeEventListener('keydown', key, true);
       if (self.voApp === api) self.voApp = null;
       if (self.satDock) self.satDock.classList.remove('vx-on');

@@ -18,6 +18,9 @@
   T.byId = function (id) { return T.list().find(function (R) { return R.id === id; }) || null; };
   T.openAt = function (R, t) { return t >= yof(R.open) - 1e-6; };
   T.stopOpen = function (s, t) { return (s.y0 == null || t >= yof(s.y0) - 1e-6) && (s.y1 == null || t < yof(s.y1) - 1e-6); };
+  // 能用作区间端点的车站（v3.3）：现在开着，或者已经接管到玩家手里（之后按史实停用的车站，如 1983 年停用的大埔，仍是玩家的车站；
+  // 否则它与新站之间的一段铁路永远接管不了，两段接管线路无法连起来）
+  T.usable = function (net, R, s, t) { return T.stopOpen(s, t) || !!(net && T.stationOf(net, R, s.id)); };
   const edgeOpen = function (e, t) { return e.y0 == null || t >= yof(e.y0) - 1e-6; };
 
   // ---------- 车站与区间图（数据，按线路缓存） ----------
@@ -227,7 +230,8 @@
     if (!T.openAt(R, t)) { res.error = ymText(R.open) + '起才能接管' + R.name; return res; }
     const A = G.st.get(a), B = G.st.get(b);
     if (!A || !B) { res.error = '请选择起点站和终点站'; return res; }
-    if (!T.stopOpen(A, t) || !T.stopOpen(B, t)) { res.error = (T.stopOpen(A, t) ? B : A).n + '站现在还没有开通'; return res; }
+    const unavailable = !T.usable(net, R, A, t) ? A : !T.usable(net, R, B, t) ? B : null;
+    if (unavailable) { res.error = unavailable.n + '站现在' + (unavailable.y1 && t >= yof(unavailable.y1) ? '已经停用' : '还没有开通'); return res; }
     const all = T.paths(R, a, b);
     if (!all.length) { res.error = a === b ? '起点和终点是同一座车站（只有环线可以整圈接管）' : '这两座车站之间没有连续的铁路'; return res; }
     // 每条候选路径：区间是否都已通车、都没接管
@@ -237,7 +241,7 @@
     if (!valid.length) { const why = ok(all[0]); res.error = why === 'taken' ? '这段铁路里有区段已经接管：请把起终点选在未接管的区段两端' : '这段铁路还有区段没有通车'; return res; }
     const path = valid[Math.min(res.dir, valid.length - 1)]; res.path = path;
     // 区段：相邻的已开通车站之间（没开站的中间站只是经过）
-    const stops = path.filter(function (id, i) { return i === 0 || i === path.length - 1 || T.stopOpen(G.st.get(id), t); });
+    const stops = path.filter(function (id, i) { return i === 0 || i === path.length - 1 || T.usable(net, R, G.st.get(id), t); });
     let j = 0;
     for (let i = 0; i + 1 < stops.length; i++) {
       const SA = G.st.get(stops[i]), SB = G.st.get(stops[i + 1]), edges = [];
@@ -382,8 +386,8 @@
     const add = function (path, p, closed) { const q = []; for (let k = 0; k + 1 < p.length; k += 2) q.push([F.X(p[k]), F.Y(p[k + 1])]); const z = simplify(q, 0.15); if (z.length < 2) return false; path.moveTo(z[0][0], z[0][1]); for (let i = 1; i < z.length; i++) path.lineTo(z[i][0], z[i][1]); if (closed) path.closePath(); return true; };
     const polys = function (feats, out) { for (const ft of feats || []) { if (!hits(ft.bbox)) continue; const p = new Path2D(); let any = false; for (const r of ft.rings) any = add(p, r.p, true) || any; if (any) out.push(p); } };
     if (Geo && Geo.water) {
-      polys([].concat(Geo.reserves || [], Geo.woods || [], Geo.parks || []), P.green);
-      polys(Geo.water, P.water); if (city && city.reclaimWater) polys(city.reclaimWater(), P.water);
+      polys(Geo.view('reserves').concat(Geo.view('woods'), Geo.view('parks')), P.green);
+      polys(Geo.view('water'), P.water); if (city && city.reclaimWater) polys(city.reclaimWater(), P.water);
       for (const r of Geo.waterLines || []) { if (!hits(r.bbox)) continue; const p = new Path2D(); if (add(p, r.p, false)) P.rivers.push({ p: p, w: Math.max(0.05, r.w) * F.sc }); }
     }
     for (const gr of (city && city.roadGroups) || []) { if (gr.cls < 3 || (gr.year != null && gr.year > yr) || !hits(gr.bbox)) continue; for (const p of gr.ways) add(gr.cls >= 4 ? P.r4 : P.r3, p, false); }
@@ -425,7 +429,7 @@
     for (const x of L) { const pts = simplify(T.railBetween(R, G.st.get(x.e.a), G.st.get(x.e.b)).pts.map(function (p) { return [F.X(p[0]), F.Y(p[1])]; }), 0.25); lines += '<polyline class="tk-l ' + x.k + '" points="' + pts.map(function (p) { return f1(p[0]) + ',' + f1(p[1]); }).join(' ') + '"' + (x.k === 'taken' ? ' style="stroke:' + esc(R.color || '#1f9d63') + '"' : '') + '/>'; }
     // 站名：环线放在圈外，其余放在线路一侧（竖向的线放右侧、横向的放上方），和已放的站名或车站重叠时换到另一侧或上下错开（按底图比例算一次，放大后只会更松）
     const ends = plan && plan.path ? [plan.path[0], plan.path[plan.path.length - 1]] : [];
-    const P0 = R.stops.map(function (q) { const p = T.stopPos(R, q); return { s: q, x: F.X(p.x), y: F.Y(p.y), open: T.stopOpen(q, t) }; });
+    const P0 = R.stops.map(function (q) { const p = T.stopPos(R, q); return { s: q, x: F.X(p.x), y: F.Y(p.y), open: T.usable(g.net, R, q, t) }; });
     const at = new Map(); for (const q of P0) at.set(q.s.id, q);
     const dots = P0.filter(function (q) { return q.open; }), placed = [], loop = G.loops.length > 0;
     let cx = 0, cy = 0; for (const q of P0) { cx += q.x; cy += q.y; } cx /= P0.length; cy /= P0.length;
@@ -576,7 +580,7 @@
     if (open && st.a && st.b) P = T.plan(g, R, st.a, st.b, { dir: st.dir, join: st.join });
     const pick = function (id) {
       if (!open) return;
-      const s = G.st.get(id); if (!s || !T.stopOpen(s, t)) return;
+      const s = G.st.get(id); if (!s || !T.usable(g.net, R, s, t)) return;
       if (!st.a || st.b) { st.a = id; st.b = null; } else st.b = id;
       st.dir = 0; st.join = null; redraw();
     };

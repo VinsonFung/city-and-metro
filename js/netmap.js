@@ -215,7 +215,7 @@
   function terrainSVG(net, lay, base, boxes) {
     if (!geographic) return '';
     const Geo = CM.Geo, city = game() && game().city;
-    if (!Geo || !Geo.water || !lay.L) return '';
+    if (!Geo || !Geo.view('water') || !lay.L) return '';
     const f = function (v) { return v.toFixed(2); };
     const points = function (p, closed) {
       const src = []; for (let k = 0; k + 1 < p.length; k += 2) src.push([p[k], p[k + 1]]);
@@ -238,9 +238,9 @@
       }
       return out;
     };
-    const greenFeats = Geo.reserves.concat(Geo.woods, Geo.parks);
+    const greenFeats = Geo.view('reserves').concat(Geo.view('woods'), Geo.view('parks'));
     const green = features(greenFeats, 'nm-green');
-    let water = features(Geo.water, 'nm-water'), rivers = '';
+    let water = features(Geo.view('water'), 'nm-water'), rivers = '';
     // 历史上尚未填出的土地仍是水面，沿用城市系统当前年份的几何。
     if (city && city.reclaimWater) water += features(city.reclaimWater(), 'nm-water');
     for (const river of Geo.waterLines) {
@@ -381,7 +381,7 @@
       const top = o.parts.reduce(function (a, b) { return b.len > a.len ? b : a; }), k = Math.floor(top.r.p.length / 4) * 2;
       named.push({ name: o.name, x: top.r.p[k], y: top.r.p[k + 1], size: o.len * 0.5 });
     }
-    for (const f of Geo.water) {
+    for (const f of Geo.view('water')) {
       if (!f.name || !inMap(f.bbox) || (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]) < med * med * 4 || !f.rings.length) continue;
       const p = f.rings[0].p, k = Math.floor(p.length / 4) * 2; if (k + 1 < p.length) named.push({ name: f.name, x: p[k], y: p[k + 1], size: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]) });
     }
@@ -536,7 +536,7 @@
   }
   // mag：排版用的等比缩放（地理 → 图上，带 frame、unit；见 netlayout.js scaleMap）。给了它时水面与车站同一比例，再补排版的小幅挪动
   function waterLayer(city, G, P, med, mag) {
-    if (!CM.Geo || !CM.Geo.water || !city || !city.wmask || G.length < 2) return null;
+    if (!CM.Geo || !CM.Geo.view('water') || !city || !city.wmask || G.length < 2) return null;
     const S = waterShapes(city, med);
     let warp;
     if (mag) { const res = residualWarp(G.map(function (p) { return mag(p[0], p[1]); }), P, mag.unit, mag.frame); warp = function (x, y) { const q = mag(x, y); return res(q[0], q[1]); }; }

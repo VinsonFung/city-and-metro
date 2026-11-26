@@ -1,7 +1,7 @@
 'use strict';
 // 北京 · 1990 场景（v2.4）。地理来自 OpenStreetMap（geo_bj.js，现代数据），本文件补充 1990 年起的区域开放（按区与街道划分）、环路与快速路
 // 通车年份、人口就业中心、地标、重要设施、历史事件、本地任务与人民币经营参数。坐标单位为格（250 m），用 llW(纬度, 经度)（WGS-84）换算。
-// 开局接管 1 号线（苹果园—复兴门）与环线（2 号线），与东京开局接管银座线相同。不收录任何军事设施与军用机场（西郊、南苑），
+// 开局接管 1 号线（苹果园—复兴门）与环线（2 号线），与东京开局接管银座线相同。v3.5（第 3 版）地图向北扩大到顺义新城与沙河、向东扩大到潞城。不收录任何军事设施与军用机场（西郊、南苑），
 // 地理数据生成时已剔除军事用地范围内的地名与道路。
 // 真实性：环路与快速路通车年份、地铁开通年份（只作史实背景，不会自动建成）、中关村与 CBD 开发、亚运会与奥运会、地标落成年份为史实参考；
 // 1990 年人口与就业分布、增长曲线、造价、票价与拨款为估算；2020 年之后为模拟。
@@ -17,7 +17,8 @@
   const st = function (name, lat, lon, size, year) { const p = llW(lat, lon), q = ST[name]; const use = q && Math.hypot(q[1] - p[0], q[2] - p[1]) < 6 ? [q[1], q[2]] : p; return [name, use[0], use[1], size || 'M', year]; };
 
   // 首都国际机场（民用；跑道按 OSM，范围为近似）：用地不开发，范围内可以地下设站
-  const shoudu = poly([[40.1000, 116.5650], [40.1000, 116.6230], [40.0560, 116.6230], [40.0440, 116.6100], [40.0440, 116.5850], [40.0600, 116.5650]]);
+  // v3.5 地图向北扩大：北缘由原图边界（北纬 40.10°）延到跑道北端以北，原范围内的格不变
+  const shoudu = poly([[40.1060, 116.5650], [40.1060, 116.6230], [40.0560, 116.6230], [40.0440, 116.6100], [40.0440, 116.5850], [40.0600, 116.5650]]);
   // 故宫（世界文化遗产）：不可开发，地下也不设站（风景区规则）
   const gugong = poly([[39.9227, 116.3843], [39.9227, 116.3971], [39.9112, 116.3971], [39.9112, 116.3843]]);   // v2.6.1：原值为 GCJ-02，换算到与底图一致的 WGS-84
 
@@ -32,7 +33,8 @@
           hit: '奥运主场馆定在北中轴，早已通车的{st}站让这一带抢先有了依托。', miss: '奥运主场馆定在北中轴，这里还没有地铁，七年内要补上。' },
         why: '2001 年 7 月北京申奥成功，奥运前地铁进入大规模建设期。' },
       { use: 'relocate', star: true, icon: 'road', label: '疏解与城市副中心', text: '老城人口和岗位逐步外迁；提前修到通州的线路，等来城市副中心', why: '北京 2015 年起规划建设城市副中心，疏解非首都功能。' },
-      { use: 'foresight', level: 'mid', label: '通州提前布局', id: 'bj-tz', pos: [169.21, 81.06], ym: [2015, 7], before: 2005, r: 7, region: 'tongzhou', title: '规划建设北京城市副中心',
+      // pos：v3.5 地图向北扩大后格坐标改由经纬度换算（扩图前为 [169.21, 81.06]）
+      { use: 'foresight', level: 'mid', label: '通州提前布局', id: 'bj-tz', pos: llW(39.91747, 116.65552), ym: [2015, 7], before: 2005, r: 7, region: 'tongzhou', title: '规划建设北京城市副中心',
         hit: '通州成为城市副中心，早已通车的{st}站让机关和企业搬过来时已有现成的地铁。', miss: '通州成为城市副中心，这里的地铁还不够，要尽快补上。', why: '2015 年 7 月，北京决定规划建设城市副中心。' },
       { use: 'transition', level: 'mid', label: '首钢搬迁', region: 'shijingshan', close: { y: 2010, m: 12, title: '首钢石景山主流程停产', desc: '12 月，首钢石景山厂区的钢铁主流程全面停产，结束了在北京 91 年的钢铁生产，老厂区开始再开发。' }, replan: [{ year: 2011, region: 'shijingshan', plan: 'mix' }], why: '首钢石景山厂区 2010 年 12 月全面停产，8.56 平方公里的老厂区重新开发。' },
       { use: 'carLimit', level: 'mid', label: '小客车摇号', on: { y: 2011, m: 1, title: '小客车指标摇号', desc: '1 月 1 日起，北京新增小客车要摇号取得指标，当年指标 24 万个。' }, why: '北京自 2011 年 1 月 1 日起实行小客车指标摇号。' },
@@ -49,21 +51,21 @@
         demand: { decayHW: 0.9 }, corridors: [{ a: 'jiucheng', b: 'haidian', f: 1.1 }, { a: 'jiucheng', b: 'chaoyang', f: 1.1 }] },
       { id: 'bj-e2', from: 1999, name: '扩张与申奥', tag: '史实',
         summary: '史实：1999 年复八线通车，1 号线贯通长安街（史实背景，不会自动建成）；1999 年中关村科技园区设立；回龙观、天通苑等大型经济适用房社区开工；2001 年北京申奥成功，四环、五环相继通车。估算：岗位向中关村、上地与 CBD 集中，北部新建大社区带来很长的进城通勤。',
-        grow: { pop: { jiucheng: 0.5, changping: 1.8, wangjing: 1.6, chaoyang: 1.3, fengtai: 1.2 }, jobs: { zgc: 1.8, shangdi: 1.8, cbd: 1.6, jiucheng: 0.9 } },
+        grow: { pop: { jiucheng: 0.5, changping: 1.8, wangjing: 1.6, chaoyang: 1.3, fengtai: 1.2, changping_n: 1.4 }, jobs: { zgc: 1.8, shangdi: 1.8, cbd: 1.6, jiucheng: 0.9 } },
         relocate: { pop: { jiucheng: 0.0004 } },
         demand: { decayHW: 1.05 },
         corridors: [{ a: 'changping', b: 'shangdi', f: 1.2 }, { a: 'changping', b: 'jiucheng', f: 1.1 }, { a: 'wangjing', b: 'cbd', f: 1.15 }],
         goals: [{ id: 'bj-g1', type: 'connect', months: 48, reward: 45000, title: '回龙观到上地', desc: '回龙观的居民大多在上地、中关村的科技企业上班。用地铁连接回龙观与上地。', anchors: [anchor('回龙观', 40.0700, 116.3350, 4), anchor('上地', 40.0330, 116.3190, 3)] }] },
       { id: 'bj-e3', from: 2004, name: '奥运建设期', tag: '史实',
         summary: '史实：2007 年 5 号线通车，2008 年 7 月 10 号线一期、8 号线奥运支线与机场线通车，北京南站启用（史实背景）；8 月第二十九届奥运会在北京举行。估算：奥林匹克公园、望京与 CBD 快速成长，东部与北部的通勤流向中心汇聚。',
-        grow: { pop: { changping: 1.6, wangjing: 1.4, tongzhou: 1.3, aoyun: 1.4, jiucheng: 0.5 }, jobs: { cbd: 1.8, aoyun: 1.5, zgc: 1.5, shangdi: 1.4, jiucheng: 0.85 } },
+        grow: { pop: { changping: 1.6, wangjing: 1.4, tongzhou: 1.3, aoyun: 1.4, jiucheng: 0.5, shunyi: 1.3, shunyixc: 1.5, changping_n: 1.4 }, jobs: { cbd: 1.8, aoyun: 1.5, zgc: 1.5, shangdi: 1.4, jiucheng: 0.85, shunyixc: 1.3 } },
         relocate: { pop: { jiucheng: 0.0005 } },
         demand: { lz: 1.05, decayHW: 1.1, hub: 1.05 },
         corridors: [{ a: 'tongzhou', b: 'cbd', f: 1.2 }, { a: 'aoyun', b: 'jiucheng', f: 1.1 }, { a: 'changping', b: 'shangdi', f: 1.15 }],
         goals: [{ id: 'bj-g2', type: 'connect', months: 48, reward: 50000, title: '通州到国贸', desc: '通州的居民每天沿京通快速路进城，国贸是最大的目的地。用地铁连接通州与国贸。', anchors: [anchor('通州北苑', 39.9050, 116.6230, 4), anchor('国贸', 39.9085, 116.4600, 3)] }] },
       { id: 'bj-e4', from: 2009, name: '网络化时期', tag: '史实',
         summary: '史实：2009 年起 4 号线、大兴线、亦庄线、9 号线、6 号线、14 号线等相继通车（史实背景），线网从几条线扩展为网络；亦庄经济技术开发区与望京成为新的就业中心。估算：职住分离加剧，长距离通勤与换乘客流快速增长，老城继续疏解。',
-        grow: { pop: { tongzhou: 1.5, daxing: 1.5, changping: 1.3, fengtai: 1.2, jiucheng: 0.5 }, jobs: { cbd: 1.5, wangjing: 1.5, daxing: 1.6, zgc: 1.3, jiucheng: 0.8 } },
+        grow: { pop: { tongzhou: 1.5, daxing: 1.5, changping: 1.3, fengtai: 1.2, jiucheng: 0.5, shunyixc: 1.3, changping_n: 1.2 }, jobs: { cbd: 1.5, wangjing: 1.5, daxing: 1.6, zgc: 1.3, jiucheng: 0.8, fsc: 1.5 } },
         relocate: { pop: { jiucheng: 0.0005 }, jobs: { jiucheng: 0.0003 } },
         demand: { sh: 1.05, decayHW: 1.15, hub: 1.1 },
         corridors: [{ a: 'daxing', b: 'cbd', f: 1.15 }, { a: 'tongzhou', b: 'cbd', f: 1.2 }, { a: 'wangjing', b: 'cbd', f: 1.1 }],
@@ -105,7 +107,7 @@
       ],
     },
     regions: [
-      { id: 'gugong', name: '故宫', poly: gugong, scenic: true, open: null, lockNote: '世界文化遗产，不可开发，地下也不能设站' },
+      { id: 'gugong', name: '故宫', poly: gugong, scenic: true, relief: 0, open: null, lockNote: '世界文化遗产，不可开发，地下也不能设站' },
       { id: 'yiheyuan', name: '颐和园', geo: { park: '颐和园' }, scenic: true, open: null },
       { id: 'yuanmingyuan', name: '圆明园', geo: { park: '圆明园遗址公园' }, scenic: true, open: null },
       { id: 'tiantan', name: '天坛', geo: { park: '天坛公园' }, scenic: true, open: null },
@@ -122,10 +124,20 @@
       { id: 'fengtai', name: '丰台', district: ['丰台区'], open: 1990, plan: 'resind' },
       { id: 'shijingshan', name: '石景山', district: ['石景山区'], open: 1990, plan: 'ind' },
       { id: 'changping', name: '回龙观·天通苑（昌平）', district: ['昌平区'], open: 1999, plan: 'res', pop: 8.8e6, note: '1999 年起回龙观、天通苑经济适用房社区建设（史实）' },
-      { id: 'tongzhou', name: '通州', district: ['通州区'], open: 1996, plan: 'res', pop: 7.87e6, note: '2015 年起建设城市副中心（史实）' },
+      // poly + late（v3.5）：原图东缘几格没有行政区归属的土地（OSM 里属三河），扩图前作为飞地并入通州；东侧新增三河片区后照旧归通州，原范围的归属不变
+      { id: 'tongzhou', name: '通州', district: ['通州区'], poly: poly([[39.96715, 116.75446], [39.96715, 116.75739], [39.95814, 116.75739], [39.95814, 116.75446], [39.96039, 116.75446], [39.96039, 116.75154], [39.96490, 116.75154], [39.96490, 116.75446]]), late: true, open: 1996, plan: 'res', pop: 7.87e6, note: '2015 年起建设城市副中心（史实）' },
       { id: 'daxing', name: '亦庄·大兴', district: ['大兴区'], open: 2000, plan: 'resind', pop: 8.59e6, note: '北京经济技术开发区（亦庄）1992 年设立（史实）' },
       { id: 'shunyi', name: '顺义（机场周边）', district: ['顺义区'], open: 2005, plan: 'res', pop: 11.05e6 },
       { id: 'mentougou', name: '门头沟', district: ['门头沟区'], open: 2008, plan: 'res', pop: 12.69e6 },
+      // v3.5 地图向北扩大到顺义新城、沙河与未来科学城，向东扩大到潞城、宋庄东部：新片区只用完全落在新增范围内的街道，
+      // 或南缘正好在原图北界（北纬 40.10°）上的范围；跨接缝的沙河镇、北七家镇、潞城镇等仍按所在区归入昌平、顺义、通州，原有范围内每一格的归属不变
+      { id: 'shunyixc', name: '顺义新城（胜利·光明·双丰）', streets: ['胜利街道', '光明街道', '双丰街道'], open: 1998, plan: 'resind', pop: 8.65e6, note: '1998 年顺义撤县设区（史实）；老县城一带是顺义新城的核心，临空经济区就业随首都机场扩建增长' },
+      { id: 'shahe_u', name: '沙河高教园', poly: poly([[40.1700, 116.2500], [40.1700, 116.2830], [40.1470, 116.2830], [40.1470, 116.2500]]), open: 2005, plan: 'campus', note: '2000 年代中期起北航、北邮、中央财经大学、外交学院等在沙河建设新校区（史实）' },
+      { id: 'fsc', name: '未来科学城', poly: poly([[40.1360, 116.4280], [40.1360, 116.5000], [40.1000, 116.5000], [40.1000, 116.4280]]), open: 2009, plan: 'ind', note: '2009 年未来科技城在北七家开工建设，2017 年更名为未来科学城（史实）' },
+      // 昌平区在新增范围里的部分（within：南缘正好在原图北界上）单独成片，回龙观·天通苑片区与相关任务的范围不变
+      { id: 'changping_n', name: '沙河·北七家（昌平北部）', district: ['昌平区'], within: poly([[40.2000, 116.1000], [40.2000, 116.9000], [40.1000, 116.9000], [40.1000, 116.1000]]), open: 1999, plan: 'res', pop: 8.8e6, note: '2000 年代起沙河、北七家随回龙观、天通苑一起成为北部的大型居住区（史实）' },
+      // 河北三河（燕郊）：东侧新增范围里不属于北京的格（late：只补街道与区都没划到的格，原范围不受影响）
+      { id: 'sanhe', name: '三河·燕郊（市外）', poly: poly([[40.1000, 116.7574], [40.1000, 116.8200], [39.6000, 116.8200], [39.6000, 116.7574]]), late: true, open: null, empty: true, passOnly: true, lockNote: '河北省三河市，不属于北京的建设范围：线路可以穿过，不能设站' },
     ],
     defaultRegion: { id: 'outer', name: '外围地区', open: 2010, plan: 'res', pop: 13.24e6 },
     plans: CM.DATA.plans,
@@ -155,8 +167,15 @@
       atW(39.7265, 116.339, { pop: 5200, jobs: 3100, r: 1.6 }),   // 大兴黄村
       atW(39.7395, 116.444, { pop: 2000, jobs: 800, r: 1 }),   // 瀛海
       atW(39.725, 116.55, { pop: 2500, jobs: 1200, r: 1 }),   // 马驹桥南
+      // v3.5 扩大范围（1990 年估算，位置取 OSM 镇街地名与车站）
+      atW(40.1300, 116.6550, { pop: 5000, jobs: 3200, r: 1.5 }),   // 顺义县城（胜利、光明）
+      atW(40.1440, 116.2860, { pop: 2200, jobs: 1000, r: 1 }),   // 沙河镇
     ],
-    rural: { pop: 500, jobs: 120 },
+    // 新增范围（原范围以外）的乡村底数略低：原值按近郊校准，放到顺义、昌平北部与通州东部的农田偏高（v3.5）
+    rural: { pop: 500, jobs: 120, out: { box: [0, 28, 204, 172], k: 0.65 } },
+    // 新增范围的增长倍率（v3.5）：顺义新城随首都机场扩建、沙河与北七家随北部大社区和高教园在 2000 年代快速成长（史实）；倍率为估算，按新增范围
+    // 2020 年约 160 万人（顺义新城与临空经济区约 90 万、沙河与北七家约 55 万）校准；顺义新城另在奥运与 T3 航站楼建设期按阶段加快
+    growOut: { box: [0, 28, 204, 172], pop: [[1995, 1], [2002, 1.5], [2018, 1.5], [2030, 1.2]], jobs: [[1995, 1], [2002, 1.4], [2018, 1.4], [2030, 1.2]] },
     // 环路与快速路通车年份（名称前缀匹配；1990 年已有的道路按所在区域开放年份出现）。环路按全线贯通的年份（近似），部分快速路为近似年份
     // 铁路通车年份（线路名或前缀 → 年份，或 [通车, 停运]）：开局后才通车或停运的线路，按公开通车时间整理
     railYears: { '京津城际线': 2008, '京广高速线': 2012, '京港高速线': 2012, '京广高速京西联络线': 2012, '京沪高铁': 2011, '京哈高速线': 2021, '京包客专线': 2019, '京雄城际线': 2020, '京唐城际线': 2022, '北京直通线': 2015, '京南至动车段': 2008, '京西至动车段走行线': 2012, '北京朝阳动车走行': 2021, '京九线': 1996 },
@@ -266,8 +285,12 @@
       { id: 'bj_ciec', n: '中国国际展览中心（三元桥）', t: 'venue', at: llW(39.96064, 116.43685), w: 0.006 },
       { id: 'bj_expo', n: '北京展览馆', t: 'venue', lm: 'bj_expo', w: 0.004 },
       { id: 'bj_ncpa', n: '国家大剧院', t: 'venue', lm: 'bj_ncpa', w: 0.005 },
+      // v3.5 扩大范围（位置按 OSM 道路与车站）
+      { id: 'bj_fsc', n: '未来科学城', t: 'cbd', at: llW(40.1181, 116.4678), y0: 2012, w: [[2012, 0.003], [2020, 0.012]], note: '央企研发中心与能源、材料企业总部在温榆河北岸聚集（史实）；规模为估算。' },
+      { id: 'bj_shahe_u', n: '沙河高教园', t: 'uni', at: llW(40.1560, 116.2650), y0: 2008, w: [[2008, 0.008], [2015, 0.02]], note: '北航、北邮、中央财经大学、外交学院等高校的沙河校区（史实）；规模为估算。' },
+      { id: 'bj_sy', n: '顺义新城商圈', t: 'shop', at: llW(40.1293, 116.6520), w: [[1990, 0.004], [2010, 0.012]] },
     ],
-    districtLabels: [['东城', ['东城区']], ['西城', ['西城区']], ['朝阳', ['朝阳区']], ['海淀', ['海淀区']], ['丰台', ['丰台区']], ['石景山', ['石景山区']], ['通州', ['通州区']], ['大兴', ['大兴区']], ['昌平', ['昌平区']]],
+    districtLabels: [['东城', ['东城区']], ['西城', ['西城区']], ['朝阳', ['朝阳区']], ['海淀', ['海淀区']], ['丰台', ['丰台区']], ['石景山', ['石景山区']], ['通州', ['通州区']], ['大兴', ['大兴区']], ['昌平', ['昌平区']], ['顺义', ['顺义区']]],
     // 纪事（只能在末尾追加：已发生记录按序号保存）
     events: [
       { y: 1990, m: 1, tag: '史实', title: '1990 年的北京', desc: '中心城区人口约 630 万；地铁只有 1 号线与环线，自行车是最主要的通勤方式；二环正在改造为快速路，三环尚未贯通。你从这两条线开始经营。' },
@@ -296,10 +319,13 @@
       { id: 'bj5', appear: [2004, 1], deadline: [2008, 7], type: 'connect', reward: 55000, title: '奥运场馆', desc: '奥运会开幕前，连接奥林匹克公园、北土城与鼓楼大街。', anchors: [anchor('奥林匹克公园', 39.9990, 116.3920, 3), anchor('北土城', 39.9770, 116.3940, 3), anchor('鼓楼大街', 39.9494, 116.3939, 3)] },
       { id: 'bj6', appear: [2004, 1], deadline: [2008, 7], type: 'connect', reward: 55000, title: '机场轨道交通', desc: '奥运会开幕前，连接东直门、三元桥与首都机场航站区。', anchors: [anchor('东直门', 39.9410, 116.4338, 3), anchor('三元桥', 39.9610, 116.4560, 3), anchor('首都机场', 40.0790, 116.6030, 4)] },
       { id: 'bj7', appear: [2006, 1], deadline: [2012, 12], type: 'connect', reward: 50000, title: '北京南站接驳', desc: '京津城际铁路开通后，北京南站的旅客需要进城。连接北京南站、宣武门与西单。', anchors: [anchor('北京南站', 39.8652, 116.3786, 3), anchor('宣武门', 39.8993, 116.3747, 3), anchor('西单', 39.9070, 116.3740, 3)] },
-      { id: 'bj8', appear: [2008, 1], deadline: [2013, 12], type: 'coverage', target: 0.33, reward: 70000, title: '地铁覆盖三成三人口', desc: '2013 年底前，步行 15 分钟可到达地铁站的人口不低于全市人口的 33%。' },
-      { id: 'bj9', appear: [2014, 1], deadline: [2020, 12], type: 'coverage', target: 0.52, reward: 80000, title: '地铁覆盖五成二人口', desc: '2020 年底前，步行 15 分钟可到达地铁站的人口不低于全市人口的 52%。' },
+      { id: 'bj8', appear: [2008, 1], deadline: [2013, 12], type: 'coverage', target: 0.3, reward: 70000, title: '地铁覆盖三成人口', desc: '2013 年底前，步行 15 分钟可到达地铁站的人口不低于全市人口的 30%。' },   // v3.5 地图扩大后按人口比例由 33% 换算，难度不变
+      { id: 'bj9', appear: [2014, 1], deadline: [2020, 12], type: 'coverage', target: 0.47, reward: 80000, title: '地铁覆盖四成七人口', desc: '2020 年底前，步行 15 分钟可到达地铁站的人口不低于全市人口的 47%。' },   // v3.5 地图扩大后按人口比例由 52% 换算，难度不变
       // v2.9 扩图新增范围的史实任务
       { id: 'bj10', appear: [2005, 1], deadline: [2011, 12], type: 'connect', reward: 70000, title: '地铁到大兴新城', desc: '大兴黄村是南部的新城，4 号线大兴段 2010 年通车（史实）。连接北京南站、旧宫一带与黄村。', anchors: [anchor('北京南站', 39.8650, 116.3790, 3), anchor('旧宫', 39.8070, 116.4510, 3), anchor('黄村', 39.7265, 116.3390, 3)] },
+      // v3.5 扩图新增范围的史实任务
+      { id: 'bj11', appear: [2006, 1], deadline: [2011, 12], type: 'connect', reward: 60000, title: '顺义新城进城', desc: '顺义新城随首都机场扩建和临空经济区成长，进城的车流挤在京承与机场高速上。连接望京、后沙峪与顺义，15 号线 2010–2011 年分段通车（史实）。', anchors: [anchor('望京', 39.9980, 116.4690, 3), anchor('后沙峪', 40.1135, 116.5583, 3), anchor('顺义', 40.1293, 116.6520, 3)] },
+      { id: 'bj12', appear: [2006, 1], deadline: [2011, 12], type: 'connect', reward: 55000, title: '昌平线到沙河', desc: '沙河高教园的新校区陆续启用，上地、西二旗的科技企业也在向北延伸。连接西二旗、朱辛庄与沙河，昌平线 2010 年通车（史实）。', anchors: [anchor('西二旗', 40.0530, 116.3060, 3), anchor('朱辛庄', 40.1023, 116.3064, 3), anchor('沙河', 40.1478, 116.2884, 3)] },
     ],
     dynTasks: [
       { id: 'bjd1', from: [2003, 1], to: [2015, 12], type: 'connect', months: 36, reward: 40000, title: '天通苑的早高峰', desc: '天通苑是亚洲最大的居住区之一，早高峰进城极其拥挤。连接天通苑与立水桥、惠新西街南口。', anchors: [anchor('天通苑', 40.0750, 116.4130, 3), anchor('立水桥', 40.0520, 116.4110, 3), anchor('惠新西街南口', 39.9760, 116.4170, 3)] },
@@ -326,9 +352,12 @@
     ],
     // 线路配色参考北京地铁
     lineColorsNice: ['#c23a30', '#0b5aa2', '#f9e700', '#008e9c', '#a6217f', '#d29700', '#f6c582', '#009b6b', '#8fc31f', '#009bc0', '#ed796b', '#d5a7a1'],
+    // 南苑公园游览小火车的站台主题编号与公园入口。
     stationNameCorrections: { '1907': null, '北1门': null },
     places: (G.places || []).map(function (p) { return [p[0], p[1], p[2], p[3]]; }),
   };
+  // v3.5 地图向北、向东扩大：全图人口按新增范围的份额抬高（约 5%–9%），提前开放的人口门槛同比放大，原有片区的开放时机不变（新片区的门槛也按扩图前的口径填写）
+  for (const rg of data.regions.concat([data.defaultRegion])) if (rg.pop) rg.pop = Math.round(rg.pop * 1.07 / 1e4) * 1e4;
   // 位置校正：与 OSM 地铁站同名的设施与任务锚点，改用车站位置（相距 3 km 以内时；手填坐标的误差可达数百米）
   const nearSt = function (name, x, y) { const p = ST[name.replace(/（.*?）/g, '')]; return p && Math.hypot(p[1] - x, p[2] - y) < 12 ? p : null; };
   for (const f of data.facilities) if (f.at && !f.ext) { const p = nearSt(f.n, f.at[0], f.at[1]); if (p) f.at = [p[1], p[2]]; }
@@ -338,8 +367,10 @@
   (CM.MAP_LIST = CM.MAP_LIST || []).push({
     id: 'bj', name: '北京', title: '北京 · 1990', sub: '真实地理 · 1990 年起 · 人民币 · 已有 1 号线与环线',
     desc: '从 1990 年只有两条地铁的北京开始：你接管 1 号线与环线，城市即将沿着一圈圈环路向外扩张。中关村、CBD、奥运会与城市副中心将陆续到来。',
-    facts: [['范围', '51 km × 43 km'], ['起始', '1990 年'], ['人口', '约 666 万'], ['货币', '人民币（元）'], ['既有地铁', '1 号线与环线 29 站'], ['模式', '经营挑战 / 自由建造']],
-    modes: ['challenge', 'free'], kind: 'real', mapVersion: 2, extent: [{ from: 1, dx: 0, dy: 0, oldW: 204, oldH: 156, newW: 204, newH: 172, note: '地图向南扩大到大兴黄村与亦庄南部，大兴机场接驳点移到新的南缘，旧存档接到原接驳点的线路需要再向南延伸', oldRegionIds: ['gugong', 'yiheyuan', 'yuanmingyuan', 'tiantan', 'shoudu', 'cbd', 'zgc', 'shangdi', 'aoyun', 'yayun', 'wangjing', 'jiucheng', 'haidian', 'chaoyang', 'fengtai', 'shijingshan', 'changping', 'tongzhou', 'daxing', 'shunyi', 'mentougou', 'outer'], oldLandmarkIds: ['bj_tam', 'bj_gugong', 'bj_qnd', 'bj_yonghe', 'bj_gulou', 'bj_baita', 'bj_fxg', 'bj_museum', 'bj_bjz', 'bj_west', 'bj_south', 'bj_north', 'bj_pku', 'bj_thu', 'bj_tvtower', 'bj_jg', 'bj_wtc3', 'bj_cctv', 'bj_citic', 'bj_nest', 'bj_cube', 'bj_ncpa', 'bj_gti', 'bj_cnc', 'bj_expo', 'bj_csmt', 'bj_wjsoho', 'bj_universal', 'bj_happy'] }], scenario: 'bj-1990',
+    facts: [['范围', '55 km × 50 km'], ['起始', '1990 年'], ['人口', '约 716 万'], ['货币', '人民币（元）'], ['既有地铁', '1 号线与环线 29 站'], ['模式', '经营挑战 / 自由建造']],
+    // 第 3 版（v3.5）：向北扩大 28 格到顺义新城、沙河与未来科学城，向东扩大 16 格到潞城与宋庄东部；旧存档依次迁移（见 maps.js extentMigration）
+    modes: ['challenge', 'free'], kind: 'real', mapVersion: 3, extent: [{ from: 1, dx: 0, dy: 0, oldW: 204, oldH: 156, newW: 204, newH: 172, note: '地图向南扩大到大兴黄村与亦庄南部，大兴机场接驳点移到新的南缘，旧存档接到原接驳点的线路需要再向南延伸', oldRegionIds: ['gugong', 'yiheyuan', 'yuanmingyuan', 'tiantan', 'shoudu', 'cbd', 'zgc', 'shangdi', 'aoyun', 'yayun', 'wangjing', 'jiucheng', 'haidian', 'chaoyang', 'fengtai', 'shijingshan', 'changping', 'tongzhou', 'daxing', 'shunyi', 'mentougou', 'outer'], oldLandmarkIds: ['bj_tam', 'bj_gugong', 'bj_qnd', 'bj_yonghe', 'bj_gulou', 'bj_baita', 'bj_fxg', 'bj_museum', 'bj_bjz', 'bj_west', 'bj_south', 'bj_north', 'bj_pku', 'bj_thu', 'bj_tvtower', 'bj_jg', 'bj_wtc3', 'bj_cctv', 'bj_citic', 'bj_nest', 'bj_cube', 'bj_ncpa', 'bj_gti', 'bj_cnc', 'bj_expo', 'bj_csmt', 'bj_wjsoho', 'bj_universal', 'bj_happy'] },
+      { from: 2, dx: 0, dy: 28, oldW: 204, oldH: 172, newW: 220, newH: 200, note: '地图向北扩大到顺义新城、沙河与未来科学城，向东扩大到潞城与宋庄东部', oldRegionIds: ['gugong', 'yiheyuan', 'yuanmingyuan', 'tiantan', 'shoudu', 'cbd', 'zgc', 'shangdi', 'aoyun', 'yayun', 'wangjing', 'jiucheng', 'haidian', 'chaoyang', 'fengtai', 'shijingshan', 'changping', 'tongzhou', 'daxing', 'shunyi', 'mentougou', 'outer'], oldLandmarkIds: ['bj_tam', 'bj_gugong', 'bj_qnd', 'bj_yonghe', 'bj_gulou', 'bj_baita', 'bj_fxg', 'bj_museum', 'bj_bjz', 'bj_west', 'bj_south', 'bj_north', 'bj_pku', 'bj_thu', 'bj_tvtower', 'bj_jg', 'bj_wtc3', 'bj_cctv', 'bj_citic', 'bj_nest', 'bj_cube', 'bj_ncpa', 'bj_gti', 'bj_cnc', 'bj_expo', 'bj_csmt', 'bj_wjsoho', 'bj_universal', 'bj_happy'] }], scenario: 'bj-1990',
     region: '中国内地', tagline: '一环套一环，接管两条线的首都', difficulty: 3, tags: ['已有地铁', '环路', '奥运'],
     intro: '1990 年的北京，地铁只有两条：1 号线从苹果园开到复兴门，环线沿着旧城墙的位置绕城一圈。亚运会就要开幕，自行车流填满长安街。接下来是二环到五环一圈圈向外，中关村、CBD、北部大社区与城市副中心一个接一个出现。你要在一座摊大饼的城市里织出一张网。',
     features: [['train', '开局接管 1 号线与环线', '29 站、约 39 km，复兴门换乘，票款与运营费照常结算']],
@@ -347,8 +378,10 @@
     geo: G, data: data,
     econ: { devOffset: 1, money: 1 },   // 出行选择参数：北京 1990 年约对应广州样本 1991 年的发展阶段
     cfg: {
-      W: 204, H: 172, START: { y: 1990, m: 1, d: 1, minute: 360 },
-      growth: Object.assign({}, CM.CFG.growth, { popCurve: [[1990, 6.66e6], [1995, 7.36e6], [2000, 9.0e6], [2005, 11.15e6], [2010, 14.01e6], [2015, 14.91e6], [2020, 14.81e6], [2030, 15.24e6], [2050, 15.56e6], [2300, 15.77e6]], histEnd: 2020, jobsRatio: [[1990, 0.562], [1995, 0.564], [2000, 0.565], [2005, 0.584], [2010, 0.602], [2015, 0.612], [2020, 0.622]] }),
+      W: 220, H: 200, START: { y: 1990, m: 1, d: 1, minute: 360 },
+      // v3.5 地图向北扩大到顺义新城与沙河、向东扩大到潞城：曲线为扩图前曲线 ÷（1 − 新增范围的人口份额），份额按开局生成与增长模型实测（1990 年约 7%，2000 年约 5%，2020 年约 9%），
+      // 原有范围的人口与扩图前一致；岗位比例按人口与岗位份额同样换算，原有范围的岗位与扩图前一致
+      growth: Object.assign({}, CM.CFG.growth, { popCurve: [[1990, 7.157e6], [1995, 7.838e6], [2000, 9.506e6], [2005, 11.894e6], [2010, 15.33e6], [2015, 16.424e6], [2020, 16.323e6], [2030, 16.797e6], [2050, 17.15e6], [2300, 17.381e6]], histEnd: 2020, jobsRatio: [[1990, 0.538], [1995, 0.543], [2000, 0.547], [2005, 0.56], [2010, 0.568], [2015, 0.577], [2020, 0.587]] }),
       money: { code: 'CNY', unit: '元', wan: '万元', yi: '亿元', sym: '¥' },
       econBase: 1990,
       // 造价（万元，1990 年价格；估算，参考复八线约 13.5 km、总投资约 56 亿元的量级）：旧城地下管线与文物多，地下造价较高
@@ -362,8 +395,9 @@
       // 城市经济（macro.js）：1990 年地图范围 GDP 约 430 亿元（估算：北京全市约 500 亿元，地图覆盖中心城区与近郊主要开发区）；
       // 首都功能与科技、金融服务业比重高，2008 年奥运建设与 2015 年后的疏解体现在生产率趋势与事件中
       macro: {
-        area: '地图范围（中心城区、近郊与亦庄、通州、大兴）', region: '中国内地',
-        gdp0: 4410000, revRatio: [[1990, 0.2], [1994, 0.13], [2003, 0.16], [2010, 0.18], [2020, 0.18], [2040, 0.17]], revElastic: 1.5,
+        area: '地图范围（中心城区、近郊与亦庄、通州、大兴、顺义新城与昌平沙河）', region: '中国内地',
+        // gdp0：v3.5 地图扩大后按全图岗位增加的比例（约 3%）上调，人均产出不变（估算）
+        gdp0: 4540000, revRatio: [[1990, 0.2], [1994, 0.13], [2003, 0.16], [2010, 0.18], [2020, 0.18], [2040, 0.17]], revElastic: 1.5,
         prod: [[1990, 0.04], [1992, 0.09], [1995, 0.09], [2000, 0.09], [2005, 0.09], [2008, 0.07], [2011, 0.065], [2015, 0.055], [2019, 0.045], [2025, 0.032], [2035, 0.02], [2050, 0.014], [2080, 0.012]],
         infl: 'cn', longRun: { infl: 0.02 }, histEnd: 2020, ref: 'cn',
         struct: { trade: 0.55, fin: 0.7, ind: 0.45, tour: 0.6, prop: 0.65 },
@@ -384,6 +418,6 @@
         ],
       },
     },
-    cam: { cx: 82, cy: 78, zoom: 16 },
+    cam: { cx: 82, cy: 106, zoom: 16 },   // v3.5 地图向北扩大 28 格，镜头仍对准原处
   });
 })(window.CM);

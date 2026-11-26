@@ -151,9 +151,13 @@
         }, true));
       }
       if (res.lines.length) {
-        wrap.appendChild(this.sec('pr-lines', '相关线路客流（日上车人次）', '', function () {
+        // 既有线的分流（v3.3）：草案没改动、但客流随新线变化的线路单列在下面
+        const mine = res.lines.filter(function (l) { return !l.other; }), others = res.lines.filter(function (l) { return l.other; });
+        wrap.appendChild(this.sec('pr-lines', '相关线路客流（日上车人次）', others.length ? '含 ' + others.length + ' 条既有线的变化' : '', function () {
           const t = h('table', { class: 'tbl' }, h('tr', null, h('th', null, '线路'), h('th', null, '当前'), h('th', null, '草案')));
-          for (const l of res.lines) t.appendChild(h('tr', null, h('td', null, h('span', { class: 'swatch', style: { background: AX.line(l), marginRight: '6px' } }), l.name), h('td', null, U.fmtPeople(l.before)), h('td', null, U.fmtPeople(l.after))));
+          const row = function (l) { const d = l.after - l.before; return h('tr', null, h('td', null, h('span', { class: 'swatch', style: { background: AX.line(l), marginRight: '6px' } }), l.name), h('td', null, U.fmtPeople(l.before)), h('td', null, U.fmtPeople(l.after), l.other ? h('small', { class: d < 0 ? 'bad' : 'good' }, ' ' + UI.sgnPeople(d)) : null)); };
+          for (const l of mine) t.appendChild(row(l));
+          if (others.length) { t.appendChild(h('tr', null, h('td', { colspan: 3, class: 'small muted' }, '既有线（新线分走或带来的乘客）'))); for (const l of others) t.appendChild(row(l)); }
           return t;
         }, true));
       }
@@ -192,7 +196,16 @@
     if(r.status!=='done'){el.appendChild(h('div',{class:'callout info'},h('span',{class:'spinner',style:{width:'14px',height:'14px',borderWidth:'2px'}}),'正在评估本次建设的交通效果（不影响游戏进行），完成后自动显示。'));return{title:'建设效果报告',el};}
     el.appendChild(h('div', { class: 'tiny muted', style: { margin: '0 0 6px' } }, r.at[0] + '年' + r.at[1] + '月建成',
       r.summary ? h('span', null, ' · ' + r.summary) : null, r.cost > 0 ? h('span', null, ' · 费用 ' + U.fmtMoney(r.cost)) : null));
-    if(r.lines&&r.lines.length)el.appendChild(h('div',{class:'row',style:{flexWrap:'wrap',gap:'4px',marginBottom:'6px'}},r.lines.map(l=>h('span',{class:'tag clickable',style:{background:AX.line(l)+'22',color:AX.line(l)},onclick:()=>{if(g.net.lines[l.id])self.openPage('line',l.id);}},'● '+l.name+' · 日上车 '+U.fmtPeople(l.after)+' 人次'))));
+    if (!r.seen) { r.seen = true; g.touch(); this.markUnsaved(); this.scheduleAutosave(); }
+    const related = (r.lines || []).filter(l => l.other);
+    const built = (r.lines || []).filter(l => !l.other);
+    if (built.length) el.appendChild(h('div', {class:'row', style:{flexWrap:'wrap',gap:'4px',marginBottom:'6px'}},
+      built.map(l => h('span', {class:'tag clickable', style:{background:AX.line(l)+'22',color:AX.line(l)},
+        onclick:()=>{if(g.net.lines[l.id]) self.openPage('line',l.id);}}, '● '+l.name+' · 日上车 '+U.fmtPeople(l.after)+' 人次'))));
+    if (related.length) el.appendChild(this.sec('imp-lines', '既有线客流变化（日上车人次）', '', () =>
+      h('div', null, related.map(l => h('div', {class:'chg small'}, h('span', null, l.name),
+        h('b', {class:l.after < l.before ? 'warn' : 'good'}, U.fmtPeople(l.before)+' → '+U.fmtPeople(l.after),
+          ' · '+UI.sgnPeople(l.after-l.before))))), true, 'route'));
     el.appendChild(CM.Impact.view(this,r,{open:true}));
     const roads=[...(r.roads||[]),...(r.roadsWorse||[])];
     el.appendChild(this.sec('imp-roads','道路变化（工作日早高峰拥堵指数）',roads.length?roads.length+' 条':'变化不明显',function(){
@@ -430,7 +443,7 @@
       this.live.push(function () {
         const d2 = g.model.stDaily, dw = g.model.stDailyWk, de = g.model.stDailyWe;   // 每次读取最新统计（模型收敛过程中会不断替换）
         if (!d2 || !dw || !de || g.model.dailyStale || g.model.net.C !== C || k >= d2.inn.length) return;
-        const sub = function (a, b) { return '工作日 ' + U.fmtPeople(a) + ' · 周末 ' + U.fmtPeople(b); };
+        const sub = function (a, b) { return CM.Settings.get('detail') === 'pro' ? '工作日 ' + U.fmtPeople(a) + ' · 周末 ' + U.fmtPeople(b) : ''; };
         sIn.setV(U.fmtPeople(d2.inn[k]) + ' 人次', sub(dw.inn[k], de.inn[k])); sOut.setV(U.fmtPeople(d2.out[k]) + ' 人次', sub(dw.out[k], de.out[k])); sX.setV(U.fmtPeople(d2.xfer[k]) + ' 人次', sub(dw.xfer[k], de.xfer[k]));
         const zero = d2.inn[k] + d2.out[k] < 1;
         const reason = zero ? zeroWhy() : '';
@@ -473,7 +486,7 @@
       el.appendChild(this.sec('st-ops', '运营与费用', '', function () {
         const oi = g.econ.opsIndex(g.clock.y);
         const pw = g.model.stDailyWk, pe = g.model.stDailyWe;
-        return self.kv([['车站容量', U.fmtInt(cap) + ' 人次/小时'], ['日运营费用', U.fmtMoney(CFG.ops.stationDaily[C.stations[k].size] * oi)], ['建成时间', official.built ? official.built[0] + '年' + official.built[1] + '月' : '—'], ['高峰小时客流', pw && pe ? '工作日 ' + U.fmtInt(pw.peak[k]) + ' · 周末 ' + U.fmtInt(pe.peak[k]) + ' 人次' : U.fmtInt(sd.peak[k]) + ' 人次']]);
+        return self.kv([['车站容量', U.fmtInt(cap) + ' 人次/小时'], ['日运营费用', U.fmtMoney(CFG.ops.stationDaily[C.stations[k].size] * oi)], ['建成时间', official.built ? official.built[0] + '年' + official.built[1] + '月' : '—'], ['高峰小时客流', CM.Settings.get('detail') === 'pro' && pw && pe ? '工作日 ' + U.fmtInt(pw.peak[k]) + ' · 周末 ' + U.fmtInt(pe.peak[k]) + ' 人次' : U.fmtInt(sd.peak[k]) + ' 人次']]);
       }));
       el.appendChild(this.todBlock(id));
       el.appendChild(this.decorBlock(id));
@@ -641,11 +654,28 @@
     }
     if (stR <= 0.8 && !trains.length) return null;
     const box = h('div', { class: 'diag' }, h('div', { class: 'diag-h' }, CM.icon('warn'), '拥挤诊断'));
-    const item = function (level, title, text, actions) { box.appendChild(h('div', { class: 'diag-item lv-' + level }, h('b', null, title), h('div', { class: 'small' }, text), actions.filter(Boolean).length ? h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '6px', marginTop: '6px' } }, actions.filter(Boolean)) : null)); };
+    // 诊断条目（v3.4 图形化）：需求与能力画成一根条（竖线是能力上限），下面一句话说清楚问题；完整说明在「专业」信息里直接显示，「简洁」时可展开
+    const simple = CM.Settings.get('detail') !== 'pro';
+    const meter = function (m) {
+      if (!m) return null;
+      const r = Math.max(0, m.v), w = Math.min(1, r / 1.5), cls = r > 1 ? 'bad' : (r > 0.85 ? 'warn' : 'good');
+      return h('div', { class: 'dg-meter ' + cls }, h('div', { class: 'dg-bar' }, h('i', { style: { width: (w * 100).toFixed(1) + '%' } }), h('em', { style: { left: (100 / 1.5).toFixed(1) + '%' } })),
+        h('div', { class: 'dg-nums' }, h('b', null, U.fmtPct(r, 0)), h('span', null, m.label)));
+    };
+    const item = function (level, title, text, actions, m, short, chips) {
+      const acts = actions.filter(Boolean), more = simple && short ? h('details', { class: 'dg-more' }, h('summary', null, '详细说明'), h('div', { class: 'small' }, text)) : null;
+      box.appendChild(h('div', { class: 'diag-item lv-' + level }, h('b', null, title), meter(m),
+        chips && chips.length ? h('div', { class: 'dg-chips' }, chips.map(function (c) { return h('span', { class: 'dg-chip' }, CM.icon(c[0], 12), c[1]); })) : null,
+        h('div', { class: 'small' }, simple && short ? short : text), more,
+        acts.length ? h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '6px', marginTop: '6px' } }, acts) : null));
+    };
     const divert = h('button', { class: 'btn sm ghost', onclick: function () { self.showDiversion(st); } }, '查看可分流方向');
     if (stR > 0.8) {
       const up = st.size !== topSize ? h('button', { class: 'btn sm primary', onclick: function () { g.edit(function (n) { if (n.stations[id]) n.stations[id].size = next(st.size); }); self.toast('已在草案中把「' + st.name + '」升级为' + mc.sizeName[next(st.size)] + '车站', 'info'); } }, '升级为' + mc.sizeName[next(st.size)] + '车站') : null;
-      item(stR > 1 ? 'bad' : 'warn', stR > 1 ? '车站容量不足' : '车站接近饱和', '工作日高峰小时进出站与换乘约 ' + U.fmtInt(sd.peak[k]) + ' 人次，' + mc.sizeName[st.size] + '车站能力 ' + U.fmtInt(cap) + ' 人次/时（' + U.fmtPct(stR, 0) + '）。' + (stR > 1 ? '乘客在闸机、楼梯与换乘通道排队，进出站变慢。' : '') + (st.size === 'XL' ? '已是超大型车站，只能通过新线路分流。' : st.size === topSize ? (isFinite(M.xlYear()) ? '已是大型车站：' + M.xlYear() + ' 年起可升级为超大型，现在只能通过新线路分流。' : '已是大型车站，只能通过新线路分流。') : ''), [up, divert]);
+      item(stR > 1 ? 'bad' : 'warn', stR > 1 ? '车站容量不足' : '车站接近饱和', '工作日高峰小时进出站与换乘约 ' + U.fmtInt(sd.peak[k]) + ' 人次，' + mc.sizeName[st.size] + '车站能力 ' + U.fmtInt(cap) + ' 人次/时（' + U.fmtPct(stR, 0) + '）。' + (stR > 1 ? '乘客在闸机、楼梯与换乘通道排队，进出站变慢。' : '') + (st.size === 'XL' ? '已是超大型车站，只能通过新线路分流。' : st.size === topSize ? (isFinite(M.xlYear()) ? '已是大型车站：' + M.xlYear() + ' 年起可升级为超大型，现在只能通过新线路分流。' : '已是大型车站，只能通过新线路分流。') : ''), [up, divert],
+        { v: stR, label: U.fmtInt(sd.peak[k]) + ' / ' + U.fmtInt(cap) + ' 人次/时（工作日高峰）' },
+        stR > 1 ? '高峰进出站与换乘超过车站能力，乘客在闸机和楼梯排队。' + (st.size !== topSize ? '可以升级车站。' : '需要新线路分流。') : '高峰进出站与换乘接近车站能力。',
+        [['station', mc.sizeName[st.size] + '车站']]);
     }
     for (const t of trains) {
       const rt = t.rt, w = t.w, A = C.stations[w.a], B = C.stations[w.b];
@@ -659,7 +689,10 @@
         self.toast('已在草案中升级 ' + limiting.length + ' 座车站，' + rt.line.name + ' 可加长到 ' + mc.carsBySize[next(C.stations[C.sIndex.get(limiting[0])].size)] + ' 节编组', 'info');
       } }, '加长编组：升级 ' + limiting.length + ' 座' + mc.sizeName[C.stations[C.sIndex.get(limiting[0])].size] + '车站') : null;
       item('bad', '列车运力不足 · ' + rt.label, A.name + '—' + B.name + ' 区间工作日' + (w.p === 0 ? '早' : '晚') + '高峰断面约 ' + U.fmtInt(w.load) + ' 人/时，超过运力 ' + U.fmtInt(w.capH) + ' 人/时（' + U.fmtNum(w.freq, 1) + ' 列/时' + (atMax ? '，已达发车上限' : '') + '，' + minCars + ' 节编组）。' +
-        (minCars < 8 ? '编组受沿线最小车站限制，' + (helpsHere ? '本站是限制编组的车站之一，需与其余 ' + (limiting.length - 1) + ' 座同时升级。' : '只升级本站不能解决，需要升级限制编组的车站。') : '已是最长编组，只能修建平行线路分流。'), [locate, lengthen, divert]);
+        (minCars < 8 ? '编组受沿线最小车站限制，' + (helpsHere ? '本站是限制编组的车站之一，需与其余 ' + (limiting.length - 1) + ' 座同时升级。' : '只升级本站不能解决，需要升级限制编组的车站。') : '已是最长编组，只能修建平行线路分流。'), [locate, lengthen, divert],
+        { v: w.lf, label: U.fmtInt(w.load) + ' / ' + U.fmtInt(w.capH) + ' 人/时（' + A.name + '—' + B.name + '）' },
+        (w.p === 0 ? '早' : '晚') + '高峰这一段坐不下。' + (minCars < 8 ? '加长编组最直接。' : (atMax ? '车次和编组都到上限，需要平行线路分流。' : '可以加开列车。')),
+        [['train', U.fmtNum(w.freq, 1) + ' 列/时' + (atMax ? ' · 已到上限' : '')], ['metro', minCars + ' 节编组']]);
     }
     return box;
   };
@@ -1487,7 +1520,7 @@
     el.appendChild(body);
     if (tab === 'econ') this.finEcon(body, mv);
     else if (tab === 'fisc') this.finFiscal(body, mv);
-    else if (tab === 'debt') this.finDebt(body);
+    else if (tab === 'debt') { const tip = this.tip1('debt'); if (tip) body.appendChild(tip); this.finDebt(body); }
     else this.finOverview(body, mv);
     if (g.macroError) body.appendChild(this.callout('warn', 'warn', g.macroError));
     return { title: '财政与经济', el: el };
@@ -2171,10 +2204,14 @@
     const ym = g.ym();
     const corp = !!(CM.Corp && CM.Corp.enabled(g));   // 政府合同（v2.5）：经营挑战的真实城市
     let tab = id || this.taskTab || 'active';
-    if (tab === 'ppp' && !corp) tab = 'active';
+    if ((tab === 'ppp' && !corp) || (tab === 'todo' && g.tutorial)) tab = 'active';
     this.taskTab = tab;
     const el = h('div', { class: 'tk-page' });
     const tabs = [['active', '进行中 ' + T.active.length, 'flag'], ['done', '已完成 ' + T.done.length, 'check'], ['failed', '未完成 ' + T.failed.length, 'error']];
+    if (!g.tutorial) {
+      const todo = CM.Todo.count(g, this);
+      tabs.unshift(['todo', '待办' + (todo.n ? ' ' + todo.n : ''), 'tasks']);
+    }
     if (corp) tabs.push(['ppp', '合同' + (g.corp ? ' ' + (g.corp.tenders.length + g.corp.contracts.length) : ''), 'briefcase']);
     el.appendChild(this.pageTabs(tabs, tab, function (t) {
       self.taskTab = t; const top = self.stack[self.stack.length - 1]; if (top && top.kind === 'tasks') top.id = t; self.renderPage(false); self.rBody.scrollTop = 0;
@@ -2370,7 +2407,13 @@
           lineBtn(o),
           h('button', { class: 'btn sm ghost', onclick: function () { T.decline(g, o.id); g.touch(); self.markUnsaved(); self.rerenderPage(); } }, '不感兴趣')));
     };
-    if (tab === 'ppp') { this.corpTab(body); return { title: '任务', el: el }; }
+    if (tab === 'ppp' || tab === 'todo') {
+      const tip = this.tip1(tab);
+      if (tip) body.appendChild(tip);
+      if (tab === 'todo') CM.Todo.render(this, g, body);
+      else this.corpTab(body);
+      return { title: '任务', el };
+    }
     if (tab === 'active') {
       if (!ch) body.appendChild(this.callout('info', 'info', '自由建造模式：任务仅供参考，没有奖励，未完成也不会有后果。'));
       const offers = (T.offers || []).filter(function (o) { return ym <= o.expiresYM; });

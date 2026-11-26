@@ -241,13 +241,16 @@
     if (previews.has(meta.key)) return Promise.resolve(previews.get(meta.key));
     return readSlotText(slotId).then(function (r) {
       const pl = Save.parseEnvelope(r.text).payload, net = pl.net, q = function (v) { return Math.round(v * 10) / 10; };
-      const out = { segs: [], st: [], lines: Object.keys(net.lines || {}).length, stations: Object.keys(net.stations || {}).length, clock: pl.clock ? [pl.clock.y, pl.clock.m] : null };
+      const out = { segs: [], st: [], lines: Object.keys(net.lines || {}).length, stations: 0, clock: pl.clock ? [pl.clock.y, pl.clock.m] : null };
       for (const id in net.segments) {
         const s = net.segments[id], a = net.stations[s.a], b = net.stations[s.b], L = net.lines[s.line]; if (!a || !b) continue;
         const pts = [q(a.x), q(a.y)]; for (const p of s.pts || []) pts.push(q(p[0]), q(p[1])); pts.push(q(b.x), q(b.y));
         out.segs.push([L && L.color || '#8a94a6', s.type || 'underground', pts]);
       }
-      for (const id in net.stations) { const s = net.stations[id]; out.st.push(q(s.x), q(s.y)); }
+      for (const s of Object.values(net.stations)) {
+        if (s.v) continue;
+        out.st.push(q(s.x), q(s.y)); out.stations++;
+      }
       if (previews.size > 24) previews.clear();
       previews.set(r.meta.key, out);
       return out;
@@ -271,9 +274,10 @@
       const tv = (p.traffic && p.traffic.v) || 1;
       const mp = CM.MAPS[p.meta.map || 'gz'];
       const terrainUpgrade = (p.city.terrainRevision || 1) < (mp.data.terrainRevision || 1);
+      const scenicUpgrade = (p.city.scenicRevision || 1) < (mp.data.scenicRevision || 1);
       const displayUpgrade = (p.city.displayRevision || 1) < (mp.data.displayRevision || 1);
       const rulesUpgrade = (p.rulesRevision || 0) < (CFG.RULES_REVISION || 0);
-      if (tv >= (CFG.TRAFFIC_MODEL || 1) && !rulesUpgrade && !p.__mapMigratedFrom && !terrainUpgrade && !displayUpgrade) {
+      if (tv >= (CFG.TRAFFIC_MODEL || 1) && !rulesUpgrade && !p.__mapMigratedFrom && !terrainUpgrade && !scenicUpgrade && !displayUpgrade) {
         if (!CM.TrafficCache) return p;
         return CM.TrafficCache.keyFor(parsed.env.body).then(async function (key) {
           Object.defineProperty(p, '__trafficKey', { value: key });

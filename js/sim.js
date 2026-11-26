@@ -39,12 +39,23 @@
   // 同时交错执行的时段数（v2.1）：一个时段等汽车分配时，主线程先算其他时段的地铁路径与方式选择。
   // v2.3：12 个逻辑核心以上交错 4 个时段（方式选择线程随之增至 4 个），跳月 / 跳年少等工作线程；各时段互不依赖，结果与宽度无关
   const PIPE_W = 2;
-  function carTree(G, time, origin, W, need, stamp) {
-    const dist = W.dist, dkm = W.dkm, pred = W.pred, order = W.order, keys = W.heapK, values = W.heapV, mark = W.mark;
-    const start = G.start, node = G.nodes, initial = G.times, km = G.km;
-    const outStart = G.outStart, outArc = G.outArc, arcTo = G.arcTo, arcKm = G.arcKm;
+  // 道路最短路内核（v3.3 性能重写，结果与 v2.9 起的算法逐位一致）：
+  // 1. 路段按出发节点排成连续数组（carGraph 的 csrTo / csrKm，第 k 项即 outArc[k] 号路段），每次分配先把路段时间按同一顺序排一份（carTimes），
+  //    内层循环顺序读取，不再经 outArc 间接寻址；pred 记连续数组下标，回溯流量时再换回路段编号。
+  // 2. 按终点判定提前停止：起点需要的每个终点小区，一旦「已定下的最佳行程 < 当前距离 + 该小区接入时间的最小值」，剩下没定下的接入点
+  //    （最终距离不小于当前距离）不可能更近，该小区即可判定；全部终点判定后停止。以前要等所有接入点都定下来，实测几乎总是搜完全图。
+  //    选出的接入点、行程时间、里程与回溯的路段流量都与搜完全图相同（没定下的节点不在任何选中路径上，流量为 0）。
+  function carTimes(G, time, out) { const arc = G.outArc, n = G.nA; for (let k = 0; k < n; k++) out[k] = time[arc[k]]; return out; }
+  // tP：排好的路段时间；nDest：起点需要判定的终点数（carOriginRow 已在 W 中登记各终点的接入点、阈值与链表）
+  function carTree(G, tP, origin, W, nDest) {
+    const dist = W.dist, dkm = W.dkm, pred = W.pred, order = W.order, keys = W.heapK, values = W.heapV, mark = W.mark, stamp = W.stamp;
+    const start = G.start, node = G.nodes, initial = G.times, km = G.km, outStart = G.outStart, csrTo = G.csrTo, csrKm = G.csrKm;
+    const head = W.nHead, lNext = W.lNext, lDest = W.lDest, lT = W.lT, best = W.dBest, left = W.dLeft, minT = W.dMinT, res = W.dRes, thK = W.thK, thV = W.thV, thB = W.thB;
     dist.fill(INF);
-    let count = 0;
+    let count = 0, open = nDest, thN = 0;
+    // 阈值小顶堆：键为 best − minT（近似），弹出后按精确条件 du + minT > best 核对；thB 记入堆时的 best，变了就是过时项
+    const thPush = function (key, j, b) { let i = thN++; while (i > 0) { const p = (i - 1) >> 1; if (thK[p] <= key) break; thK[i] = thK[p]; thV[i] = thV[p]; thB[i] = thB[p]; i = p; } thK[i] = key; thV[i] = j; thB[i] = b; };
+    const thPop = function () { const n = --thN; if (n <= 0) return; const key = thK[n], v = thV[n], b = thB[n]; let i = 0; for (;;) { const l = i * 2 + 1; if (l >= n) break; const r = l + 1, c = r < n && thK[r] < thK[l] ? r : l; if (thK[c] >= key) break; thK[i] = thK[c]; thV[i] = thV[c]; thB[i] = thB[c]; i = c; } thK[i] = key; thV[i] = v; thB[i] = b; };
     for (let k = start[origin]; k < start[origin + 1]; k++) {
       const v = node[k], t = initial[k];
       if (t < dist[v]) {
@@ -61,8 +72,8 @@
         const key = keys[n], val = values[n];
         let i = 0;
         for (;;) {
-          const left = i * 2 + 1; if (left >= n) break;
-          const right = left + 1, child = right < n && keys[right] < keys[left] ? right : left;
+          const lc = i * 2 + 1; if (lc >= n) break;
+          const rc = lc + 1, child = rc < n && keys[rc] < keys[lc] ? rc : lc;
           if (keys[child] >= key) break;
           keys[i] = keys[child]; values[i] = values[child]; i = child;
         }
@@ -70,11 +81,24 @@
       }
       if (du > dist[u]) continue;
       order[no++] = u;
-      if (need > 0 && mark[u] === stamp && --need === 0) break;
-      for (let k = outStart[u]; k < outStart[u + 1]; k++) {
-        const a = outArc[k], v = arcTo[a], nd = du + time[a];
+      if (mark[u] === stamp) {
+        for (let l = head[u]; l >= 0; l = lNext[l]) {
+          const j = lDest[l]; if (res[j]) continue;
+          const c = du + lT[l];
+          if (c < best[j]) { best[j] = c; thPush(c - minT[j], j, c); }
+          if (--left[j] === 0) { res[j] = 1; open--; }
+        }
+      }
+      while (thN > 0 && thK[0] < du) {
+        const j = thV[0], b = thB[0]; thPop();
+        if (res[j] || b !== best[j]) continue;
+        if (du + minT[j] > best[j]) { res[j] = 1; open--; } else { thPush(du, j, b); break; }   // 舍入边界：距离再增大时再核对
+      }
+      if (open <= 0) break;
+      for (let k = outStart[u], e = outStart[u + 1]; k < e; k++) {
+        const v = csrTo[k], nd = du + tP[k];
         if (nd < dist[v]) {
-          dist[v] = nd; dkm[v] = dkm[u] + arcKm[a]; pred[v] = a;
+          dist[v] = nd; dkm[v] = dkm[u] + csrKm[k]; pred[v] = k;
           let i = count++;
           while (i > 0) { const p = (i - 1) >> 1; if (keys[p] <= nd) break; keys[i] = keys[p]; values[i] = values[p]; i = p; }
           keys[i] = nd; values[i] = v;
@@ -85,40 +109,60 @@
   }
   // 起点 o：行程时间与里程写入 outT / outK 的 off 起一行（不可达的小区不写，保留原值；工作线程的行预先填 NaN 表示「未写」），
   // 流量累加到本块的 auxP；不可达条目保留原值。
-  // v2.7.1 行程表只存用得到的小区对：dests[q0..q1) 为起点 o 需要的终点小区（升序），dem[q] 为对应的汽车需求，
+  // v2.9 行程表只存用得到的小区对：dests[q0..q1) 为起点 o 需要的终点小区（升序），dem[q] 为对应的汽车需求，
   // 结果写入 outT / outK[q - shift]（不可达的不写，保持调用方填好的 NaN）。终点按小区编号升序处理，
-  // 需求只出现在这些小区对上，所以路段流量的累加顺序与逐个小区遍历完全相同，结果逐位一致
-  function carOriginRow(G, time, o, dests, q0, q1, dem, W, outT, outK, shift, auxP) {
-    const dist = W.dist, dkm = W.dkm, pred = W.pred, order = W.order, accN = W.accN, arcFrom = G.arcFrom;
-    const connStart = G.start, connNode = G.nodes, connTime = G.times, connKm = G.km;
-    // 终点小区的接入节点都标出来，搜索到它们全部定下来为止（v2.7.1，见 carTree）；没有要算的终点就不搜
-    const mark = W.mark;
+  // 需求只出现在这些小区对上，所以路段流量的累加顺序与逐个小区遍历完全相同，结果逐位一致。tP 为 carTimes 排好的路段时间
+  function carOriginRow(G, tP, o, dests, q0, q1, dem, W, outT, outK, shift, auxP) {
+    const dist = W.dist, dkm = W.dkm, pred = W.pred, order = W.order, accN = W.accN, arcFrom = G.arcFrom, outArc = G.outArc;
+    const connStart = G.start, connNode = G.nodes, connTime = G.times, connKm = G.km, comp = G.comp;
+    const o0 = connStart[o], o1 = connStart[o + 1];
+    if (o0 === o1) return;
+    // 起点的接入点都在同一连通片时，只登记该片内的终点接入点。
+    let component = comp[connNode[o0]];
+    for (let k = o0 + 1; k < o1; k++) if (comp[connNode[k]] !== component) { component = -1; break; }
+    // 登记各终点小区：接入点链表（节点 → 终点）、接入点个数与最短接入时间（v3.3，见 carTree 的提前停止）；没有要算的终点就不搜
+    const mark = W.mark, head = W.nHead, lNext = W.lNext, lDest = W.lDest, lT = W.lT, best = W.dBest, left = W.dLeft, minT = W.dMinT, res = W.dRes;
     if (W.stamp >= 2147480000) { mark.fill(0); W.stamp = 0; }
     const stamp = ++W.stamp;
-    let need = 0;
+    let nD = 0, nL = 0;
     for (let q = q0; q < q1; q++) {
       const d = dests[q];
       if (d === o) continue;
-      for (let k = connStart[d]; k < connStart[d + 1]; k++) { const nd = connNode[k]; if (mark[nd] !== stamp) { mark[nd] = stamp; need++; } }
+      const k0 = connStart[d], k1 = connStart[d + 1]; if (k0 === k1) continue;
+      const j = nD, first = nL; let mt = INF;
+      for (let k = k0; k < k1; k++) {
+        const nd = connNode[k];
+        if (component >= 0 && comp[nd] !== component) continue;
+        if (mark[nd] !== stamp) { mark[nd] = stamp; head[nd] = -1; }
+        lDest[nL] = j; lT[nL] = connTime[k]; lNext[nL] = head[nd]; head[nd] = nL; nL++;
+        if (connTime[k] < mt) mt = connTime[k];
+      }
+      if (nL === first) continue;
+      best[j] = INF; left[j] = nL - first; minT[j] = mt; res[j] = 0;
+      nD++;
     }
-    const no = need > 0 ? carTree(G, time, o, W, need, stamp) : 0;
+    if (!nD) return;   // 没有候选终点，保留输出，不读取上一行的距离缓冲。
+    const no = carTree(G, tP, o, W, nD);
     for (let q = q0; q < q1; q++) {
       const d = dests[q];
       if (d === o) continue;
-      let best = INF, bk = 0, bn = -1;
-      for (let k = connStart[d]; k < connStart[d + 1]; k++) { const nd = connNode[k], v = dist[nd] + connTime[k]; if (v < best) { best = v; bk = dkm[nd] + connKm[k]; bn = nd; } }
-      if (bn < 0 || best >= INF) continue;
-      outT[q - shift] = best; outK[q - shift] = bk;
+      let bt = INF, bk = 0, bn = -1;
+      for (let k = connStart[d]; k < connStart[d + 1]; k++) { const nd = connNode[k], v = dist[nd] + connTime[k]; if (v < bt) { bt = v; bk = dkm[nd] + connKm[k]; bn = nd; } }
+      if (bn < 0 || bt >= INF) continue;
+      outT[q - shift] = bt; outK[q - shift] = bk;
       const x = dem[q];
       if (x > 0) accN[bn] += x;
     }
     for (let q = no - 1; q >= 0; q--) {
       const n = order[q], a = accN[n];
-      if (a > 0) { const e = pred[n]; if (e >= 0) { auxP[e] += a; accN[arcFrom[e]] += a; } accN[n] = 0; }
+      if (a > 0) { const e = pred[n]; if (e >= 0) { const arc = outArc[e]; auxP[arc] += a; accN[arcFrom[arc]] += a; } accN[n] = 0; }
     }
   }
   function carWork(G) {
-    return { dist: new Float64Array(G.nN), dkm: new Float32Array(G.nN), pred: new Int32Array(G.nN), order: new Int32Array(G.nN), accN: new Float64Array(G.nN), heapK: new Float64Array(G.nA + 4), heapV: new Int32Array(G.nA + 4), mark: new Int32Array(G.nN), stamp: 0 };
+    const L = G.nodes.length, Z = G.Z;
+    return { dist: new Float64Array(G.nN), dkm: new Float32Array(G.nN), pred: new Int32Array(G.nN), order: new Int32Array(G.nN), accN: new Float64Array(G.nN), heapK: new Float64Array(G.nA + 4), heapV: new Int32Array(G.nA + 4), mark: new Int32Array(G.nN), stamp: 0,
+      tP: new Float32Array(G.nA), nHead: new Int32Array(G.nN), lNext: new Int32Array(L), lDest: new Int32Array(L), lT: new Float64Array(L),
+      dBest: new Float64Array(Z), dLeft: new Int32Array(Z), dMinT: new Float64Array(Z), dRes: new Uint8Array(Z), thK: new Float64Array(L + G.nN + 4), thV: new Int32Array(L + G.nN + 4), thB: new Float64Array(L + G.nN + 4) };
   }
   // 工作线程入口：收到道路图（每次路网变化一次）与计算块，逐起点计算并回传（缓冲区转移，不复制）。
   // 稀疏块用 JavaScript 提前结束，稠密块仍可由现有 WASM 内核计算。
@@ -146,8 +190,8 @@
         } catch (e) { module = kernel = null; }
       }
       if (!W) W = carWork(G);
-      const aux = new Float32Array(G.nA);
-      for (let i = 0; i < n; i++) carOriginRow(G, m.time, m.origins[i], tDest, tStart[i], tStart[i + 1], m.dem, W, rowsT, rowsK, 0, aux);
+      const aux = new Float32Array(G.nA), tP = carTimes(G, m.time, W.tP);
+      for (let i = 0; i < n; i++) carOriginRow(G, tP, m.origins[i], tDest, tStart[i], tStart[i + 1], m.dem, W, rowsT, rowsK, 0, aux);
       postMessage({ req: m.req, b: m.b, rowsT: rowsT, rowsK: rowsK, aux: aux }, [rowsT.buffer, rowsK.buffer, aux.buffer]);
     };
   }
@@ -155,8 +199,17 @@
   function carGraph(model) {
     const rd = model.roadData, road = model.road;
     if (rd.G) return rd.G;
+    // 只按道路拓扑找连通片，方向仍由最短路搜索判断。
+    const comp = Int32Array.from({ length: road.nN }, (_, i) => i);
+    const root = function (v) {
+      while (comp[v] !== v) { comp[v] = comp[comp[v]]; v = comp[v]; }
+      return v;
+    };
+    for (let a = 0; a < road.nA; a++) comp[root(road.arcFrom[a])] = root(road.arcTo[a]);
+    for (let v = 0; v < comp.length; v++) comp[v] = root(v);
     rd.G = { id: ++CarPool.gseq, Z: model.Z, nN: road.nN, nA: road.nA, outStart: road.outStart, outArc: road.outArc, arcTo: road.arcTo, arcFrom: road.arcFrom,
-      start: rd.start, nodes: rd.nodes, times: rd.times, km: rd.km, zones: rd.zones, arcKm: rd.arcKm };
+      start: rd.start, nodes: rd.nodes, times: rd.times, km: rd.km, zones: rd.zones, arcKm: rd.arcKm, comp: comp,
+      csrTo: Int32Array.from(road.outArc, a => road.arcTo[a]), csrKm: Float64Array.from(road.outArc, a => rd.arcKm[a]) };
     return rd.G;
   }
   // 工作线程池：页面内用 Blob 创建（桌面 CSP 已允许 blob: 工作线程）；无法创建或出错时整体退回主线程计算。
@@ -183,7 +236,7 @@
       try {
         if (typeof Worker === 'undefined' || typeof Blob === 'undefined' || typeof URL === 'undefined' || !URL.createObjectURL) throw new Error('Worker 不可用');
         const kernel = CM.RoadKernel;
-        const src = '"use strict";\nconst INF = 1e30;\n' + (kernel ? kernel.worker.toString() : 'function roadKernelWorker(){return null;}') + '\n' + [carTree, carOriginRow, carWork, carWorkerMain].map(function (f) { return f.toString(); }).join('\n') + '\ncarWorkerMain();\n';
+        const src = '"use strict";\nconst INF = 1e30;\n' + (kernel ? kernel.worker.toString() : 'function roadKernelWorker(){return null;}') + '\n' + [carTimes, carTree, carOriginRow, carWork, carWorkerMain].map(function (f) { return f.toString(); }).join('\n') + '\ncarWorkerMain();\n';
         url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
         const self = this; this.list = [];
         for (let i = 0; i < this.size(); i++) {
@@ -233,8 +286,11 @@
     },
     pump: function () {
       if (!this.list) return;
-      // 先让每个线程都有一块，再补第二块（排队深度 CAR_DEPTH）。镜头移动时（v2.5 性能）只用一半线程，把核心让给画面；跳月、载入时全力。线程多少不影响结果
-      const busy = CM.R && CM.R.interacting && !(CM.game && CM.game.jumping), slots = busy ? Math.max(1, Math.ceil(this.list.length / 2)) : this.list.length;
+      // 每个线程先领一块，再补第二块。实时求解给渲染留出核心，载入和快进使用整个道路线程池。
+      const game = CM.game, n = this.list.length;
+      const full = !game || game.jumping || CM.isLoading?.();
+      const share = CM.R && CM.R.interacting ? 0.5 : 0.75;
+      const slots = full ? n : Math.ceil(n * share);
       for (let depth = 1; depth <= CAR_DEPTH; depth++) for (let si = 0; si < slots; si++) {
         const s = this.list[si];
         if (s.n >= depth) continue;
@@ -774,7 +830,7 @@
   // 单个起点的分目的出行分布（生产约束重力模型）：小区按各目的的吸引与距离衰减，重要设施作为独立目的地；
   // 候选目的地取综合份额最高的 240 个小区与份额足够的设施，各目的在候选中按比例分配；最后加上枢纽接驳
   function demandOrigin(D, i) {
-    const Z = D.Z, F = D.F, A = D.A, Ls = D.Ls, fA = D.fA, fL = D.fL, rate = D.rate, rw = D.rw, zJobs = D.zJobs, zAsum = D.zAsum;
+    const Z = D.Z, F = D.F, A = D.A, Ls = D.Ls, fA = D.fA, fL = D.fL, rate = D.rate, rw = D.rw, act = D.act;
     const zCx = D.zCx, zCy = D.zCy, nx = D.nx, ny = D.ny, hostZ = D.hostZ, kmPerCell = D.kmPerCell;
     const w = D.w, wf = D.wf, scores = D.scores, s = D.s, kk = D.kk, cand = D.cand, candF = D.candF, tot = D.tot, o = D.out;
     const dest = o.dest, c0 = o.t[0], c1 = o.t[1], c2 = o.t[2], c3 = o.t[3], c4 = o.t[4], c5 = o.t[5];
@@ -788,8 +844,9 @@
       const xi = zCx[i], yi = zCy[i], corr = D.corr, RN = D.RN, zReg = D.zReg, cRow = corr ? zReg[i] * RN : 0;
       // 距离衰减 exp(-d / L) 查表（v2.2 性能）：按距离等间隔的表线性插值，相对误差约 1e-6，结果与逐个求指数一致；超出表的距离仍逐个求指数
       const X = D.lut, inv = X.inv, nT = X.n, T0 = X.t[0], T1 = X.t[1], T2 = X.t[2], T3 = X.t[3], T4 = X.t[4];
-      for (let j = 0; j < Z; j++) {
-        if (j === i || (zJobs[j] < 5 && zAsum[j] < 5)) { w0[j] = 0; w1[j] = 0; w2[j] = 0; w3[j] = 0; w4[j] = 0; continue; }
+      w0[i] = w1[i] = w2[i] = w3[i] = w4[i] = 0;
+      for (const j of act) {
+        if (j === i) continue;
         const dx = xi - zCx[j], dy = yi - zCy[j], d = Math.sqrt(dx * dx + dy * dy) * kmPerCell;
         let v, e0, e1, e2, e3, e4;
         const u = d * inv, k = u | 0;
@@ -811,7 +868,7 @@
       let nc = 0, nf = 0;
       // 各目的的份额系数（rw / s）先算好，逐个去向只做乘法
       const q0 = s[0] > 0 ? rw[0] / s[0] : 0, q1 = s[1] > 0 ? rw[1] / s[1] : 0, q2 = s[2] > 0 ? rw[2] / s[2] : 0, q3 = s[3] > 0 ? rw[3] / s[3] : 0, q4 = s[4] > 0 ? rw[4] / s[4] : 0;
-      for (let j = 0; j < Z; j++) {
+      for (const j of act) {
         const sh = q0 * w0[j] + q1 * w1[j] + q2 * w2[j] + q3 * w3[j] + q4 * w4[j];
         if (sh > 0.0015) { scores[j] = sh; cand[nc++] = j; }
       }
@@ -1032,7 +1089,7 @@
     const F = list.length, NZ = Z + F;
     const hostZ = new Int32Array(NZ), nx = new Float32Array(NZ), ny = new Float32Array(NZ), reach = new Float32Array(F);
     for (let z = 0; z < Z; z++) hostZ[z] = z;
-    const cells = [], cellFac = new Map(), ringFac = new Map(), inner = new Float32Array(F), excl = new Uint8Array(city.N), we = new Float32Array(F);
+    const cells = [], cellFac = new Map(), ringFac = new Map(), link = new Uint8Array(F), inner = new Float32Array(F), excl = new Uint8Array(city.N), we = new Float32Array(F);
     const walk = city.walk, VW = city.VW;
     const onRoad = function (cc) { if (!walk) return true; const v = ((cc / city.W) | 0) * VW + cc % city.W; return walk.deg[v] > 0 || walk.deg[v + 1] > 0 || walk.deg[v + VW] > 0 || walk.deg[v + VW + 1] > 0; };
     list.forEach(function (f, k) {
@@ -1066,12 +1123,13 @@
           }
         }
       }
+      link[k] = linked || f.ext ? 1 : 0;
       inner[k] = Math.min(600, Math.sqrt(cs.length) * CFG.CELL_M * 0.4);   // 场内步行（米），大型公园与会展场馆约数分钟
       we[k] = f.we || f.T.we || 1;   // 单个设施可覆盖周末倍数（如主题乐园，v2.2）
     });
     const key = list.map(function (f) { return f.id; }).join(',');
     if (this.fn && this.fn.key !== key) this.facDaily = null;
-    this.fn = { F: F, NZ: NZ, list: list, ids: list.map(function (f) { return f.id; }), key: key, hostZ: hostZ, nx: nx, ny: ny, cells: cells, cellFac: cellFac, ringFac: ringFac, inner: inner, reach: reach, excl: excl, we: we };
+    this.fn = { F: F, NZ: NZ, list: list, ids: list.map(function (f) { return f.id; }), key: key, hostZ: hostZ, nx: nx, ny: ny, cells: cells, cellFac: cellFac, ringFac: ringFac, link: link, inner: inner, reach: reach, excl: excl, we: we };
     return this.fn;
   };
   Model.prototype.facIndex = function (id) { return this.fn ? this.fn.ids.indexOf(id) : -1; };
@@ -1083,9 +1141,12 @@
     const city = this.city, LU = CM.LU, Z = this.Z;
     const fn = this.buildFacNodes(), excl = fn.excl;
     const A = this.zA, hub = this.zHub;
+    // 空置用地只在开放前排除。机场等设施自己的客流由设施节点计算。
+    const vacant = city.regions.map((region, k) => region.empty && !city.regionOpen[k]);
     for (let z = 0; z < Z; z++) {
       let p = 0, j = 0, a = 0, sx = 0, sy = 0, sw = 0, aSc = 0, aSh = 0, aMd = 0, aLz = 0, h = 0, bw = -1, bc = this.zoneCells[z][0];
       for (const c of this.zoneCells[z]) {
+        if (vacant[city.region[c]]) continue;
         const pc = city.pop[c], jc = city.jobs[c];
         p += pc; j += jc;
         const L = city.lu[c], com = L === LU.COM || L === LU.MIX;
@@ -1187,6 +1248,8 @@
     const rsum = rate[0] + rate[1] + rate[2] + rate[3] + rate[4];
     const zAsum = new Float64Array(Z);
     for (let z = 0; z < Z; z++) zAsum[z] = A[1][z] + A[2][z] + A[3][z] + A[4][z];
+    const act = [];
+    for (let z = 0; z < Z; z++) if (!(this.zJobs[z] < 5 && zAsum[z] < 5)) act.push(z);
     // 输出写入复用的类型数组（两套交替使用：新的需求表算完前，旧表保持不变）
     this._odBufs = this._odBufs || [null, null];
     const cur = this.od && this.od.dest ? this.od.dest.buffer : null;
@@ -1197,15 +1260,16 @@
     // 距离衰减表（见 demandOrigin）：覆盖整张地图的对角距离，步长 5 m
     const LH = 0.005, nT = Math.ceil(Math.hypot(CFG.W, CFG.H) * kmPerCell / LH) + 1;
     const lut = { inv: 1 / LH, n: nT, t: Ls.map(function (Lk) { const t = new Float64Array(nT + 1); for (let k = 0; k <= nT; k++) t[k] = Math.exp(-k * LH / Lk); return t; }) };
-    const D = { Z: Z, F: F, A: A, Ls: Ls, lut: lut, corr: corr, RN: RN, zReg: this.zReg, fA: fA, fL: fL, rate: rate, rw: rate.map(function (r) { return r / rsum; }), zPop: this.zPop, zJobs: this.zJobs, zAsum: zAsum,
+    const D = { Z: Z, F: F, A: A, Ls: Ls, lut: lut, act, corr: corr, RN: RN, zReg: this.zReg, fA: fA, fL: fL, rate: rate, rw: rate.map(function (r) { return r / rsum; }), zPop: this.zPop, zJobs: this.zJobs,
       zCx: this.zCx, zCy: this.zCy, nx: fn.nx, ny: fn.ny, hostZ: fn.hostZ, kmPerCell: kmPerCell, hubs: hubs, hubTours: hubTours,
       w: [new Float64Array(Z), new Float64Array(Z), new Float64Array(Z), new Float64Array(Z), new Float64Array(Z)],
       wf: [null, new Float64Array(F), new Float64Array(F), new Float64Array(F), new Float64Array(F)],
       scores: new Float64Array(Z), s: new Float64Array(5), kk: new Float64Array(5), cand: new Int32Array(Z), candF: new Int32Array(Math.max(1, F)),
       out: ob, n: 0, tot: new Float64Array(NPK) };
     const start = new Int32Array(Z + 1);
+    let sliceAt = performance.now();
     for (let i = 0; i < Z; i++) {
-      if (i > 0 && (i & 15) === 0) yield;
+      if (i > 0 && (i & 3) === 0 && performance.now() - sliceAt >= CFG.perf.trafficBuildMs) { yield; sliceAt = performance.now(); }
       if (D.out.cap - D.n < per) D.out = this._odBufs[this._odFlip] = odGrow(D.out, D.n, Math.max(D.out.cap * 2, D.n + per * 64));
       demandOrigin(D, i);
       start[i + 1] = D.n;
@@ -1459,7 +1523,7 @@
         if (j >= ACC_MAX) { j = -1; for (let q = L.length - 1; q >= 0; q--) if (cnt[L[q].s] > 1) { j = q; break; } }   // 只替换在别处也有的车站
         if (j < 0) continue;
         if (j < L.length) cnt[L[j].s]--;
-        L[j] = { s: s2, w: b.d / mpm, share: b.w / Math.max(1, zTot[b.z]) };
+        L[j] = { s: s2, w: wOf(b.d / mpm, s2), share: b.w / Math.max(1, zTot[b.z]) };
         L.sort(function (x, y) { return x.w - y.w; });
         cnt[s2] = 1;
       }
@@ -2130,7 +2194,7 @@
         else if (skT[at] < 0) { skT[at] = 0; skK[at] = 0; }
       }
     };
-    let rowT = work.rowT, rowK = work.rowK;
+    let rowT = work.rowT, rowK = work.rowK, tP;
     for (let b = 0; b < CAR_BLOCKS; b++) {
       const i0 = bounds[b], i1 = bounds[b + 1];
       if (i0 === i1) continue;
@@ -2142,11 +2206,12 @@
         auxB = r.aux;
       } else {
         auxB = work.auxB; auxB.fill(0);
+        if (!tP) tP = carTimes(G, time, work.tP);
         for (let i = i0; i < i1; i++) {
           const o = runList[i], a0 = pS[o], a1 = pS[o + 1], len = a1 - a0;
           if (!rowT || rowT.length < len) { rowT = work.rowT = new Float32Array(Math.max(len, 256)); rowK = work.rowK = new Float32Array(rowT.length); }
           rowT.fill(NaN, 0, len); rowK.fill(NaN, 0, len);
-          carOriginRow(G, time, o, pD, a0, a1, carDem, work, rowT, rowK, a0, auxB);
+          carOriginRow(G, tP, o, pD, a0, a1, carDem, work, rowT, rowK, a0, auxB);
           merge(a0, len, rowT, rowK, 0);
           if ((i & 1) === 1) yield;
         }
@@ -2674,6 +2739,18 @@
         const ln = draftC.net.lines[lid];
         result.lines.push({ id: lid, name: ln ? ln.name : '（已拆除）', color: ln ? ln.color : '#999', before: lb0.get(lid) || 0, after: lb1.get(lid) || 0 });
       }
+      // 既有线的分流（v3.3）：草案没改动的线路，乘客被新线分走（或新线带来换乘）后客流也会变化，一并列出（other），
+      // 变化很小的（约 2%、200 人次以内，迭代误差量级）不列；减少最多的排前面
+      const affSet = new Set(affectedLineIds), others = [];
+      new Set(Array.from(lb0.keys()).concat(Array.from(lb1.keys()))).forEach(function (lid) {
+        if (affSet.has(lid)) return;
+        const b = lb0.get(lid) || 0, a = lb1.get(lid) || 0;
+        if (Math.abs(a - b) < Math.max(200, b * 0.02)) return;
+        const ln = draftC.net.lines[lid] || (baseNet?.C?.net?.lines[lid]);
+        others.push({ id: lid, name: ln ? ln.name : '（已拆除）', color: ln ? ln.color : '#999', before: b, after: a, other: true });
+      });
+      others.sort(function (x, y) { return (x.after - x.before) - (y.after - y.before); });
+      result.lines = result.lines.concat(others.slice(0, 8));
       // 建设效果归因（v2.3，impact.js）：受影响线路各站的日客流（周平均，进出站 + 换乘）与工作日早高峰最大满载率
       const stFlow = function (perSet, net) {
         if (!perSet || !net) return null;
