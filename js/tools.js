@@ -1167,11 +1167,12 @@
       polyPath(ctx, R, cs.g.pts, hh);
       ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = R.lineWidthPx() + 7; ctx.stroke();
       ctx.strokeStyle = col; ctx.lineWidth = R.lineWidthPx() + 2; ctx.stroke();
-      const minR = M.minRadius(L), ts = M.tightStretch(cs.g, minR);
-      for (const run of ts.stretch) { polyPath(ctx, R, run, hh); ctx.strokeStyle = 'rgba(214,48,49,0.95)'; ctx.lineWidth = R.lineWidthPx() + 3; ctx.stroke(); }
+      const minR = M.minRadius(L), ts = M.tightStretch(cs.g, minR), adopted = !!cs.seg.tk;
+      const tightColor = adopted ? 'rgba(176,102,20,0.95)' : 'rgba(214,48,49,0.95)';
+      for (const run of ts.stretch) { polyPath(ctx, R, run, hh); ctx.strokeStyle = tightColor; ctx.lineWidth = R.lineWidthPx() + 3; ctx.stroke(); }
       if (isFinite(cs.g.minRadiusM) && cs.g.minRxy && cs.g.minRadiusM < M.warnRadius(L) * 1.5) {
         const bad = cs.g.minRadiusM < minR, q = R.P(cs.g.minRxy[0], cs.g.minRxy[1], hh);
-        tag(ctx, q.x, q.y - 22, (bad ? '弯道过急 ' : '最小半径 ') + Math.round(cs.g.minRadiusM) + ' m' + (bad ? ' < ' + minR : ' ✓'), bad ? 'rgba(214,48,49,0.92)' : 'rgba(32,160,90,0.92)');
+        tag(ctx, q.x, q.y - 22, (bad ? (adopted ? '弯道限速 ' : '弯道过急 ') : '最小半径 ') + Math.round(cs.g.minRadiusM) + ' m' + (bad ? ' < ' + minR : ' ✓'), bad ? tightColor : 'rgba(32,160,90,0.92)');
         if (bad && ts.circle) turnCircles(ctx, R, ts.circle, hh);
       }
     }

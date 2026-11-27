@@ -21190,3 +21190,14 @@ Object.assign(window.CM.I18N_EN, {
     "石坑围": "Shek Hang Wai"
   }
 });
+
+// 接管铁路的草案检查与恢复操作。
+Object.assign(window.CM.I18N_EN, {
+  "恢复接管原状": "Restore Taken-over Alignment",
+  "弯道限速": "Curve speed limit",
+  "接管铁路原线位经过的风景区照旧可以通过，只是改线后多出了风景区里的一段。恢复接管原状、调整线形回到原线位附近，或把这段改为地下。": "The scenic area the original railway already crosses is still allowed; the realignment adds a new stretch inside it. Restore the taken-over alignment, move the line back near its original route, or put this section underground.",
+  "接管的车站不能挪位置：在两侧加转弯点，让线路直行进出车站。": "Taken-over stations can't be moved: add bend points on both sides so the line runs straight through the station.",
+  "{v0} 在车站「{v1}」前后转向约 {v2}°：接管的既有铁路沿用原来的进站线形，列车在这里限速通过": "{v0} turns about {v2}° through “{v1}”: the taken-over railway keeps its original approach, so trains slow down here",
+  "找不到这段轨道接管时的线位：请用「撤销」退回改动": "The original taken-over alignment of this track can't be found: use Undo to revert the change",
+  "已在草案中应用：恢复接管原状": "Applied to draft: Restore Taken-over Alignment",
+});

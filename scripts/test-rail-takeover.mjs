@@ -122,7 +122,91 @@ for (const [map, before, open, first, last] of [
   assert.ok(TK.bgCut(restored.net, restored.year()) > 0);
   assert.equal(TK.plan(restored, railway, first, last).ok, false);
   assert.equal(restored.econ.funds, game.econ.funds);
+  if (map === 'hk') {
+    const draft = M.clone(restored.net);
+    const originalTunnel = Object.values(draft.segments).find(s => draft.stations[s.a].tkStop === 'kt' && draft.stations[s.b].tkStop === 'tw');
+    assert.equal(originalTunnel.type, 'underground');
+    originalTunnel.type = 'surface';
+    const conflict = M.evaluate(draft, restored.net, restored.city, restored.clock.y).conflicts.find(c => c.ref === originalTunnel.id && c.type === 'hill');
+    assert.equal(conflict?.fixes[0].op, 'restoreTk');
+    assert.equal(M.applyFix(draft, conflict.fixes[0], restored.net).error, undefined);
+    assert.deepEqual(draft, restored.net);
+  }
   console.log('PASS', map, 'availability, construction, compatible trains, background deduction and ownership after map expansion');
+}
+
+{
+  CM.useMap('hk');
+  const eastRail = new CM.Game();
+  eastRail.clock = { y: 2023, m: 1, d: 1, minute: 480 };
+  eastRail.city = new CM.City();
+  eastRail.city.generate(723, eastRail.clock.y);
+  eastRail.net = CM.Metro.empty();
+  const { Metro: East, Takeover: Take } = CM, railway = Take.list()[0];
+  const main = Take.plan(eastRail, railway, 'adm', 'lw');
+  assert.ok(main.ok, main.error);
+  eastRail.net = main.preview.net;
+  const spurPlan = Take.plan(eastRail, railway, 'ss', 'lmc', { join: main.preview.lid });
+  assert.ok(spurPlan.ok, spurPlan.error);
+  const eastNet = eastRail.net = spurPlan.preview.net;
+  const trackBetween = (a, b) => Object.values(eastNet.segments).find(s => eastNet.stations[s.a].tkStop === a && eastNet.stations[s.b].tkStop === b);
+  const fire = trackBetween('ft', 'un'), taiPo = trackBetween('un', 'tpm'), tunnel = trackBetween('kt', 'tw');
+  const review = (draft, original = eastNet) => East.evaluate(draft, original, eastRail.city, eastRail.clock.y);
+  assert.equal(review(East.clone(eastNet)).conflicts.length, 0);
+
+  const elevated = East.clone(eastNet);
+  East.applyFix(elevated, { op: 'segType', seg: fire.id, value: 'elevated' });
+  assert.equal(review(elevated).conflicts.length, 0);
+  assert.ok(review(elevated).warnings.some(w => w.ref === fire.id && w.msg.includes('限速')));
+  East.setPlatform(elevated, fire.a, fire.line, 'elevated');
+  const stationRebuild = review(elevated);
+  assert.equal(stationRebuild.conflicts.length, 0);
+  assert.ok(stationRebuild.items.some(x => x.ref === fire.a && x.label.includes('改建车站')));
+
+  const minor = East.clone(eastNet);
+  const middle = Math.floor(taiPo.pts.length / 2);
+  minor.segments[taiPo.id].pts[middle][0] += 0.12;
+  assert.equal(review(minor).conflicts.length, 0);
+
+  const sharedRail = East.clone(eastNet), sharedLine = East.newLine(sharedRail);
+  assert.equal(East.runAlong(sharedRail, sharedLine, fire.a, fire.line, taiPo.b).added, 2);
+  assert.equal(review(sharedRail).conflicts.length, 0);
+  const detour = East.clone(sharedRail), track = detour.segments[taiPo.id];
+  const sameTracks = East.coTrackSegs(detour, track);
+  assert.equal(sameTracks.length, 1);
+  const alignment = East.segGeom(eastNet, taiPo, eastRail.city);
+  const center = CM.U.posAt(alignment.pts, alignment.cum, alignment.lenC / 2, {});
+  track.pts = [[center.x - 7, center.y + 7]];
+  East.syncCoTrack(detour, track, sameTracks);
+  const stuck = review(detour, sharedRail);
+  assert.deepEqual(Array.from(stuck.conflicts, c => c.type), ['hill']);
+  assert.equal(stuck.conflicts[0].fixes[0].op, 'restoreTk');
+  assert.ok(stuck.warnings.some(w => w.kind === 'station' && w.msg.includes('限速')));
+  assert.ok(!stuck.conflicts[0].fixes.some(f => f.op === 'removeSeg' || f.op === 'editStation'));
+  assert.equal(East.applyFix(detour, stuck.conflicts[0].fixes[0], sharedRail).error, undefined);
+  assert.deepEqual(detour, sharedRail);
+  assert.equal(review(detour, sharedRail).conflicts.length, 0);
+
+  const surfaced = East.clone(eastNet);
+  surfaced.segments[tunnel.id].type = 'surface';
+  const tunnelConflict = review(surfaced).conflicts.find(c => c.ref === tunnel.id && c.type === 'hill');
+  assert.equal(tunnelConflict?.fixes[0].op, 'restoreTk');
+  East.applyFix(surfaced, tunnelConflict.fixes[0], eastNet);
+  assert.deepEqual(surfaced, eastNet);
+
+  const insertion = trackBetween('st', 'ft'), withStation = East.clone(eastNet);
+  const straight = East.segGeom(eastNet, insertion, eastRail.city);
+  const point = CM.U.posAt(straight.pts, straight.cum, straight.lenC / 2, {});
+  const { station: newStop } = East.splitSegment(withStation, insertion.id, point.x, point.y, { type: insertion.type, size: 'M' }, eastRail.city);
+  assert.equal(review(withStation).conflicts.length, 0, JSON.stringify(review(withStation).conflicts));
+  const movedStop = East.clone(withStation), original = movedStop.stations[insertion.a];
+  Object.assign(movedStop.stations[newStop], { x: original.x + 0.05, y: original.y });
+  const stopConflict = review(movedStop).conflicts.find(c => c.ref === newStop && c.type === 'spacing');
+  assert.equal(stopConflict?.fixes[0].op, 'restoreTk');
+  East.applyFix(movedStop, stopConflict.fixes[0], eastNet);
+  assert.deepEqual(movedStop, withStation);
+  assert.equal(review(movedStop).conflicts.length, 0);
+  console.log('PASS 2023 East Rail main line and branch, station rebuild, minor realignment, sharing, protected tunnel and one-click draft restoration');
 }
 
 CM.useMap('hz');

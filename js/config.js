@@ -2,7 +2,7 @@
 // 全局参数。PRD 中标注"待确认"的数值在此给出可调整的默认值（DEFAULT），评审确认后只需修改本文件。
 (function (CM) {
   CM.CFG = {
-    GAME_VERSION: '3.0.1',
+    GAME_VERSION: '3.0.2',
     TRAFFIC_MODEL: 6,      // 背景交通与共用区段采用新模型，旧可重建缓存作废。
     RULES_REVISION: 24,    // 扩图、建设范围与城市项目，载入旧档前保留原存档备份。
     SAVE_FORMAT: 'city-metro-save',

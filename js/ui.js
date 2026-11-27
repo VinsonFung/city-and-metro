@@ -1599,7 +1599,7 @@
   UI.prototype.applyFix = function (fix) {
     const g = this.g(), net = g.draft ? g.draft.net : g.net;
     if (fix.op === 'editStation') {
-      const s = net.stations[fix.station]; if (!s) return;
+      const s = net.stations[fix.station]; if (!s || s.tk) return;
       this.tools.setTool('edit'); this.select({ kind: 'station', id: fix.station }, true); this.openPage('build', null, { replaceTop: true });
       this.flyTo(s.x, s.y, Math.max(this.R.cam.zoom, 26));
       this.toast('已选中「' + s.name + '」：直接拖动车站到新位置', 'info');
@@ -1620,7 +1620,7 @@
       this.toast('已撤回「' + o.name + '」的位置与建设方式修改', 'good');
       return;
     }
-    const r = g.edit(function (n) { return M.applyFix(n, fix); });
+    const r = g.edit(function (n) { return M.applyFix(n, fix, g.net); });
     if (r && r.error) { this.toast(r.error, 'bad'); return; }
     if (r && r.notes) for (const n of r.notes) this.toast(n, 'info');
     if (fix.op !== 'autoFit') this.toast('已在草案中应用：' + fix.label, 'good');
@@ -2294,9 +2294,9 @@
       fixes.appendChild(h('button', { class: 'btn sm', onclick: function (e) { e.stopPropagation(); self.hoverConflict = c.n; self.flyTo(c.x, c.y, Math.max(self.R.cam.zoom, 22)); } }, ic('locate'), '定位'));
       // 试算得到的具体调整（v2.3）：一键按建议移动转弯点或车站
       // 支线把既有线路的站台方向拉偏时（v2.4），「保持原站台方向」优先于移动受影响区段的转弯点
-      const keepDir = (c.fixes || []).some(function (f) { return f.op === 'platDir'; });
-      if (gd && gd.fix) fixes.appendChild(h('button', { class: 'btn sm' + (keepDir ? '' : ' primary'), onclick: function (e) { e.stopPropagation(); self.applyFix(gd.fix); } }, ic('sparkle', 14), gd.fix.label));
-      for (const f of (c.fixes || [])) fixes.appendChild(h('button', { class: 'btn sm' + (f.op === 'platDir' || f.op === 'autoFit' || (!(gd && gd.fix) && (f.op === 'segType' || f.op === 'splitBranch' || f.op === 'normalize' || f.op === 'removeBend')) ? ' primary' : ''), onclick: function (e) { e.stopPropagation(); self.applyFix(f); } }, f.label));
+      const preferredFix = (c.fixes || []).some(function (f) { return f.op === 'platDir' || f.op === 'restoreTk'; });
+      if (gd && gd.fix) fixes.appendChild(h('button', { class: 'btn sm' + (preferredFix ? '' : ' primary'), onclick: function (e) { e.stopPropagation(); self.applyFix(gd.fix); } }, ic('sparkle', 14), gd.fix.label));
+      for (const f of (c.fixes || [])) fixes.appendChild(h('button', { class: 'btn sm' + (f.op === 'platDir' || f.op === 'autoFit' || f.op === 'restoreTk' || (!(gd && gd.fix) && (f.op === 'segType' || f.op === 'splitBranch' || f.op === 'normalize' || f.op === 'removeBend')) ? ' primary' : ''), onclick: function (e) { e.stopPropagation(); self.applyFix(f); } }, f.label));
       const card = h('div', { class: 'cf-card' + (self.hoverConflict === c.n ? ' on' : ''),
         onmouseenter: function () { self.hoverConflict = c.n; },
         onmouseleave: function () { if (self.hoverConflict === c.n) self.hoverConflict = null; },
