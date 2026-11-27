@@ -180,7 +180,7 @@
       s.roadVersion = c.roadVersion; s.roadGrowthVersion = c.roadGrowthVersion; any = true;
     }
     const LK = c.lockState();
-    if (s.lk !== LK) { msg.lock = { mask: LK.mask, info: LK.info.map(function (f) { return { n: f.n, b: f.b }; }) }; s.lk = LK; any = true; }
+    if (s.lk !== LK) { msg.lock = { mask: LK.mask, over: LK.over, info: LK.info.map(function (f) { return { n: f.n, b: f.b }; }) }; s.lk = LK; any = true; }
     const fm = R._facm && R._facm.city === c ? R._facm : null;
     if (s.facm !== fm) {
       const pick = function (it) { return { lm: it.lm, x: it.x, y: it.y, fac: it.fac }; };
@@ -517,6 +517,29 @@
     o = o || {};
     this.fx.push({ kind: kind, x: x, y: y, o: o, t: -(o.delay || 0), dur: o.dur || FX_DUR[kind] || 1, seed: Math.random() * 1000 });
     if (this.fx.length > 160) this.fx.shift();
+  };
+  // 活动开幕和闭幕的烟花随游戏时间播放，暂停时停在当前帧。
+  Renderer.prototype.drawEventFireworks = function (ctx) {
+    const g = this.game, minute = g.clock.minute;
+    if (g.preview || this.z < 8 || minute < 19 * 60 || minute >= 22 * 60 || CM.Settings.reducedMotion()) return;
+    const venues = CM.SimPlan?.fireworks(g); if (!venues) return;
+    const colors = ['#f5bb64', '#ff8c85', '#bcd9ff'], point = {}, offset = (minute - 19 * 60) / 5;
+    ctx.save();
+    for (const [x, y] of venues) {
+      this.P(x, y, 0, point);
+      if (!this.screenVisible(point.x, point.y, 1, 1, 120)) continue;
+      for (let b = 0; b < 3; b++) {
+        const p = (offset + b / 3) % 1, seed = Math.floor(offset + b / 3) + b * 17;
+        const dx = (U.hash2(x | 0, y | 0, seed) - 0.5) * 55, rise = 35 + b * 13;
+        ctx.fillStyle = colors[b]; ctx.globalAlpha = 1 - p;
+        for (let j = 0; j < 16; j++) {
+          const a = Math.PI * 2 * j / 16, r = p * (12 + 21 * U.hash2(j, seed, b));
+          const cx = point.x + dx + Math.cos(a) * r, cy = point.y - rise + Math.sin(a) * r + 15 * p * p;
+          ctx.fillRect(cx, cy, 1.8, 1.8);
+        }
+      }
+    }
+    ctx.restore();
   };
   Renderer.prototype.fxRing = function (ctx, x, y, rw, h) {
     const tmp = {};
@@ -1289,17 +1312,11 @@
       if (it.x < X0 - r || it.x > X1 + r || it.y < Y0 - r || it.y > Y1 + r) continue;
       this.drawLandmark2D(ctx, it.lm, lvl);
     }
-    // 未开放区域：底色与斜线先画在临时图层上，再用按格掩膜（3×3 平均后双线性放大）裁出范围，
-    // 与山体、风景区相邻处是柔和的边缘，不再是一格一格的方块。水面格按所在区域计入（随后按真实岸线裁掉水面）
-    const state = city.lockState();
-    const locked = function (i, j) {
-      const c = U.clamp(j, 0, H - 1) * W + U.clamp(i, 0, W - 1);
-      if (city.landFrac[c] >= 0.5) return state.mask[c];
-      const region = state.info[city.lockRegion(c)];
-      return region.n && !region.b ? 1 : 0;
-    };
+    // 陆地与近岸水面共用平滑后的开放边界。水面只画斜线，保留原有水色。
+    const state = city.lockState(), cover = state.over || state.mask;
+    const locked = function (i, j) { return cover[U.clamp(j, 0, H - 1) * W + U.clamp(i, 0, W - 1)]; };
     let anyLock = false;
-    for (let j = j0; j < j1 && !anyLock; j++) for (let i = i0; i < i1; i++) if (locked(i, j) && city.lu[j * W + i] !== LU.WATER) { anyLock = true; break; }
+    for (let j = j0; j < j1 && !anyLock; j++) for (let i = i0; i < i1; i++) if (locked(i, j)) { anyLock = true; break; }
     if (anyLock) {
       const mw = i1 - i0 + 2, mh = j1 - j0 + 2, mc = makeCanvas(mw, mh), mx = mc.getContext('2d'), img = mx.createImageData(mw, mh), d = img.data;
       for (let y = 0; y < mh; y++) for (let x = 0; x < mw; x++) {
@@ -1315,10 +1332,6 @@
       // 先画区域遮罩，再分别扣除现代水面、历史水面与河道。
       // 矩形叠加水面不能用 nonzero 作反向裁剪；改回 evenodd 也会让重叠水面相互抵消。
       lx.fillStyle = TH.lockFill; lx.fillRect(X0, Y0, X1 - X0, Y1 - Y0);
-      lx.strokeStyle = TH.lockHatch; lx.lineWidth = Math.max(px, 0.04);
-      lx.beginPath();
-      for (let k = Math.floor((X0 + Y0) / 0.6) * 0.6; k < X1 + Y1; k += 0.6) { lx.moveTo(k - Y0, Y0); lx.lineTo(k - Y1, Y1); }
-      lx.stroke();
       // 先合成不透明的水域遮罩，再统一扣除，避免重复混合留下抗锯齿色边。
       const water = makeCanvas(cv.width, cv.height), wx = water.getContext('2d');
       wx.setTransform(tf); wx.fillStyle = wx.strokeStyle = '#000'; wx.lineCap = wx.lineJoin = 'round';
@@ -1337,6 +1350,10 @@
       }
       lx.save(); lx.setTransform(1, 0, 0, 1, 0, 0);
       lx.globalCompositeOperation = 'destination-out'; lx.drawImage(water, 0, 0); lx.restore();
+      lx.strokeStyle = TH.lockHatch; lx.lineWidth = Math.max(px, 0.04);
+      lx.beginPath();
+      for (let k = Math.floor((X0 + Y0) / 0.6) * 0.6; k < X1 + Y1; k += 0.6) { lx.moveTo(k - Y0, Y0); lx.lineTo(k - Y1, Y1); }
+      lx.stroke();
       lx.globalCompositeOperation = 'destination-in'; lx.imageSmoothingEnabled = true; lx.imageSmoothingQuality = 'high';
       lx.drawImage(mc, 0, 0, mw, mh, i0 - 1, j0 - 1, mw, mh);
       ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(layer, 0, 0); ctx.restore();
@@ -3220,6 +3237,7 @@
     if (this.layer === 'gap') this.drawGapOverload(ctx);
     if (this.layer === 'fac' || this.layer === 'gap') this.drawFacilities(ctx);
     if (this.fx.length) this.drawFx(ctx, dt);
+    if (under < 0.5) this.drawEventFireworks(ctx);
     if (under < 0.5) this.drawAtmosphere(ctx);
     // ---- 标注 ----
     this.drawLabels(ctx, ui);

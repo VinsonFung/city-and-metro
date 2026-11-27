@@ -10,7 +10,7 @@ for(const[,src]of(await readFile(new URL('index.html',root),'utf8')).matchAll(/<
 const C=c.CM,M=C.Metro,copy=x=>JSON.parse(JSON.stringify(x));
 C.UI=function(){};for(const src of ['settings','corp','fleet','screens'])await load('js/'+src+'.js');
 const F=C.Fleet;
-assert.equal(C.CFG.GAME_VERSION,'3.0.0');assert.ok(C.CFG.RULES_REVISION>=15);
+assert.equal(C.CFG.GAME_VERSION,'3.0.1');assert.ok(C.CFG.RULES_REVISION>=15);
 assert.equal(C.MAP_ORDER.length,17);assert.equal(F.MODELS.length,83);assert.ok(C.MAPS.ld&&C.Traits);
 assert.equal(C.NEWS[0].v,'3.0');
 assert.equal(C.UI.prototype.newsUnread(),true);
@@ -21,7 +21,7 @@ for(const seen of ['3.0','3.0.0','3.0.1']){
 memory.set('cm1.newsSeen','2.9.6');assert.equal(C.UI.prototype.newsUnread(),true);
 memory.set('cm1.newsSeen','2.8.0');assert.equal(C.UI.prototype.newsUnread(),true);
 memory.set('cm1.newsSeen','2.4.0');assert.equal(C.UI.prototype.newsUnread(),true);
-assert.ok(!C.NEWS.some(n=>n.v==='2.7.1'),'Patch release has no new announcement');
+assert.ok(!C.NEWS.some(n=>n.v==='2.7.1'||n.v===C.CFG.GAME_VERSION),'Patch release has no new announcement');
 
 C.useMap('tutorial');const g=C.Game.create({mode:'free',tutorial:true,seed:20000101});F.ensure(g);
 // A legacy smooth segment must keep its shape and avoid a platform adjustment charge on extension.

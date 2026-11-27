@@ -8,7 +8,7 @@
   const GZ_CFG = {}; for (const k of CFG_KEYS) GZ_CFG[k] = k === 'START' ? Object.assign({}, CFG.START) : CFG[k];
   // 广州图内人口与岗位按独立版校准；其他地图与青湾使用各自的增长曲线。
   GZ_CFG.growth = Object.assign({}, GZ_CFG.growth, {
-    popCurve: [[1990, 4.1e6], [1995, 5.0e6], [2000, 6.9e6], [2005, 8.4e6], [2010, 10.3e6], [2015, 12.0e6], [2020, 14.0e6], [2030, 15.4e6], [2045, 16.3e6], [2070, 16.9e6], [2300, 17.3e6]],
+    popCurve: [[1990, 4.53e6], [1995, 5.43e6], [2000, 7.39e6], [2005, 9.14e6], [2010, 11.38e6], [2015, 13.49e6], [2020, 16.02e6], [2030, 17.81e6], [2045, 18.96e6], [2070, 19.65e6], [2300, 20.12e6]],
     jobsRatio: [[1990, 0.5], [2000, 0.55], [2010, 0.59], [2020, 0.62], [2030, 0.63]],
   });
   // 出行选择参数按「发展阶段对应年份」平移并按本城货币缩放：devOffset 为广州曲线年份减本城年份，money 为本城货币相对广州曲线的倍数
@@ -25,24 +25,28 @@
     gz: {
       id: 'gz', name: '广州', title: '广州 · 1990', sub: '真实地理 · 1990 年起 · 人民币',
       desc: '从 1990 年尚无地铁的广州开始：珠江水系、道路与桥梁、街道边界和地标都来自真实地理，区域按历史年份逐步开放，并有参考广州地铁发展的历史任务。',
-      facts: [['范围', '38 km × 57 km'], ['起始', '1990 年'], ['人口', '约 410 万'], ['货币', '人民币（元）'], ['模式', '经营挑战 / 自由建造']],
+      facts: [['范围', '61 km × 76 km'], ['起始', '1990 年'], ['人口', '约 453 万'], ['货币', '人民币（元）'], ['模式', '经营挑战 / 自由建造']],
       // 第 2 版（v2.1）：向北扩大 16 格到同和、京溪，向南扩大 32 格到市桥与广州南站；
       // 第 3 版（v2.9）：向北扩大 80 格到新白云机场与花都城区，向东扩大 32 格到知识城、永和与新塘西缘，向南扩大 4 格。旧存档载入时依次迁移（见 extentMigration）
-      modes: ['challenge', 'free'], kind: 'real', mapVersion: 3, scenario: 'gz-1990',
+      // 第 4 版：完整矩形图幅向西延伸 92 格、向南延伸 76 格，旧坐标向东平移 92 格。
+      modes: ['challenge', 'free'], kind: 'real', mapVersion: 4, scenario: 'gz-1990',
       extent: [{ from: 1, dx: 0, dy: 16, oldW: 120, oldH: 96, newW: 120, newH: 144, note: '地图向北扩大到同和、京溪，向南扩大到市桥与广州南站',
         oldRegionIds: ['bys', 'hls', 'airport', 'oldcity', 'cbd', 'tianhe_w', 'sanyuanli', 'fangcun', 'haizhu_n', 'huangpu', 'changzhou', 'kaifaqu', 'tianhe_e', 'haizhu_s', 'tianhe_n', 'baiyun_n', 'baiyun_w', 'tonghe', 'panyu_n', 'pazhou', 'guanzhou', 'longdong', 'tianhe_ne', 'unicity', 'luogang', 'foshan', 'panyu_e', 'outer'],
         oldLandmarkIds: ['zsjnt', 'zhl', 'cjc', 'gxs', 'lrs', 'hss', 'wxg', 'sssx', 'sm', 'nyw', 'njs', 'lsly', 'hhg', 'yxst', 'hpjx', 'sysu', 'scut', 'jnu', 'thty', 'gzzhan', 'gzdz', 'tcity', 'citic', 'xhyyt', 'gdmsg', 'pzhz', 'bycc', 'gzt', 'ifc', 'opera', 'gdmus', 'gzlib', 'ctf'] },
       { from: 2, dx: 0, dy: 80, oldW: 120, oldH: 144, newW: 152, newH: 228, eventInsert: { index: 12, count: 5 }, note: '地图向北扩大到新白云机场与花都城区，向东扩大到知识城、永和与新塘西缘',
         oldRegionIds: ['bys', 'hls', 'airport', 'oldcity', 'cbd', 'tianhe_w', 'sanyuanli', 'fangcun', 'haizhu_n', 'huangpu', 'changzhou', 'kaifaqu', 'tianhe_e', 'haizhu_s', 'tianhe_n', 'baiyun_n', 'baiyun_w', 'tonghe', 'panyu_n', 'pazhou', 'guanzhou', 'longdong', 'tianhe_ne', 'unicity', 'luogang', 'foshan', 'panyu_e', 'outer'],
+        oldLandmarkIds: ['zsjnt', 'zhl', 'cjc', 'gxs', 'lrs', 'hss', 'wxg', 'sssx', 'sm', 'nyw', 'njs', 'lsly', 'hhg', 'yxst', 'hpjx', 'sysu', 'scut', 'jnu', 'thty', 'gzzhan', 'gzdz', 'tcity', 'citic', 'xhyyt', 'gdmsg', 'pzhz', 'bycc', 'gzt', 'ifc', 'opera', 'gdmus', 'gzlib', 'ctf', 'gznz'] },
+      { from: 3, dx: 92, dy: 0, oldW: 152, oldH: 228, newW: 244, newH: 304, note: '地图向南扩大到南沙（黄阁、南沙街、东涌、大岗、榄核）与番禺南部，向西扩大到花都西部（炭步、赤坭、狮岭、秀全）',
+        oldRegionIds: ['bys', 'hls', 'airport', 'oldcity', 'cbd', 'tianhe_w', 'sanyuanli', 'fangcun', 'haizhu_n', 'huangpu', 'changzhou', 'kaifaqu', 'tianhe_e', 'haizhu_s', 'tianhe_n', 'baiyun_n', 'baiyun_w', 'tonghe', 'panyu_n', 'pazhou', 'guanzhou', 'longdong', 'tianhe_ne', 'unicity', 'luogang', 'foshan', 'panyu_e', 'newair', 'huadu', 'huadong', 'renhe', 'zskc', 'yonghe', 'zengcheng', 'dongguan', 'outer'],
         oldLandmarkIds: ['zsjnt', 'zhl', 'cjc', 'gxs', 'lrs', 'hss', 'wxg', 'sssx', 'sm', 'nyw', 'njs', 'lsly', 'hhg', 'yxst', 'hpjx', 'sysu', 'scut', 'jnu', 'thty', 'gzzhan', 'gzdz', 'tcity', 'citic', 'xhyyt', 'gdmsg', 'pzhz', 'bycc', 'gzt', 'ifc', 'opera', 'gdmus', 'gzlib', 'ctf', 'gznz'] }],
       // 地图选择页：地区、一句话特色、介绍、特色卡、大事年表、难度（1–4）
       region: '中国内地', tagline: '珠江两岸，从第一条线开始', difficulty: 2, tags: ['无地铁开局', '越江', '新区开放'],
       intro: '1990 年的广州还没有一公里地铁。老城的街巷挤满公交与自行车，天河才刚刚起步，珠江新城仍是一片农田。你要在老城与天河之间画下第一条线，再跟着城市一路向东、向南跨过珠江。',
-      features: [['bridge', '珠江越江', '珠江把城市分成两岸，越江段可以建隧道或桥梁'], ['map', '35 个片区逐年开放', '珠江新城、番禺、大学城、花都与知识城按真实年份开放，新白云机场在图内'], ['building', '33 处真实地标', '中山纪念堂、广州塔、东塔按落成年份出现'], ['flag', '7 项历史任务', '参考广州地铁的发展需求，不要求复刻真实线路']],
+      features: [['bridge', '珠江越江', '珠江把城市分成两岸，越江段可以建隧道或桥梁'], ['map', '38 个片区逐年开放', '珠江新城、番禺、大学城、花都、知识城与南沙按真实年份开放，新白云机场在图内'], ['building', '33 处真实地标', '中山纪念堂、广州塔、东塔按落成年份出现'], ['flag', '7 项历史任务', '参考广州地铁的发展需求，不要求复刻真实线路']],
       highlights: [[1993, '珠江新城开始规划'], [1996, '广州东站建成'], [2000, '番禺撤市设区'], [2004, '新白云机场与大学城启用'], [2010, '亚运会，广州塔落成']],
       geo: CM.GEO, data: Object.assign({}, CM.DATA),
       cfg: GZ_CFG,
-      cam: { cx: 30, cy: 137, zoom: 18 },   // v2.9 地图向北扩大 80 格，镜头仍对准老城
+      cam: { cx: 122, cy: 137, zoom: 18 },   // 扩图后镜头仍对准老城
     },
   };
   // 其他地图（教程与新增城市）由各自的数据文件登记为 CM.MAP_LIST；未写的配置项沿用广州样本
@@ -217,6 +221,11 @@
       move(t.spot);
       (t.parts || []).forEach(fixTask);
     };
+    for (const it of p.plan?.items || []) {
+      move(it);
+      if (it.fac?.at) { const point = { x: it.fac.at[0], y: it.fac.at[1] }; move(point); it.fac.at = [point.x, point.y]; }
+      fixTask(it.taskSpec);
+    }
     const tasks = p.tasks || {};
     for (const list of [tasks.active, tasks.done, tasks.failed, tasks.offers, tasks.adjusted]) (list || []).forEach(fixTask);
     if (tasks.cool) tasks.cool = Object.fromEntries(Object.entries(tasks.cool).map(([key, until]) => [shiftCool(taskKey(key)), until]));

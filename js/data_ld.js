@@ -207,6 +207,13 @@
       { id: 'havering', name: '罗姆福德·黑弗灵', streets: ['黑弗灵区'], open: 1932, plan: 'res' },
       // v2.9 扩图：萨里北部的郊区在两次大战之间沿铁路大片建成（年份为近似）
       { id: 'surreynorth', name: '萨里北部（埃普索姆·班斯特德）', streets: ['埃普索姆-尤厄尔', '赖盖特-班斯特德', '莫尔谷', '坦德里奇'], open: 1910, plan: 'res' },
+      // v3.5 扩图：西缘、东缘新增条带里的区（within：边正好在原图东西界上，原范围里的同名区仍属外围地区）；
+      // 斯劳的行政界线在数据包里不全，按图内的斯劳东部、兰利与科恩布鲁克画近似范围（东界在原图西界以西）
+      { id: 'slough', name: '斯劳·兰利', poly: poly([[51.545, -0.5966], [51.545, -0.5115], [51.468, -0.5115], [51.468, -0.535], [51.492, -0.560], [51.492, -0.5966]]), open: 1920, plan: 'resind', note: '1920 年起建设斯劳工业区，两次大战之间成为伦敦以西最大的工业城镇（史实）' },
+      { id: 'staines', name: '斯坦斯·埃格姆', streets: ['斯佩尔索恩', '兰尼米德', '沃金', '萨里希思'], within: [[0, 0], [24, 0], [24, 164], [0, 164]], open: 1925, plan: 'res', note: '两次大战之间沿铁路建成的郊区（年份为近似）' },
+      { id: 'thurrock', name: '瑟罗克（格雷斯·蒂尔伯里）', district: ['瑟罗克'], within: [[236, 0], [272, 0], [272, 164], [236, 164]], open: 1886, plan: 'resind', note: '1886 年蒂尔伯里码头启用，泰晤士河北岸随后建起码头与工厂（史实）' },
+      { id: 'brentwood', name: '布伦特伍德·申菲尔德', streets: ['布伦特伍德'], within: [[236, 0], [272, 0], [272, 164], [236, 164]], open: 1930, plan: 'res' },
+      { id: 'gravesend', name: '格雷夫森德·斯旺斯科姆', streets: ['格雷夫舍姆', '达特福德'], within: [[236, 0], [272, 0], [272, 164], [236, 164]], open: 1860, plan: 'resind', note: '泰晤士河口南岸的老港镇与水泥工业区（史实）' },
     ],
     defaultRegion: { id: 'outer', name: '外围地区', open: 1950, plan: 'res' },
     plans: CM.DATA.plans,
@@ -276,10 +283,19 @@
       at(51.329, -0.411, { pop: 1300, jobs: 650, r: 0.6 }),   // 科巴姆
       at(51.556, 0.218, { pop: 1300, jobs: 500, r: 0.6 }),   // 霍恩彻奇
       at(51.559, 0.251, { pop: 800, jobs: 350, r: 0.6 }),   // 厄普敏斯特
+      // v3.5 扩大范围（1860 年估算，OSM 坐标）
+      at(51.4416, 0.3700, { pop: 4000, jobs: 2000, r: 0.8 }),   // 格雷夫森德
+      at(51.4430, 0.3270, { pop: 1200, jobs: 900, r: 0.6 }),    // 诺斯弗利特
+      at(51.4470, 0.3000, { pop: 700, jobs: 600, r: 0.5 }),     // 斯旺斯科姆、格林海斯
+      at(51.4770, 0.3230, { pop: 800, jobs: 400, r: 0.5 }),     // 格雷斯
+      at(51.6210, 0.3050, { pop: 900, jobs: 300, r: 0.6 }),     // 布伦特伍德
+      at(51.5105, -0.5900, { pop: 1000, jobs: 300, r: 0.6 }),   // 斯劳
+      at(51.4310, -0.5480, { pop: 700, jobs: 300, r: 0.5 }),    // 埃格姆
+      at(51.3190, -0.5580, { pop: 600, jobs: 200, r: 0.5 }),    // 沃金
     ],
     rural: { pop: 100, jobs: 30 },
     // 扩图新增范围的增长倍率（v2.9，见 city.js growMonth）：大伦敦南缘与东缘按史实是增长最快的郊区，不加倍率时到 2020 年只有现实的一半左右
-    growOut: { box: [0, 0, 196, 140], pop: 1.9 },
+    growOut: { box: [24, 0, 196, 140], pop: 1.9 },   // box 为 v2.9 扩图前的原范围（v3.5 西扩 24 格后右移），v2.9 与 v3.5 的新增范围同样适用
     // 道路通车年份（名称前缀匹配；1860 年已有的街道按所在区域开放年份出现）
     // 铁路通车年份（线路名或前缀 → 年份，或 [通车, 停运]）：开局后才通车或停运的线路，按公开通车时间整理
     railYears: { '米德兰干线': 1868, '泰晤士连线': 1866, '南伦敦线': 1867, '东伦敦线': 1869, '格林尼治线': 1878, '福音橡树-巴金线': 1894, '奇尔特恩干线': 1906, '高铁一号线': 2007, '伊丽莎白线': 2022 },
@@ -477,28 +493,31 @@
       { id: 'ld03', appear: [1865, 1], deadline: [1876, 12], type: 'connect', reward: 70, title: '沿着河岸进城', desc: '新修的维多利亚堤岸正好能埋隧道。连接南肯辛顿、斯隆广场、维多利亚、威斯敏斯特、河堤、黑衣修士与市长官邸。', anchors: [anchor('南肯辛顿', 51.4941, -0.1738, 3), anchor('斯隆广场', 51.4924, -0.1565, 3), anchor('维多利亚', 51.4965, -0.1447, 3), anchor('威斯敏斯特', 51.5010, -0.1250, 3), anchor('河堤', 51.5074, -0.1223, 3), anchor('黑衣修士', 51.5119, -0.1037, 3), anchor('市长官邸', 51.5122, -0.0940, 3)] },
       { id: 'ld04', appear: [1866, 1], deadline: [1878, 12], type: 'connect', reward: 60, title: '从河底过去', desc: '布鲁内尔的泰晤士隧道一直只能走人。让火车穿过去，把东区和南岸连起来：连接白教堂、沃平、罗瑟希德与新十字。', anchors: [anchor('白教堂', 51.5194, -0.0612, 3), anchor('沃平', 51.5043, -0.0558, 3), anchor('罗瑟希德', 51.5010, -0.0521, 3), anchor('新十字', 51.4767, -0.0327, 3)] },
       { id: 'ld05', appear: [1870, 1], deadline: [1888, 12], type: 'connect', reward: 110, title: '绕城一圈', desc: '两条线的尽头相隔不远，两家公司却互不相让。把它们连成一个环，绕过整个市中心：连接贝克街、利物浦街、塔丘、威斯敏斯特与肯辛顿高街。', anchors: [anchor('贝克街', 51.5226, -0.1571, 3), anchor('利物浦街', 51.5178, -0.0823, 3), anchor('塔丘', 51.5098, -0.0766, 3), anchor('威斯敏斯特', 51.5010, -0.1250, 3), anchor('肯辛顿高街', 51.5009, -0.1925, 3)] },
-      { id: 'ld06', appear: [1875, 1], deadline: [1890, 12], type: 'coverage', target: 0.15, reward: 90, title: '地铁覆盖一成五人口', desc: '1890 年前，步行 15 分钟可到达地铁站的人口不低于全图人口的 15%。' },
+      { id: 'ld06', appear: [1875, 1], deadline: [1890, 12], type: 'coverage', target: 0.14, reward: 90, title: '地铁覆盖一成四人口', desc: '1890 年前，步行 15 分钟可到达地铁站的人口不低于全图人口的 14%。' },   // v3.5 地图扩大后按人口比例由 15% 换算，难度不变
       { id: 'ld07', appear: [1884, 1], deadline: [1895, 12], type: 'connect', reward: 90, title: '更深的隧道', desc: '再也挖不开街道了。用盾构在黏土层深处修一条线，穿过泰晤士河：连接斯托克韦尔、肯宁顿、象堡、博罗与银行。', anchors: [anchor('斯托克韦尔', 51.4722, -0.1229, 3), anchor('肯宁顿', 51.4884, -0.1053, 3), anchor('象堡', 51.4943, -0.1001, 3), anchor('博罗', 51.5011, -0.0943, 3), anchor('银行', 51.5133, -0.0886, 3)] },
       { id: 'ld08', appear: [1892, 1], deadline: [1902, 12], type: 'connect', reward: 60, title: '滑铁卢的通勤者', desc: '每天几万人在滑铁卢下车，再走路过河去金融城。连接滑铁卢与银行。', anchors: [anchor('滑铁卢', 51.5033, -0.1148, 3), anchor('银行', 51.5133, -0.0886, 3)] },
       { id: 'ld1', appear: [1900, 1], deadline: [1906, 12], type: 'connect', reward: 90, title: '两便士地铁', desc: '牛津街上人流如织，却只有马车。沿牛津街到金融城修一条东西向的电气地铁：连接牧人丛林、诺丁山门、邦德街、牛津圆环、霍尔本与银行。', anchors: [anchor('牧人丛林', 51.5046, -0.2187, 3), anchor('诺丁山门', 51.5090, -0.1960, 3), anchor('邦德街', 51.5142, -0.1494, 3), anchor('牛津圆环', 51.5152, -0.1415, 3), anchor('霍尔本', 51.5174, -0.1200, 3), anchor('银行', 51.5133, -0.0886, 3)] },
       { id: 'ld2', appear: [1902, 1], deadline: [1910, 12], type: 'connect', reward: 80, title: '南北穿城：过河到象堡', desc: '滑铁卢与南岸的乘客要到西区去。连接贝克街、牛津圆环、皮卡迪利圆环、查令十字、滑铁卢与象堡。过河段只能走隧道。', anchors: [anchor('贝克街', 51.5226, -0.1571, 3), anchor('牛津圆环', 51.5152, -0.1415, 3), anchor('皮卡迪利圆环', 51.5098, -0.1342, 3), anchor('查令十字', 51.5074, -0.1275, 3), anchor('滑铁卢', 51.5033, -0.1148, 3), anchor('象堡', 51.4943, -0.1001, 3)] },
       { id: 'ld3', appear: [1902, 6], deadline: [1912, 12], type: 'connect', reward: 90, title: '西区到北伦敦', desc: '连接哈默史密斯、骑士桥、皮卡迪利圆环、霍尔本、国王十字-圣潘克拉斯与芬斯伯里公园。', anchors: [anchor('哈默史密斯', 51.4920, -0.2239, 3), anchor('骑士桥', 51.5015, -0.1607, 3), anchor('皮卡迪利圆环', 51.5098, -0.1342, 3), anchor('霍尔本', 51.5174, -0.1200, 3), anchor('国王十字-圣潘克拉斯', 51.5308, -0.1238, 3), anchor('芬斯伯里公园', 51.5642, -0.1065, 3)] },
       { id: 'ld4', appear: [1904, 1], deadline: [1913, 12], type: 'connect', reward: 80, title: '通往汉普斯特德', desc: '把地铁穿过北部高地修到田野里去：连接查令十字、尤斯顿、卡姆登镇、汉普斯特德与戈尔德斯格林。沿线的房子会跟着地铁长出来。', anchors: [anchor('查令十字', 51.5074, -0.1275, 3), anchor('尤斯顿', 51.5282, -0.1337, 3), anchor('卡姆登镇', 51.5392, -0.1426, 3), anchor('汉普斯特德', 51.5568, -0.1780, 3), anchor('戈尔德斯格林', 51.5724, -0.1941, 3)] },
-      { id: 'ld5', appear: [1912, 1], deadline: [1925, 12], type: 'coverage', target: 0.3, reward: 100, title: '地铁覆盖三成人口', desc: '1925 年前，步行 15 分钟可到达地铁站的人口不低于全图人口的 30%。', },
+      { id: 'ld5', appear: [1912, 1], deadline: [1925, 12], type: 'coverage', target: 0.29, reward: 100, title: '地铁覆盖两成九人口', desc: '1925 年前，步行 15 分钟可到达地铁站的人口不低于全图人口的 29%。', },
       { id: 'ld6', appear: [1919, 1], deadline: [1930, 12], type: 'connect', reward: 110, title: '向南到莫登', desc: '南伦敦的通勤者只能靠市郊铁路和电车。连接银行、肯宁顿、克拉珀姆公地、图廷百老汇与莫登。', anchors: [anchor('银行', 51.5133, -0.0886, 3), anchor('肯宁顿', 51.4884, -0.1053, 3), anchor('克拉珀姆公地', 51.4617, -0.1383, 3), anchor('图廷百老汇', 51.4275, -0.1680, 3), anchor('莫登', 51.4022, -0.1948, 3)] },
       { id: 'ld7', appear: [1925, 1], deadline: [1936, 12], type: 'connect', reward: 110, title: '北到科克福斯特斯', desc: '芬斯伯里公园的换乘早已挤不下，公交与电车公司还反对延伸。连接芬斯伯里公园、伍德格林、萨斯盖特与科克福斯特斯。', anchors: [anchor('芬斯伯里公园', 51.5642, -0.1065, 3), anchor('伍德格林', 51.5975, -0.1097, 3), anchor('萨斯盖特', 51.6323, -0.1277, 3), anchor('科克福斯特斯', 51.6517, -0.1496, 3)] },
       { id: 'ld8', appear: [1934, 1], deadline: [1940, 8], type: 'connect', reward: 120, title: '新工程计划：向东到伊尔福德', desc: '战前最大的地铁扩建计划，要把郊区住宅区接进城。连接利物浦街、贝思纳尔格林、斯特拉特福、莱顿与甘茨山。战争一旦爆发，工程就会搁置。', anchors: [anchor('利物浦街', 51.5178, -0.0823, 3), anchor('贝思纳尔格林', 51.5270, -0.0555, 3), anchor('斯特拉特福', 51.5416, -0.0033, 3), anchor('莱顿', 51.5566, -0.0053, 3), anchor('甘茨山', 51.5765, 0.0663, 3)] },
-      { id: 'ld9', appear: [1946, 1], deadline: [1960, 12], type: 'coverage', target: 0.43, reward: 120, title: '战后重建：覆盖四成三人口', desc: '1960 年前，步行 15 分钟可到达地铁站的人口不低于全图人口的 43%。重建要花钱，也要等拨款恢复。' },
+      { id: 'ld9', appear: [1946, 1], deadline: [1960, 12], type: 'coverage', target: 0.4, reward: 120, title: '战后重建：覆盖四成人口', desc: '1960 年前，步行 15 分钟可到达地铁站的人口不低于全图人口的 40%。重建要花钱，也要等拨款恢复。' },
       { id: 'ld10', appear: [1955, 1], deadline: [1971, 12], type: 'connect', reward: 180, title: '市中心的新干线', desc: '半个世纪没有新线穿过市中心，老线路挤得要命。连接沃尔瑟姆斯托中央、七姐妹、芬斯伯里公园、国王十字-圣潘克拉斯、牛津圆环、维多利亚与布里克斯顿。', anchors: [anchor('沃尔瑟姆斯托中央', 51.5830, -0.0197, 3), anchor('七姐妹', 51.5822, -0.0749, 3), anchor('芬斯伯里公园', 51.5642, -0.1065, 3), anchor('国王十字-圣潘克拉斯', 51.5308, -0.1238, 3), anchor('牛津圆环', 51.5152, -0.1415, 3), anchor('维多利亚', 51.4965, -0.1447, 3), anchor('布里克斯顿', 51.4627, -0.1145, 3)] },
       { id: 'ld11', appear: [1968, 1], deadline: [1979, 12], type: 'connect', reward: 180, title: '直达希思罗', desc: '世界上最繁忙的国际机场还没有地铁。连接希思罗机场、哈顿十字、西豪恩斯洛与哈默史密斯。', anchors: [anchor('希思罗机场', 51.4700, -0.4540, 4), anchor('哈顿十字', 51.4669, -0.4233, 3), anchor('西豪恩斯洛', 51.4735, -0.3866, 3), anchor('哈默史密斯', 51.4920, -0.2239, 3)] },
       { id: 'ld12', appear: [1982, 1], deadline: [1993, 12], type: 'connect', reward: 200, title: '码头区的轻轨', desc: '废弃的码头需要一条便宜的轻轨才能招来开发商。连接银行、莱姆豪斯、金丝雀码头与岛屿花园。沿旧铁路走高架可以省下很多钱。', anchors: [anchor('银行', 51.5133, -0.0886, 3), anchor('莱姆豪斯', 51.5125, -0.0397, 3), anchor('金丝雀码头', 51.5054, -0.0195, 3), anchor('岛屿花园', 51.4880, -0.0083, 3)] },
       { id: 'ld13', appear: [1990, 1], deadline: [1999, 12], type: 'connect', reward: 260, title: '千禧年：朱比利线', desc: '千禧巨蛋年底开幕，金丝雀码头的大楼也等着地铁救活。连接威斯敏斯特、滑铁卢、伦敦桥、金丝雀码头、北格林尼治与斯特拉特福。', anchors: [anchor('威斯敏斯特', 51.5010, -0.1250, 3), anchor('滑铁卢', 51.5033, -0.1148, 3), anchor('伦敦桥', 51.5052, -0.0860, 3), anchor('金丝雀码头', 51.5054, -0.0195, 3), anchor('北格林尼治', 51.5005, 0.0039, 3), anchor('斯特拉特福', 51.5416, -0.0033, 3)] },
-      { id: 'ld14', appear: [1985, 1], deadline: [2000, 12], type: 'coverage', target: 0.57, reward: 240, title: '千禧年：覆盖五成七人口', desc: '2000 年前，步行 15 分钟可到达地铁站的人口不低于全图人口的 57%。' },
+      { id: 'ld14', appear: [1985, 1], deadline: [2000, 12], type: 'coverage', target: 0.53, reward: 240, title: '千禧年：覆盖五成三人口', desc: '2000 年前，步行 15 分钟可到达地铁站的人口不低于全图人口的 53%。' },   // v3.5 地图扩大后按人口比例由 57% 换算，难度不变
       { id: 'ld15', appear: [2005, 7], deadline: [2012, 7], type: 'connect', reward: 280, title: '2012 年奥运会', desc: '奥运会开幕前，连接斯特拉特福、西汉姆、坎宁镇、金丝雀码头与伦敦城市机场。', anchors: [anchor('斯特拉特福', 51.5416, -0.0033, 3), anchor('西汉姆', 51.5287, 0.0056, 3), anchor('坎宁镇', 51.5147, 0.0082, 3), anchor('金丝雀码头', 51.5054, -0.0195, 3), anchor('伦敦城市机场', 51.5035, 0.0495, 3)] },
       { id: 'ld16', appear: [2008, 1], deadline: [2022, 12], type: 'connect', reward: 340, title: '横贯东西的大容量铁路', desc: '老线路的隧道太小，再也提不了运力。修一条又大又快的新线：连接希思罗机场、帕丁顿、邦德街、托特纳姆法院路、法灵顿、利物浦街与金丝雀码头。', anchors: [anchor('希思罗机场', 51.4700, -0.4540, 4), anchor('帕丁顿', 51.5154, -0.1755, 3), anchor('邦德街', 51.5142, -0.1494, 3), anchor('托特纳姆法院路', 51.5165, -0.1310, 3), anchor('法灵顿', 51.5203, -0.1053, 3), anchor('利物浦街', 51.5178, -0.0823, 3), anchor('金丝雀码头', 51.5054, -0.0195, 3)] },
       // v2.9 扩图新增范围的史实任务
       { id: 'ld17', appear: [1925, 1], deadline: [1935, 12], type: 'connect', reward: 100, title: '东区线到厄普敏斯特', desc: '1932 年东区线电气化延伸到厄普敏斯特（史实）。连接巴金、霍恩彻奇与厄普敏斯特。', anchors: [anchor('巴金', 51.5396, 0.0809, 3), anchor('霍恩彻奇', 51.5539, 0.2187, 3), anchor('厄普敏斯特', 51.5590, 0.2510, 3)] },
       { id: 'ld18', appear: [1925, 1], deadline: [1940, 12], type: 'connect', reward: 100, title: '萨里北部的新郊区', desc: '两次大战之间，铁路沿线的萨里北部建起大片郊区住宅。连接莫登、萨顿与埃普索姆。', anchors: [anchor('莫登', 51.4022, -0.1948, 3), anchor('萨顿', 51.3618, -0.1945, 3), anchor('埃普索姆', 51.3343, -0.2687, 3)] },
+      // v3.5 扩图新增范围的史实任务（横贯铁路 2017—2019 年起开到申菲尔德与斯劳一带，2022 年以伊丽莎白线贯通，史实参考）
+      { id: 'ld19', appear: [2009, 1], deadline: [2022, 12], type: 'connect', reward: 200, title: '横贯铁路东到申菲尔德', desc: '横贯铁路的东段要接上大东部干线，让埃塞克斯的通勤者直达金融城。连接申菲尔德、罗姆福德与斯特拉特福。', anchors: [anchor('申菲尔德', 51.6309, 0.3297, 3), anchor('罗姆福德', 51.5749, 0.1832, 3), anchor('斯特拉特福', 51.5416, -0.0033, 3)] },
+      { id: 'ld20', appear: [2009, 1], deadline: [2022, 12], type: 'connect', reward: 200, title: '横贯铁路西到斯劳', desc: '横贯铁路的西段沿大西部干线伸向斯劳，伦敦以西的工业城镇不必再在帕丁顿换车。连接斯劳、兰利与海斯-哈灵顿。', anchors: [anchor('斯劳', 51.5118, -0.5915, 3), anchor('兰利', 51.5080, -0.5418, 3), anchor('海斯-哈灵顿', 51.5030, -0.4206, 3)] },
     ],
     dynTasks: [
       { id: 'ldd1', from: [1866, 1], to: [1900, 12], type: 'connect', months: 48, reward: 40000, title: '终点站之间', desc: '火车的终点站都在城市边缘，旅客要穿城换乘。连接帕丁顿、尤斯顿、国王十字-圣潘克拉斯与利物浦街。', anchors: [anchor('帕丁顿', 51.5154, -0.1755, 3), anchor('尤斯顿', 51.5282, -0.1337, 3), anchor('国王十字-圣潘克拉斯', 51.5308, -0.1238, 3), anchor('利物浦街', 51.5178, -0.0823, 3)] },
@@ -544,8 +563,10 @@
   (CM.MAP_LIST = CM.MAP_LIST || []).push({
     id: 'ld', name: '伦敦', title: '伦敦 · 1860', sub: '真实地理 · 1860 年起 · 英镑 · 修世界第一条地铁',
     desc: '从 1860 年世界最大的城市开始：世界上还没有一条地铁，第一条由你来修。蒸汽与电气、泰晤士河与历史城区、两次世界大战、码头区的衰落与金丝雀码头的崛起，都会改变这张线网的价值。',
-    facts: [['范围', '53 km × 41 km'], ['起始', '1860 年'], ['人口', '约 307 万'], ['货币', '英镑'], ['模式', '经营挑战 / 自由建造']],
-    modes: ['challenge', 'free'], kind: 'real', mapVersion: 2, extent: [{ from: 1, dx: 0, dy: 0, oldW: 196, oldH: 140, newW: 212, newH: 164, note: '地图向南扩大到大伦敦南缘，向东扩大到霍恩彻奇与厄普敏斯特，盖特威克机场接驳点移到新的南缘，旧存档接到原接驳点的线路需要再向南延伸', oldRegionIds: ['hydepark', 'kensingtongardens', 'regentspark', 'hampsteadheath', 'richmondpark', 'bushypark', 'kewgardens', 'greenwichpark', 'heathrow', 'cityairport', 'westend', 'citylondon', 'greenwichheritage', 'isledogs', 'royaldocks', 'surreydocks', 'wapping', 'greenwichpen', 'stratford', 'marylebone', 'camden', 'kensington', 'hamfulham', 'eastend', 'hackney', 'southbank', 'battersea', 'greenwich', 'lewisham', 'newham', 'walthamforest', 'haringey', 'metroland', 'ealing', 'hounslow', 'richmond', 'merton', 'hillingdon', 'barnet', 'croydon', 'kingston', 'redbridge', 'barkingdag', 'sutton', 'bromley', 'enfield', 'bexley', 'havering', 'outer'], oldLandmarkIds: ['ld_bigben', 'ld_abbey', 'ld_stpauls', 'ld_tower', 'ld_towerbridge', 'ld_buckingham', 'ld_bm', 'ld_nhm', 'ld_rah', 'ld_observatory', 'ld_onc', 'ld_hampton', 'ld_ally', 'ld_battersea', 'ld_tate', 'ld_bt', 'ld_rfh', 'ld_eye', 'ld_lloyds', 'ld_gherkin', 'ld_shard', 'ld_walkie', 'ld_tower42', 'ld_ocs', 'ld_hsbc', 'ld_o2', 'ld_wembley', 'ld_olympic', 'ld_twick', 'ld_wimbledon', 'ld_stpancras', 'ld_kingscross', 'ld_paddington', 'ld_waterloo', 'ld_victoria', 'ld_liverpool', 'ld_euston', 'ld_ucl', 'ld_imperial'] }], scenario: 'ld-1860',
+    facts: [['范围', '68 km × 41 km'], ['起始', '1860 年'], ['人口', '约 316 万'], ['货币', '英镑'], ['模式', '经营挑战 / 自由建造']],
+    // 第 3 版（v3.5）：向西扩大 24 格到斯劳、斯坦斯与埃格姆，向东扩大 36 格到格雷斯、蒂尔伯里、格雷夫森德与布伦特伍德；旧存档依次迁移（见 maps.js extentMigration）
+    modes: ['challenge', 'free'], kind: 'real', mapVersion: 3, extent: [{ from: 1, dx: 0, dy: 0, oldW: 196, oldH: 140, newW: 212, newH: 164, note: '地图向南扩大到大伦敦南缘，向东扩大到霍恩彻奇与厄普敏斯特，盖特威克机场接驳点移到新的南缘，旧存档接到原接驳点的线路需要再向南延伸', oldRegionIds: ['hydepark', 'kensingtongardens', 'regentspark', 'hampsteadheath', 'richmondpark', 'bushypark', 'kewgardens', 'greenwichpark', 'heathrow', 'cityairport', 'westend', 'citylondon', 'greenwichheritage', 'isledogs', 'royaldocks', 'surreydocks', 'wapping', 'greenwichpen', 'stratford', 'marylebone', 'camden', 'kensington', 'hamfulham', 'eastend', 'hackney', 'southbank', 'battersea', 'greenwich', 'lewisham', 'newham', 'walthamforest', 'haringey', 'metroland', 'ealing', 'hounslow', 'richmond', 'merton', 'hillingdon', 'barnet', 'croydon', 'kingston', 'redbridge', 'barkingdag', 'sutton', 'bromley', 'enfield', 'bexley', 'havering', 'outer'], oldLandmarkIds: ['ld_bigben', 'ld_abbey', 'ld_stpauls', 'ld_tower', 'ld_towerbridge', 'ld_buckingham', 'ld_bm', 'ld_nhm', 'ld_rah', 'ld_observatory', 'ld_onc', 'ld_hampton', 'ld_ally', 'ld_battersea', 'ld_tate', 'ld_bt', 'ld_rfh', 'ld_eye', 'ld_lloyds', 'ld_gherkin', 'ld_shard', 'ld_walkie', 'ld_tower42', 'ld_ocs', 'ld_hsbc', 'ld_o2', 'ld_wembley', 'ld_olympic', 'ld_twick', 'ld_wimbledon', 'ld_stpancras', 'ld_kingscross', 'ld_paddington', 'ld_waterloo', 'ld_victoria', 'ld_liverpool', 'ld_euston', 'ld_ucl', 'ld_imperial'] },
+      { from: 2, dx: 24, dy: 0, oldW: 212, oldH: 164, newW: 272, newH: 164, note: '地图向西扩大到斯劳、斯坦斯与埃格姆，向东扩大到格雷斯、蒂尔伯里、格雷夫森德与布伦特伍德', oldRegionIds: ['hydepark', 'kensingtongardens', 'regentspark', 'hampsteadheath', 'richmondpark', 'bushypark', 'kewgardens', 'greenwichpark', 'heathrow', 'cityairport', 'westend', 'citylondon', 'greenwichheritage', 'isledogs', 'royaldocks', 'surreydocks', 'wapping', 'greenwichpen', 'stratford', 'marylebone', 'camden', 'kensington', 'hamfulham', 'eastend', 'hackney', 'southbank', 'battersea', 'greenwich', 'lewisham', 'newham', 'walthamforest', 'haringey', 'metroland', 'ealing', 'hounslow', 'richmond', 'merton', 'hillingdon', 'barnet', 'croydon', 'kingston', 'redbridge', 'barkingdag', 'sutton', 'bromley', 'enfield', 'bexley', 'havering', 'surreynorth', 'outer'], oldLandmarkIds: ['ld_bigben', 'ld_abbey', 'ld_stpauls', 'ld_tower', 'ld_towerbridge', 'ld_buckingham', 'ld_bm', 'ld_nhm', 'ld_rah', 'ld_observatory', 'ld_onc', 'ld_hampton', 'ld_ally', 'ld_battersea', 'ld_tate', 'ld_bt', 'ld_rfh', 'ld_eye', 'ld_lloyds', 'ld_gherkin', 'ld_shard', 'ld_walkie', 'ld_tower42', 'ld_ocs', 'ld_hsbc', 'ld_o2', 'ld_wembley', 'ld_olympic', 'ld_twick', 'ld_wimbledon', 'ld_stpancras', 'ld_kingscross', 'ld_paddington', 'ld_waterloo', 'ld_victoria', 'ld_liverpool', 'ld_euston', 'ld_ucl', 'ld_imperial'] }], scenario: 'ld-1860',
     region: '英国', tagline: '修世界第一条地铁', difficulty: 4, tags: ['无地铁开局', '一百六十年跨度', '两次大战'],
     intro: '1860 年的伦敦，街道被马车堵死，火车进不了市中心，世界上还没有一条地铁。你要在狭窄的历史城区底下挖第一条隧道，看着蒸汽换成电力，一次次穿过泰晤士河，和公共马车、电车、巴士、市郊铁路抢乘客。两次世界大战会炸毁东区、掏空财政；码头关闭之后，一条早早修到狗岛的线路，也许会在几十年后变成全城最重要的线路。',
     features: [['train', '世界第一条地铁', '世界上还没有地铁，第一条由你来修，从蒸汽一路走到电气']],
@@ -553,10 +574,12 @@
     geo: G, data: data,
     econ: { devOffset: 0, money: 1 },
     cfg: {
-      W: 212, H: 164, START: { y: 1860, m: 1, d: 1, minute: 360 },
+      W: 272, H: 164, START: { y: 1860, m: 1, d: 1, minute: 360 },
       // 工作周：20 世纪上半叶周六上午上班很普遍（史实），比例为估算；中小学周六不上课
       workWeek: { sat: [[1860, 1], [1900, 0.9], [1919, 0.75], [1946, 0.6], [1960, 0.35], [1970, 0.2], [2000, 0.15]], school: [[1860, 0]] },
-      growth: Object.assign({}, CM.CFG.growth, { popCurve: [[1860, 3.07e6], [1870, 3.77e6], [1880, 4.67e6], [1890, 5.49e6], [1900, 6.32e6], [1911, 7.26e6], [1921, 7.59e6], [1931, 8.33e6], [1939, 8.88e6], [1941, 7.14e6], [1945, 7.25e6], [1951, 8.47e6], [1961, 8.26e6], [1971, 7.74e6], [1981, 7.01e6], [1991, 7.12e6], [2001, 7.59e6], [2011, 8.63e6], [2020, 9.45e6], [2050, 10.53e6], [2300, 10.74e6]], histEnd: 2020, jobsRatio: [[1860, 0.455], [1870, 0.458], [1880, 0.461], [1890, 0.463], [1900, 0.465], [1911, 0.473], [1921, 0.48], [1931, 0.487], [1939, 0.493], [1941, 0.501], [1945, 0.518], [1950, 0.541], [1951, 0.541], [1961, 0.557], [1971, 0.574], [1981, 0.59], [1991, 0.601], [2000, 0.609], [2001, 0.612], [2011, 0.64], [2020, 0.665]] }),
+      // v3.5 地图向西扩大到斯劳、向东扩大到格雷斯与格雷夫森德：曲线为扩图前曲线 ÷（1 − 新增范围的人口份额），份额按各年份开局生成实测（1860 年约 2.9%，2019 年约 7.4%），
+      // 原有范围的人口与扩图前一致；岗位比例按人口与岗位份额同样换算，原有范围的岗位与扩图前一致
+      growth: Object.assign({}, CM.CFG.growth, { popCurve: [[1860, 3.162e6], [1870, 3.89e6], [1880, 4.829e6], [1890, 5.688e6], [1900, 6.568e6], [1911, 7.571e6], [1921, 7.94e6], [1931, 8.767e6], [1939, 9.392e6], [1941, 7.561e6], [1945, 7.696e6], [1951, 9.025e6], [1961, 8.805e6], [1971, 8.254e6], [1981, 7.478e6], [1991, 7.61e6], [2001, 8.128e6], [2011, 9.286e6], [2020, 10.208e6], [2050, 11.375e6], [2300, 11.602e6]], histEnd: 2020, jobsRatio: [[1860, 0.448], [1870, 0.451], [1880, 0.453], [1890, 0.454], [1900, 0.457], [1911, 0.465], [1921, 0.472], [1931, 0.48], [1939, 0.488], [1941, 0.496], [1945, 0.513], [1950, 0.537], [1951, 0.537], [1961, 0.553], [1971, 0.571], [1981, 0.587], [1991, 0.599], [2000, 0.608], [2001, 0.611], [2011, 0.641], [2020, 0.667]] }),
       // 货币：内部记账单位为万英镑；1971 年 2 月十进制之前，票价按先令与便士显示（1 英镑 = 240 便士）
       money: { code: 'GBP', unit: '英镑', wan: '万英镑', yi: '亿英镑', sym: '£', pence: true,
         eras: [{ from: [1971, 2], code: 'GBP', unit: '英镑', wan: '万英镑', yi: '亿英镑', sym: '£', pence: false }] },
@@ -594,7 +617,8 @@
       // 城市经济（macro.js）：1860 年地图范围 GDP 约 1.3 亿英镑（估算，约占英国的两成）
       macro: {
         area: '地图范围（大伦敦）', region: '英国',
-        gdp0: 13200, revRatio: [[1860, 0.05], [1900, 0.06], [1950, 0.1], [1980, 0.13], [2020, 0.15]], revElastic: 1.4,
+        // gdp0：v3.5 地图扩大后按全图岗位增加的比例（约 1.5%）上调，人均产出不变（估算）
+        gdp0: 13400, revRatio: [[1860, 0.05], [1900, 0.06], [1950, 0.1], [1980, 0.13], [2020, 0.15]], revElastic: 1.4,
         prod: [[1860, 0.012], [1873, 0.012], [1874, 0.009], [1900, 0.009], [1913, 0.009], [1914, 0.006], [1919, 0.012], [1929, 0.012], [1930, 0.006], [1938, 0.016], [1939, 0.01], [1946, 0.016], [1950, 0.024], [1960, 0.026], [1973, 0.024], [1974, 0.012], [1980, 0.018], [1990, 0.021], [2000, 0.022], [2008, 0.009], [2020, 0.008], [2050, 0.009]],
         infl: UK_INFL, longRun: { infl: LONG_INFL }, histEnd: 2020,
         ref: { label: '英国实际 GDP 增速', src: '公开统计的时期平均与重点年份（近似值）', periods: [[1860, 1873, 0.022], [1874, 1899, 0.019], [1900, 1913, 0.014], [1920, 1929, 0.019], [1930, 1938, 0.021], [1950, 1973, 0.029], [1974, 1990, 0.019], [1991, 2007, 0.027], [2010, 2019, 0.019]], points: [[1921, -0.1], [1931, -0.051], [1975, -0.015], [1980, -0.02], [1991, -0.012], [2009, -0.042], [2020, -0.095]] },
@@ -624,6 +648,6 @@
         ],
       },
     },
-    cam: { cx: 108, cy: 71, zoom: 16 },
+    cam: { cx: 132, cy: 71, zoom: 16 },   // v3.5 地图向西扩大 24 格，镜头仍对准原处
   });
 })(window.CM);

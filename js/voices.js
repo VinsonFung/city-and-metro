@@ -710,7 +710,7 @@
       // 同名、相距 1.5 km 以内的车站、设施与地名只留一条（按车站、设施、地名的顺序取先到的）
       const add = function (name, x, y, kind) { if (!name || !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x >= g.city.W || y >= g.city.H) return; const l = seen.get(name); if (l && l.some(function (q) { return Math.hypot(q.x - x, q.y - y) < 6; })) return; const it = { name: name, x: x, y: y, kind: kind, key: S(name).normalize('NFC') }; if (l) l.push(it); else seen.set(name, [it]); list.push(it); };
       for (const id in g.net.stations) { const s = g.net.stations[id]; if (!s.virtual) add(s.name, s.x, s.y, 'st'); }
-      for (const f of CM.Fac ? CM.Fac.list(g.city) : []) if (!f.ext) add(f.label || f.name, f.x, f.y, 'fac');
+      for (const f of CM.Fac ? CM.Fac.list(g.city) : []) if (!f.ext && f.t !== 'event') add(f.label || f.name, f.x, f.y, 'fac');
       for (const p of CM.DATA.places || []) add(p[0], p[1], p[2], 'pl');
       N.idx = { key: key, list: list }; return list;
     };

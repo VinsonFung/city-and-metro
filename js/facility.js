@@ -19,6 +19,7 @@
     park: { name: '公园', icon: 'tree', p: { lz: 1 }, we: 1.15, L: 1.4, r: 1.0, group: '旅游休闲' },
     stadium: { name: '体育场馆', icon: 'stadium', p: { lz: 1 }, we: 1.3, L: 2.4, r: 0.6, group: '旅游休闲' },
     venue: { name: '会展中心', icon: 'expo', p: { sh: 0.6, lz: 0.4 }, we: 0.6, L: 2.4, r: 0.8, group: '商业' },
+    event: { name: '大型活动', icon: 'flag', p: { hb: 1 }, hub: true, we: 1.3, L: 0, r: 0.8, group: '旅游休闲' },
   };
   const Fac = { TYPES: TYPES };
   CM.Fac = Fac;
@@ -108,19 +109,45 @@
     }
     if (best) { f.x = best[0]; f.y = best[1]; }
   }
+  // 场馆活动（v3.6，地图数据 D.venueEvents）：颁奖典礼、演唱会季、单项赛事与奥运会等在已有场馆举办的活动，按年份展开成活动设施
+  // （t: 'event'，枢纽方式以人次计，观众从全城前来），只在活动月份出现。每项：{ id, n: 名称（{y} 年份，{n} 届数 = 年份 − nBase）,
+  // lm: 地标 或 at: [x, y], from, to（年，含）, every（每几年一次，默认 1）, skip: [不在本地举办的年份], m: 开始月份, months: 持续月数,
+  // visit: 每天观众人次（数或 [[年, 值]…]）}。展开出的设施编号为「id-年份」，事件任务（eventShare）按这个编号考核
+  Fac.venueEvents = function () {
+    const L = D.venueEvents; if (!L || !L.length) return [];
+    if (D._veSrc === L && D._ve) return D._ve;
+    const out = [];
+    for (const v of L) {
+      const to = Math.min(v.to || 2100, 2100), every = v.every || 1, mo = v.months || 1;
+      for (let y = v.from; y <= to; y += every) {
+        if (v.skip && v.skip.indexOf(y) >= 0) continue;
+        const ym = y * 12 + (v.m || 1) - 1, e = ym + mo, V = typeof v.visit === 'number' ? v.visit : U.interp(v.visit, y);
+        const name = String(v.n).replace('{y}', y).replace('{n}', y - (v.nBase || 0));
+        const s = { id: v.id + '-' + y, n: name, t: 'event', y0: [y, (v.m || 1)], y1: [Math.floor(e / 12), e % 12 + 1], pax: [[0, +(2 * V / 1e4).toFixed(2)]], r: v.r || 0.8, note: v.note || '', venue: true };
+        if (v.lm) s.lmAt = v.lm; else s.at = v.at;
+        out.push(s);
+      }
+    }
+    // 引用地标的活动取地标位置（不占用地标：活动设施只是观众的去向）
+    for (const s of out) if (s.lmAt) { const lm = (D.landmarks || []).find(function (l) { return l.id === s.lmAt; }); if (lm) s.at = [lm.x, lm.y]; delete s.lmAt; }
+    D._veSrc = L; D._ve = out.filter(function (s) { return s.at; });
+    return D._ve;
+  };
   // 当前地图的设施表（按地图数据缓存）。lm：引用地标（位置、场地与落成年份取自地标）
   // city：传入时同时生成片区设施（需要城市的片区划分）；不传时沿用最近一次生成的表
   Fac.list = function (city) {
     // 切换地图后旧城市的迟到调用：不按新地图的设施表生成，也不覆盖缓存（玩家反馈：不同城市的设施与需求混在一起）
     if (city && city.mapId && city.mapId !== CM.mapId) return [];
-    if (D._facSrc === D.facilities && D._fac && (!city || D._facCity === city)) return D._fac;
+    const c0 = city || D._facCity, pv = c0?.planFacVer || 0;
+    if (D._facSrc === D.facilities && D._fac && (!city || D._facCity === city) && D._facPV === pv) return D._fac;
+    if (!city && D._facSrc === D.facilities) city = c0;
     const out = [];
     const lms = D.landmarks || [];
-    (D.facilities || []).forEach(function (s, i) {
+    (D.facilities || []).concat(Fac.venueEvents(), city?.planFac || []).forEach(function (s, i) {
       const T = TYPES[s.t]; if (!T) return;
       const f = { k: out.length, id: s.id || ('f' + i), name: s.n, label: s.label || s.n, t: s.t, T: T, x: 0, y: 0, r: s.r != null ? s.r : T.r, lmK: -1,
         open: null, openMonth: Array.isArray(s.y0) ? s.y0[1] : null, close: yrOf(s.y1), w: s.w != null ? curve(s.w) : null, pax: s.pax || null, p: s.p || T.p, we: s.we || null, note: s.note || '', src: s.src || null,
-        ext: s.ext ? { dir: s.ext[0], km: s.ext[1], v: EXT_DIR[s.ext[0]] || [0, 0], gate: !!s.gate, to: s.to || null } : null, rw: s.rw || null, noModel: !!s.noModel, tour: !!s.tour };   // rw：机场自己的跑道（格坐标，v2.2，用于模型选址）；tour：旅游景点（v3.0）
+        ext: s.ext ? { dir: s.ext[0], km: s.ext[1], v: EXT_DIR[s.ext[0]] || [0, 0], gate: !!s.gate, to: s.to || null } : null, rw: s.rw || null, noModel: !!s.noModel, tour: !!s.tour, plan: s.plan || null };   // rw：机场自己的跑道（格坐标，v2.2，用于模型选址）；tour：旅游景点（v3.0）
       if (s.lm) {
         const k = lms.findIndex(function (l) { return l.id === s.lm; });
         if (k < 0) return;
@@ -133,7 +160,7 @@
       out.push(f);
     });
     if (city) genDistrict(out, city);
-    D._fac = out; D._facSrc = D.facilities; D._facCity = city || null;
+    D._fac = out; D._facSrc = D.facilities; D._facCity = city || null; D._facPV = pv;
     return out;
   };
   // 片区设施（v2.1 第二轮：重要设施集中在老城与天河，外围片区发展起来后没有设施需求）：真实地图的每个片区

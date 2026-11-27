@@ -508,7 +508,7 @@
     if (year > this.terrainYear) this.terrainYear = year;
     if (!list.length) return list;
     const N = this.N, FW = this.FW, BW = this.BW, BH = this.BH, Geo = CM.Geo, old = this.landFrac;
-    this._lkPrevMask = this._lk ? this._lk.mask : null;
+    this._lkPrevMask = this._lk ? this._lk.over : null;
     this.buildWater();
     this.terrainVer++;
     const fresh = new Set();
@@ -543,7 +543,7 @@
     }
     // 新土地可能把隔开的片区连起来（v2.2 可建设范围按格计算）：范围有变化的格重画
     const prevLock = this._lkPrevMask;
-    if (prevLock) { const now = this.lockState().mask; for (let c = 0; c < N; c++) if (prevLock[c] !== now[c]) this.dirty.add(c); }
+    if (prevLock) { const now = this.lockState().over; for (let c = 0; c < N; c++) if (prevLock[c] !== now[c]) this.dirty.add(c); }
     this.version++; this.geoVer++;
     return list;
   };
@@ -953,7 +953,89 @@
     const mask = new Uint8Array(N);
     // 岛屿地图不豁免被包围的未开放片区。empty 表示开局空置：尚未开放的空置地也不享受豁免，按期开放或作为枢纽连通后可建设。
     for (let c = 0; c < N; c++) if (LF[c] >= 0.5 && !inM(c) && (out[c] || D.lockEnclaves || R[reg[c]].empty)) mask[c] = 1;
+    this.dropLockFragments(mask);
     return mask;
+  };
+  // 水面的未开放斜线（v3.6）：按离得最近的岸边算——最近的陆地格不能建设、离岸不超过 LOCK_BRIDGE 格（2.5 km）的水面画斜线。
+  // 以前按水面所属的区域整片判断：行政界线伸进海里的部分画成方块，两岸都开放的海峡、城里的湖也会画上斜线。
+  // lab：每个水面格最近的陆地格（倒角距离，正交 1、对角 √2），超出范围为 −1；只随地形（填海）变化
+  City.prototype.shoreOf = function () {
+    if (this._shore && this._shore.t === this.terrainVer && this._shore.lf === this.landFrac) return this._shore;
+    const W = this.W, H = this.H, N = this.N, LF = this.landFrac, lab = new Int32Array(N).fill(-1), d = new Float32Array(N).fill(1e9), D2 = Math.SQRT2;
+    for (let c = 0; c < N; c++) if (LF[c] >= 0.5) { lab[c] = c; d[c] = 0; }
+    const relax = function (c, n, w) { if (lab[n] >= 0 && d[n] + w < d[c]) { d[c] = d[n] + w; lab[c] = lab[n]; } };
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+      const c = j * W + i; if (LF[c] >= 0.5) continue;
+      if (i > 0) relax(c, c - 1, 1);
+      if (j > 0) { relax(c, c - W, 1); if (i > 0) relax(c, c - W - 1, D2); if (i < W - 1) relax(c, c - W + 1, D2); }
+    }
+    for (let j = H - 1; j >= 0; j--) for (let i = W - 1; i >= 0; i--) {
+      const c = j * W + i; if (LF[c] >= 0.5) continue;
+      if (i < W - 1) relax(c, c + 1, 1);
+      if (j < H - 1) { relax(c, c + W, 1); if (i < W - 1) relax(c, c + W + 1, D2); if (i > 0) relax(c, c + W - 1, D2); }
+    }
+    for (let c = 0; c < N; c++) if (LF[c] < 0.5 && d[c] > LOCK_BRIDGE) lab[c] = -1;
+    this._shore = { t: this.terrainVer, lf: LF, lab: lab };
+    return this._shore;
+  };
+  // 未开放范围的显示（陆地按 mask，水面按最近的岸），地面图的斜线按它画
+  City.prototype.lockOverlay = function (mask) {
+    const W = this.W, H = this.H, N = this.N, LF = this.landFrac, lab = this.shoreOf().lab, o = new Uint8Array(N);
+    for (let c = 0; c < N; c++) o[c] = LF[c] >= 0.5 ? mask[c] : (lab[c] >= 0 ? mask[lab[c]] : 0);
+    // 按 v 值连片：e8 为 8 邻接；对每一片回调 (格表, 含陆地, 碰到地图边缘)
+    const pieces = function (v, e8, fn) {
+      const seen = new Uint8Array(N), q = [];
+      for (let s = 0; s < N; s++) {
+        if (seen[s] || o[s] !== v) continue;
+        q.length = 0; q.push(s); seen[s] = 1; let land = false, edge = false;
+        for (let h = 0; h < q.length; h++) {
+          const c = q[h], i = c % W, j = (c / W) | 0;
+          if (LF[c] >= 0.5) land = true;
+          if (!i || !j || i === W - 1 || j === H - 1) edge = true;
+          for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+            if ((!di && !dj) || (!e8 && di && dj)) continue;
+            const ii = i + di, jj = j + dj; if (ii < 0 || jj < 0 || ii >= W || jj >= H) continue;
+            const n = jj * W + ii; if (!seen[n] && o[n] === v) { seen[n] = 1; q.push(n); }
+          }
+        }
+        fn(q, land, edge);
+      }
+    };
+    // 与未开放陆地不相连的零星斜线水面（离两边岸差不多远时偶尔出现的一两格）：不画
+    pieces(1, true, function (q, land, edge) { if (!land && !edge) for (const c of q) o[c] = 0; });
+    // 离岸超过 2.5 km、四周全是斜线水面的一片水（宽阔海湾的中央），旁边没有可以建设的陆地、也不通到地图边缘的大海
+    // （或者只是地图边上一两格的小缺口）：同样画斜线，不留空洞
+    pieces(0, false, function (q, land, edge) { if (!land && (!edge || q.length < LOCK_FRAG)) for (const c of q) o[c] = 1; });
+    return o;
+  };
+  // 未开放范围不留飞地与碎块（v3.6）：连同按岸线画斜线的水面一起按 8 邻接连片，不与地图边缘相连的未开放片——
+  //  · 嵌在开放城区里（四周以可以建设的陆地为主）：不论大小都算「被可建设范围包围的规划用地」，可以建设（以前隔着河道、湖泊能通到地图边缘的仍不能建设，成了城里的飞地）；
+  //  · 海上的岛（四周以水面为主）或 lockEnclaves 的岛屿地图：只有陆地不足 LOCK_FRAG 格（约 1.5 km²）的小块可以建设。
+  // 只处理以后会开放的片区；境外、永不开放、空置与只能穿过的片区照旧不能建设。城市开发仍按各片区的参考年份进行
+  const LOCK_FRAG = 24;
+  City.prototype.dropLockFragments = function (mask) {
+    const W = this.W, H = this.H, N = this.N, LF = this.landFrac, lab = this.shoreOf().lab, R = this.regions, self = this;
+    const on = function (c) { return LF[c] >= 0.5 ? mask[c] === 1 : (lab[c] >= 0 && mask[lab[c]] === 1); };
+    const later = function (c) { const rg = R[self.lockRegion(c)]; return rg.open != null && !rg.lockNote && !rg.empty && !rg.passOnly; };
+    const seen = new Uint8Array(N), q = [];
+    for (let s = 0; s < N; s++) {
+      if (seen[s] || !on(s)) continue;
+      q.length = 0; q.push(s); seen[s] = 1;
+      let land = 0, edge = false, bl = 0, bw = 0;
+      for (let h = 0; h < q.length; h++) {
+        const c = q[h], i = c % W, j = (c / W) | 0;
+        if (LF[c] >= 0.5) land++;
+        if (!i || !j || i === W - 1 || j === H - 1) edge = true;
+        for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+          if (!di && !dj) continue;
+          const ii = i + di, jj = j + dj; if (ii < 0 || jj < 0 || ii >= W || jj >= H) continue;
+          const n = jj * W + ii; if (seen[n]) continue;
+          if (on(n)) { seen[n] = 1; q.push(n); } else if (LF[n] >= 0.5) bl++; else bw++;
+        }
+      }
+      if (edge || !(land < LOCK_FRAG || (!D.lockEnclaves && bl >= bw))) continue;
+      for (const c of q) if (LF[c] >= 0.5 && later(c)) mask[c] = 0;
+    }
   };
   City.prototype.lockState = function () {
     const u = !!this.unlockAll, lk = this._lk;
@@ -989,7 +1071,7 @@
       const f = info[rk[c]], x = c % W + 0.5, y = ((c / W) | 0) + 0.5, d = (x - f.cx) * (x - f.cx) + (y - f.cy) * (y - f.cy);
       if (d < f.bd) { f.bd = d; f.x = x; f.y = y; }
     }
-    this._lk = { v: this.lockVer, t: this.terrainVer, u: u, reg: this.region, mask: mask, year: year, info: info };
+    this._lk = { v: this.lockVer, t: this.terrainVer, u: u, reg: this.region, mask: mask, year: year, info: info, over: this.lockOverlay(mask) };
     return this._lk;
   };
   // 旧存档兼容（v2.2）：区域开放年份调整、区域拆分或可建设范围改为按格计算后，旧存档里已有的车站与进行中任务的锚点
@@ -1063,7 +1145,7 @@
     }
     for (const p of comps) {
       const n = p.cells.length, rg = regions[p.k];
-      if (n >= largest[p.k] || (rg.scenic ? n >= 4 || !rg.woodMin : n >= 12)) continue;
+      if (n >= largest[p.k] || rg.empty || rg.passOnly || rg.hub || rg.lockNote || (rg.scenic ? n >= 4 || !rg.woodMin : n >= LOCK_FRAG)) continue;
       const cnt = new Map(), alt = new Map();   // alt：四周只有风景区时并入风景区
       for (const c of p.cells) {
         const i = c % W;
@@ -1770,9 +1852,9 @@
     this.regionOpen[k] = 1; this.regionOpenDate[k] = [y, m];
     // 可建设范围可能连带变化（连通的已开放片区、被包围的规划用地），这些格也要重画；
     // lastLinked：因此由「整片不能建设」变为可以建设的其他区域（开放提示用）
-    const prev = this._lk, before = prev && prev.mask;
+    const prev = this._lk, before = prev && prev.over;
     this.lockVer++;
-    const now = this.lockState(), after = now.mask;
+    const now = this.lockState(), after = now.over;
     for (let c = 0; c < this.N; c++) if (this.region[c] === k || (before && before[c] !== after[c])) this.dirty.add(c);
     this.lastLinked = prev ? this.regions.map(function (r, j) { return j; }).filter(function (j) { return j !== k && !prev.info[j].b && prev.info[j].n && now.info[j].b; }) : [];
     this.version++;
@@ -1930,6 +2012,8 @@
     };
     distribute(this.pop, capR, wR, sR, dP, hills.homes, chM > 0.01 && NAC ? NAC.churnP * chM : 0);
     distribute(this.jobs, capJ, wJ, sJ, dJ, hills.jobs, chM > 0.01 && NAC ? NAC.churnJ * chM : 0);
+    const projectCells = CM.SimPlan?.grow(this, year, capR, capJ, access);
+    if (projectCells) for (const c of projectCells) changed.push(c);
     for (let c = 0; c < N; c++) {
       if (hills.jobs[c] >= 1 || capR[c] <= 0) continue;
       if (this.bh[c] > hillHeightCap(this.lu[c], hills.homes[c], hills.jobs[c]) + 0.001) {
@@ -2106,7 +2190,7 @@
     if (D.terrainRevision) out.terrainRevision = D.terrainRevision;
     if (D.scenicRevision) out.scenicRevision = D.scenicRevision;
     if (D.displayRevision) out.displayRevision = D.displayRevision;
-    out.lockRule = 2;
+    out.lockRule = 3;
     return out;
   };
   // 按 id 把存档中的区域 / 地标状态对应到当前数据；没有 id 的旧存档按数组位置对应
@@ -2138,7 +2222,7 @@
   };
   City.prototype.restore = function (s, year) { const it = this.restoreGen(s, year); let r = it.next(); while (!r.done) r = it.next(); };
   City.prototype.restoreGen = function* (s, year) {
-    this.lockRuleOld = (s.lockRule || 1) < 2; this.lockVer++; this._lk = null;
+    this.lockRuleOld = (s.lockRule || 1) < 3; this.lockVer++; this._lk = null;
     const N = this.N;
     const chk = function (a, n) { if (a.length !== n) throw new Error('城市数据尺寸不符'); return a; };
     this.pop = chk(U.unpackTyped(s.pop), N); this.jobs = chk(U.unpackTyped(s.jobs), N); this.bh = chk(U.unpackTyped(s.bh), N);

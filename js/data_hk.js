@@ -176,6 +176,8 @@
       { id: 'tpo', name: '大埔新市镇', district: ['大埔区'], open: 1979, plan: 'res', note: '1979 年起按新市镇计划发展（史实）' },
       { id: 'north', name: '粉岭·上水', district: ['北区'], open: 1979, plan: 'res', growK: [0.5, 0.6], note: '粉岭／上水新市镇 1979 年起发展（史实）' },
       { id: 'lantau', name: '大屿山东北（愉景湾·欣澳）', district: ['离岛区'], open: 1997, plan: 'res', note: '1990 年代配合新机场建设开发（史实）' },
+      // v3.5 向东扩大：西贡区在新增东缘条带里的部分（within：西边正好在原图东界上）单独成片，原范围里的西贡区仍属将军澳新市镇；山地郊野公园照旧按林地划入郊野公园
+      { id: 'saikung_e', name: '西贡半岛（清水湾·西贡东）', district: ['西贡区'], within: [[184, 0], [240, 0], [240, 180], [184, 180]], open: 1985, plan: 'res', note: '郊野公园之间的乡村与度假屋，开发很少（史实）' },
     ],
     defaultRegion: { id: 'outer', name: '新界外围', open: 1985, plan: 'res', pop: 5.69e6 },
     plans: CM.DATA.plans,
@@ -211,7 +213,8 @@
       at(22.204, 114.132, { pop: 8200, jobs: 2200, r: 0.4 }),   // 南丫岛索罟湾
       at(22.2537, 113.86, { pop: 29000, jobs: 7500, r: 0.6 }),   // 大澳
     ],
-    rural: { pop: 300, jobs: 60 },
+    // 新增范围（v3.5 原范围以外）的乡村底数略低：西贡半岛与离岛多是郊野公园和小村
+    rural: { pop: 300, jobs: 60, out: { box: [0, 0, 184, 164], k: 0.5 } },
     // 铁路通车年份（线路名或前缀 → 年份，或 [通车, 停运]）：开局后才通车或停运的线路，按公开通车时间整理
     railYears: { '广深港高速': 2018, '港铁东铁线马场支线': 1985 },
     roadYears: {
@@ -341,6 +344,7 @@
     ],
     lineColorsNice: ['#00ab4e', '#ed1d24', '#0075c2', '#7d499d', '#f38b00', '#5eb6e4', '#9a3b26', '#bac429', '#00888a', '#e777cb', '#a35200', '#6d6e71'],
     // v2.7 向北扩大后：新增范围里的深圳一侧不收地名（边界线取近似）
+    // 港铁轻铁运营站表不含这座应急月台。
     stationNameCorrections: { '洪天路紧急月台': null },
     places: (G.places || []).filter(function (p) { return !(p[2] < 24 && inSz(p[1], p[2])); }).map(function (p) { return [p[0], p[1], p[2], p[3]]; }),
   };
@@ -348,15 +352,17 @@
   (CM.MAP_LIST = CM.MAP_LIST || []).push({
     id: 'hk', name: '香港', title: '香港 · 1970', sub: '真实地理 · 1970 年起 · 港币',
     desc: '从 1970 年尚无地铁的香港开始：维多利亚港分隔港岛与九龙，山多地少、人口极其稠密；之后过海隧道、新市镇与大规模填海陆续出现。新土地随年份由系统填海形成后才能开发与建设。',
-    facts: [['范围', '46 km × 41 km'], ['起始', '1970 年'], ['人口', '约 372 万'], ['货币', '港币（港元）'], ['模式', '经营挑战 / 自由建造']],
-    modes: ['challenge', 'free'], kind: 'real', mapVersion: 5, extent: [{ from: 1, dx: 56, dy: 40, oldW: 80, oldH: 80, newW: 140, newH: 120, note: '地图扩大到屯门、元朗、天水围、上水与大埔等新市镇', oldRegionIds: ['hills', 'airport', 'central', 'wanchai', 'eastern', 'southern', 'ytm', 'ssp', 'klc', 'wts', 'kt', 'tw', 'kwt', 'st', 'tko', 'outer'], oldLandmarkIds: ['hk_pen', 'hk_hku', 'hk_stad', 'hk_hhs', 'hk_stra', 'hk_col', 'hk_cec', 'hk_hkcc', 'hk_boc', 'hk_cp', 'hk_ifc', 'hk_icc'] },
+    facts: [['范围', '60 km × 45 km'], ['起始', '1970 年'], ['人口', '约 372 万'], ['货币', '港币（港元）'], ['模式', '经营挑战 / 自由建造']],
+    // 第 6 版（v3.5）：向东扩大 56 格到西贡半岛、清水湾与东平洲，向南扩大 16 格到蒲台与索罟群岛；原点不变，旧存档的坐标不用平移
+    modes: ['challenge', 'free'], kind: 'real', mapVersion: 6, extent: [{ from: 1, dx: 56, dy: 40, oldW: 80, oldH: 80, newW: 140, newH: 120, note: '地图扩大到屯门、元朗、天水围、上水与大埔等新市镇', oldRegionIds: ['hills', 'airport', 'central', 'wanchai', 'eastern', 'southern', 'ytm', 'ssp', 'klc', 'wts', 'kt', 'tw', 'kwt', 'st', 'tko', 'outer'], oldLandmarkIds: ['hk_pen', 'hk_hku', 'hk_stad', 'hk_hhs', 'hk_stra', 'hk_col', 'hk_cec', 'hk_hkcc', 'hk_boc', 'hk_cp', 'hk_ifc', 'hk_icc'] },
       { from: 2, dx: 36, dy: 0, oldW: 140, oldH: 120, newW: 176, newH: 120, note: '地图向西扩大到赤鱲角（香港国际机场）、东涌与龙鼓滩',
         oldRegionIds: ['hills', 'airport', 'disney', 'oceanpark', 'central', 'wanchai', 'eastern', 'southern', 'ytm', 'ssp', 'klc', 'wts', 'kt', 'tw', 'kwt', 'st', 'tko', 'sz', 'tm', 'yl', 'tpo', 'north', 'lantau', 'outer'] },
       // v2.7：向北扩大 24 格，罗湖、落马洲、皇岗、文锦渡、莲塘、沙头角等口岸都进入地图
       { from: 3, dx: 0, dy: 24, oldW: 176, oldH: 120, newW: 176, newH: 144, note: '地图向北扩大到深港各口岸',
         oldRegionIds: ['hills', 'hkia', 'tungchung', 'lantaun', 'airport', 'disney', 'oceanpark', 'central', 'wanchai', 'eastern', 'southern', 'ytm', 'ssp', 'klc', 'wts', 'kt', 'tw', 'kwt', 'st', 'tko', 'sz', 'tm', 'yl', 'tpo', 'north', 'lantau', 'outer'],
         oldLandmarkIds: ['hk_pen', 'hk_hku', 'hk_stad', 'hk_hhs', 'hk_stra', 'hk_col', 'hk_cec', 'hk_hkcc', 'hk_boc', 'hk_cp', 'hk_ifc', 'hk_icc', 'hk_op', 'hk_disney'] },
-      { from: 4, dx: 8, dy: 0, eventInsert: { index: 19, count: 1, beforeRules: 13 }, oldW: 176, oldH: 144, newW: 184, newH: 164, note: '地图向南扩大到赤柱与南丫岛，向西扩大到大屿山西端的大澳', oldRegionIds: ['hills', 'hkia', 'tungchung', 'lantaun', 'airport', 'disney', 'oceanpark', 'central', 'wanchai', 'eastern', 'southern', 'ytm', 'ssp', 'klc', 'wts', 'kt', 'tw', 'kwt', 'st', 'tko', 'sz', 'tm', 'yl', 'tpo', 'north', 'lantau', 'outer'], oldLandmarkIds: ['hk_pen', 'hk_hku', 'hk_stad', 'hk_hhs', 'hk_stra', 'hk_col', 'hk_cec', 'hk_hkcc', 'hk_boc', 'hk_cp', 'hk_ifc', 'hk_icc', 'hk_op', 'hk_disney'] }],
+      { from: 4, dx: 8, dy: 0, eventInsert: { index: 19, count: 1, beforeRules: 13 }, oldW: 176, oldH: 144, newW: 184, newH: 164, note: '地图向南扩大到赤柱与南丫岛，向西扩大到大屿山西端的大澳', oldRegionIds: ['hills', 'hkia', 'tungchung', 'lantaun', 'airport', 'disney', 'oceanpark', 'central', 'wanchai', 'eastern', 'southern', 'ytm', 'ssp', 'klc', 'wts', 'kt', 'tw', 'kwt', 'st', 'tko', 'sz', 'tm', 'yl', 'tpo', 'north', 'lantau', 'outer'], oldLandmarkIds: ['hk_pen', 'hk_hku', 'hk_stad', 'hk_hhs', 'hk_stra', 'hk_col', 'hk_cec', 'hk_hkcc', 'hk_boc', 'hk_cp', 'hk_ifc', 'hk_icc', 'hk_op', 'hk_disney'] },
+      { from: 5, dx: 0, dy: 0, oldW: 184, oldH: 164, newW: 240, newH: 180, note: '地图向东扩大到西贡半岛、清水湾与东平洲，向南扩大到蒲台与索罟群岛', oldRegionIds: ['hills', 'hkia', 'tungchung', 'lantaun', 'airport', 'disney', 'oceanpark', 'central', 'wanchai', 'eastern', 'southern', 'ytm', 'ssp', 'klc', 'wts', 'kt', 'tw', 'kwt', 'st', 'tko', 'sz', 'tm', 'yl', 'tpo', 'north', 'lantau', 'outer'], oldLandmarkIds: ['hk_pen', 'hk_hku', 'hk_stad', 'hk_hhs', 'hk_stra', 'hk_col', 'hk_cec', 'hk_hkcc', 'hk_boc', 'hk_cp', 'hk_ifc', 'hk_icc', 'hk_op', 'hk_disney'] }],
     scenario: 'hk-1970',
     region: '中国香港', tagline: '山与海之间的高密度城市', difficulty: 3, tags: ['无地铁开局', '过海', '填海'],
     intro: '1970 年的香港人口约 345 万，港岛与九龙隔着维多利亚港，靠渡轮与巴士往来，还没有地铁。土地少得惊人：新城区要等填海成陆才能开发。你要让地铁第一次穿过海港，再把荃湾、沙田、将军澳这些新市镇连起来。',
@@ -365,7 +371,7 @@
     geo: G, data: data,
     econ: { devOffset: 23, money: 0.25 },   // 出行选择参数：香港 1970 年约对应广州样本 1993 年的发展阶段；时间价值等按港币换算
     cfg: {
-      W: 184, H: 164, START: { y: 1970, m: 1, d: 1, minute: 360 },   // v2.2：向西扩大 36 格到赤鱲角；v2.7：向北扩大 24 格到深港各口岸
+      W: 240, H: 180, START: { y: 1970, m: 1, d: 1, minute: 360 },   // v2.2：向西扩大 36 格到赤鱲角；v2.7：向北扩大 24 格到深港各口岸
       // 工作周：政府 2006 年 7 月起分阶段实行五天工作周（史实）；私营机构周六上班的比例为估算
       workWeek: { sat: [[1970, 0.85], [1990, 0.7], [2006.5, 0.55], [2015, 0.4], [2030, 0.35]], school: [[1970, 1], [1990, 0.8], [2000, 0.3], [2006, 0]] },
       growth: Object.assign({}, CM.CFG.growth, { popCurve: [[1970, 3.72e6], [1975, 4.21e6], [1980, 5.02e6], [1985, 5.58e6], [1990, 6.13e6], [1995, 6.62e6], [2000, 7.0e6], [2010, 7.4e6], [2020, 7.6e6], [2040, 7.73e6], [2300, 7.84e6]], histEnd: 2020, jobsRatio: [[1970, 0.415], [1975, 0.426], [1980, 0.442], [1985, 0.459], [1990, 0.478], [1995, 0.487], [2000, 0.494], [2010, 0.509], [2020, 0.523]] }),

@@ -290,7 +290,7 @@
       trafficChangedYm: this.trafficChangedYm, taskRecheckYM: this.taskRecheckYM,
     };
     state.tasks = Object.assign(new CM.Tasks(), this.tasks, M.clone(this.tasks));
-    for (const key of ['firedEvents', 'foresight', 'macro', 'corp', 'fleet', 'milestones', 'bgBase', 'eraLog']) {
+    for (const key of ['firedEvents', 'foresight', 'macro', 'corp', 'fleet', 'milestones', 'bgBase', 'eraLog', 'plan']) {
       state[key] = this[key] && M.clone(this[key]);
     }
     return lastDay;
@@ -310,6 +310,7 @@
       Object.assign(target, state);
     }
     this.city.foresight = this.foresight;
+    if (CM.SimPlan) CM.SimPlan.attach(this);
     if (CM.Macro && this.macro) CM.Macro.sync(this);
     if (CM.applyMoneyEra) CM.applyMoneyEra(this.clock.y, this.clock.m);
     yield* this.rebuildSettlementTraffic(lastDay.trafficYear);
@@ -555,6 +556,7 @@
       this.emit('histEvent', { y: y, m: m, tag: '模拟', title: x.f.title, desc: desc, fx: null });
     }
     city.applyReplan(yr);
+    if (CM.SimPlan) CM.SimPlan.month(this, y, m);
     // 城市经济：1 月结算上一年 GDP 与地方财政、确定本年预算与经济周期；触发到期的经济事件（每个事件只生效一次）
     if (this.macro && CM.Macro) for (const x of CM.Macro.month(this, y, m)) this.logMacroEvent(x);
     const ef = this.macro && CM.Macro ? CM.Macro.cityFactors(this) : null;
@@ -1146,6 +1148,7 @@
       traffic: this.traffic || { v: CFG.TRAFFIC_MODEL },
       rulesRevision: CFG.RULES_REVISION,
       buildSeq: this.buildSeq || undefined,
+      plan: this.plan || undefined,
       taskRecheckYM: this.taskRecheckYM ?? null,
       impactReport: Game.validImpact(this.impactReport) ? this.impactReport : null,
     };
@@ -1168,6 +1171,8 @@
       g.city = new CM.City();
       yield* g.city.generateGen(g.seed, CFG.START.y, { deferGraphs: true, deferRoads: true });
       yield* g.city.restoreGen(s.city, g.clock.y);
+      g.plan = s.plan || null;
+      if (g.plan && CM.SimPlan) CM.SimPlan.attach(g);
       // 全图解锁要在编译线网之前恢复：线路几何带有可建设范围的判断（玩家反馈：读档后已建线路在未开放区段报冲突）
       g.unlockAll = !!s.unlockAll && g.mode === 'free'; g.city.unlockAll = g.unlockAll;
       lp(0.3, '恢复城市');

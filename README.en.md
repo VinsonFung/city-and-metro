@@ -8,7 +8,7 @@ City & Metro is a single-player metro planning and city management game for your
 
 **[Play online](https://city-and-metro.pages.dev)** · [Source repository](https://github.com/VinsonFung/city-and-metro) · [License](./LICENSE.txt)
 
-The current web edition is **v3.0.0**.
+The current web edition is **v3.0.1**.
 
 v3.0 adds Nanjing (2000) and Miami (1980), with five local train models, historical tasks and airport terminals. It adds a task inbox, Simple and Professional information modes, and ridership comparisons for existing lines. Beijing and Shanghai have expanded maps, Nanjing uses 1 km traffic zones, and developed areas and secondary roads grow together.
 

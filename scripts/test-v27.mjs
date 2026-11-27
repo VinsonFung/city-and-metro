@@ -12,7 +12,7 @@ for(const[,src]of(await readFile(new URL('index.html',root),'utf8')).matchAll(/<
 const C=c.CM,M=C.Metro,copy=v=>JSON.parse(JSON.stringify(v));
 C.UI=function(){};for(const f of ['settings','corp','fleet','netlayout','netreplay','review'])await load('js/'+f+'.js');
 const F=C.Fleet;
-assert.equal(C.CFG.GAME_VERSION,'3.0.0');assert.ok(C.CFG.RULES_REVISION>=15);
+assert.equal(C.CFG.GAME_VERSION,'3.0.1');assert.ok(C.CFG.RULES_REVISION>=15);
 assert.equal(C.MAP_ORDER.length,17);assert.equal(F.MODELS.length,83);
 assert.equal(F.MODELS.filter(m=>m.maps?.includes('ld')).length,11);
 assert.equal(F.MODELS.filter(m=>m.maps?.includes('sz')).length,2);

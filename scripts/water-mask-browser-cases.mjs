@@ -21,22 +21,30 @@ export async function runWaterMaskChecks({E,task,fs,path}){
    const{city,R,g}=w.audit;city.applyReclaim(year);g.clock.y=year;R.styleYear=year;R.styleEpoch=Math.floor(year/5);R.applyTheme(theme);
    const [x0,y0,x1,y1]=box||[0,0,city.W,city.H],W=Math.round((x1-x0)*scale),H=Math.round((y1-y0)*scale),make=()=>{const cv=w.document.createElement('canvas');cv.width=W;cv.height=H;return cv};
    const draw=()=>{const cv=make(),x=cv.getContext('2d',{willReadFrequently:true});x.setTransform(scale,0,0,scale,-x0*scale,-y0*scale);R.drawGround(x,x0,y0,x1,y1,scale);return cv};
-   const normal=draw(),fill=R.th.lockFill,hatch=R.th.lockHatch;let clear;
-   try{R.th.lockFill='transparent';R.th.lockHatch='transparent';clear=draw()}finally{R.th.lockFill=fill;R.th.lockHatch=hatch}
+   const normal=draw(),fill=R.th.lockFill,hatch=R.th.lockHatch;let linesOnly,clear;
+   try{R.th.lockFill='transparent';linesOnly=draw();R.th.lockHatch='transparent';clear=draw()}finally{R.th.lockFill=fill;R.th.lockHatch=hatch}
    const coverage=paint=>{const cv=make(),x=cv.getContext('2d',{willReadFrequently:true});x.setTransform(scale,0,0,scale,-x0*scale,-y0*scale);x.fillStyle=x.strokeStyle='#fff';x.lineCap=x.lineJoin='round';paint(x);return x.getImageData(0,0,W,H).data;};
    const polys=features=>coverage(x=>{const p=new w.Path2D();for(const f of features)p.addPath(R.featurePath(f,true));x.fill(p,'nonzero')});
    const raw=polys(C.Geo.water), visual=polys(C.Geo.view('water')), pending=polys(city.reclaimWater());
    const rivers=coverage(x=>{for(const l of C.Geo.waterLines){x.lineWidth=Math.max(l.w,1/scale*1.5);x.stroke(R.featurePath(l,false))}});
-   const a=normal.getContext('2d').getImageData(0,0,W,H).data,b=clear.getContext('2d').getImageData(0,0,W,H).data;
-   let water=0,leaked=0,landChanged=0,maxDelta=0;const samples=[];
+   const pixels=cv=>cv.getContext('2d').getImageData(0,0,W,H).data;
+   const a=pixels(normal),b=pixels(clear),h=pixels(linesOnly),over=city.lockState().over;
+   const difference=(a,b,i)=>Math.max(Math.abs(a[i]-b[i]),Math.abs(a[i+1]-b[i+1]),Math.abs(a[i+2]-b[i+2]));
+   let water=0,leaked=0,wrongHatch=0,hatched=0,landChanged=0,maxDelta=0;const samples=[];
    for(let i=0;i<a.length;i+=4){
-    const alpha=Math.max(raw[i+3],visual[i+3],pending[i+3],rivers[i+3]);
-    const delta=Math.max(Math.abs(a[i]-b[i]),Math.abs(a[i+1]-b[i+1]),Math.abs(a[i+2]-b[i+2]),Math.abs(a[i+3]-b[i+3]));
-    if(alpha===255){water++;if(delta>1){leaked++;maxDelta=Math.max(maxDelta,delta);if(samples.length<4)samples.push([(i/4)%W,Math.floor(i/4/W),delta,raw[i+3],visual[i+3],pending[i+3],rivers[i+3]])}}
-    else if(alpha===0&&delta>1)landChanged++;
+    const alpha=Math.max(raw[i+3],visual[i+3],pending[i+3],rivers[i+3]), delta=difference(a,b,i);
+    if(alpha===255){
+     water++;const tint=difference(a,h,i);
+     if(tint>1){leaked++;maxDelta=Math.max(maxDelta,tint);if(samples.length<4)samples.push([(i/4)%W,Math.floor(i/4/W),tint]);}
+     if(difference(h,b,i)>1){
+      hatched++;const x=Math.floor(x0+((i/4)%W+.5)/scale),y=Math.floor(y0+(Math.floor(i/4/W)+.5)/scale);
+      let near=false;for(let j=Math.max(0,y-2);j<=Math.min(city.H-1,y+2)&&!near;j++)for(let k=Math.max(0,x-2);k<=Math.min(city.W-1,x+2);k++)if(over[j*city.W+k]){near=true;break;}
+      if(!near)wrongHatch++;
+     }
+    }else if(alpha===0&&delta>1)landChanged++;
    }
    w.audit.normal=normal;w.audit.clear=clear;
-   return {year,theme,scale,water,leaked,landChanged,maxDelta,samples};
+   return {year,theme,scale,water,leaked,wrongHatch,hatched,landChanged,maxDelta,samples};
   };
   w.checkWorkerTile=async function(){
    const{R,city}=w.audit,lvl=8,counts=new Map(),W=city.W,H=city.H;
@@ -59,16 +67,17 @@ export async function runWaterMaskChecks({E,task,fs,path}){
   for(const year of years)for(const theme of['light','dark']){
    const check=await E(`waterFrame.contentWindow.checkWater(${year},${JSON.stringify(theme)})`);report.cases.push({map:id,...check});
    if(year===meta.start&&theme==='light'&&(id==='tk'||id==='sz'))await saveImage(id+'-coast');
-   if(check.leaked){await saveImage(id+'-water-failure');await fs.writeFile(path.join(task,'report.json'),JSON.stringify(report,null,2));throw Error(id+' water overlay leak '+JSON.stringify(check))}
+   if(check.leaked||check.wrongHatch){await saveImage(id+'-water-failure');await fs.writeFile(path.join(task,'report.json'),JSON.stringify(report,null,2));throw Error(id+' water overlay leak '+JSON.stringify(check))}
    if(!check.landChanged)throw Error(id+' lost its closed-land shading');
    if(year===meta.start&&meta.near)for(const scale of[8,16,32,64]){
     const near=await E(`waterFrame.contentWindow.checkWater(${year},${JSON.stringify(theme)},${scale},${JSON.stringify(meta.near)})`);report.cases.push({map:id,...near});
-    if(near.leaked)throw Error(id+' zoomed water overlay leak '+JSON.stringify(near));
+    if(near.leaked||near.wrongHatch)throw Error(id+' zoomed water overlay leak '+JSON.stringify(near));
    }
   }
   const worker=await E('waterFrame.contentWindow.checkWorkerTile()');report.workers.push({map:id,...worker});if(worker.mismatch)throw Error(id+' main/worker ground mismatch '+JSON.stringify(worker));
   console.log('PASS water masking',id,report.cases.filter(c=>c.map===id).length,'cases; worker',worker.channels,'channels');
  }
+ if(!report.cases.some(c=>c.hatched>0))throw Error('Nearby locked shores did not shade water');
  await E('waterFrame.remove();true');await fs.writeFile(path.join(task,'report.json'),JSON.stringify(report,null,2));
  console.log('PASS all-map water masking',report.cases.length,'cases',report.cases.reduce((n,c)=>n+c.water,0),'water pixels',report.workers.reduce((n,c)=>n+c.channels,0),'worker channel values');
 }

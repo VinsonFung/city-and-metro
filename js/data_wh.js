@@ -24,7 +24,7 @@
       { use: 'crossing', star: true, icon: 'bridge', label: '两江三镇', text: '长江与汉江把城市分成三镇，越江线路最贵，也最有价值', why: '2012 年以前武汉没有过江地铁，三镇之间只靠桥梁、隧道和轮渡。' },
       { use: 'disaster', level: 'mid', star: true, icon: 'wave', label: '2016 年特大内涝', text: '一周暴雨让城区大面积积水，出行骤降、满意度下滑',
         on: { y: 2016, m: 7, title: '特大暴雨与内涝', desc: '6 月底到 7 月初，武汉一周降雨超过 560 毫米，破了气象记录，城区大面积积水，交通严重受阻。' }, why: '2016 年 6 月 30 日至 7 月 6 日，武汉周降雨量超过 560 毫米，为有气象记录以来最高。' },
-      { use: 'foresight', level: 'mid', star: true, icon: 'chart', label: '光谷提前布局', text: '光谷爆发前就通地铁，能得到开发商出资，片区也长得更快', id: 'wh-gg', pos: [112.96, 135.96], ym: [2010, 1], before: 2008, r: 7, region: 'guanggu', title: '东湖成为国家自主创新示范区',
+      { use: 'foresight', level: 'mid', star: true, icon: 'chart', label: '光谷提前布局', text: '光谷爆发前就通地铁，能得到开发商出资，片区也长得更快', id: 'wh-gg', pos: [144.96, 135.96], ym: [2010, 1], before: 2008, r: 7, region: 'guanggu', title: '东湖成为国家自主创新示范区',
         hit: '东湖高新区获批国家自主创新示范区，早已通车的{st}站让光谷的企业和人才一下子多了起来。', miss: '东湖高新区获批国家自主创新示范区，光谷的人越来越多，可这里还没有地铁。',
         why: '2009 年 12 月，东湖高新区获批国家自主创新示范区，光谷进入快速增长期。' },
       { use: 'foresight', level: 'light', label: '武汉站提前布局', id: 'wh-st', at: 'wh_station', ym: [2009, 12], before: 2008, r: 7, region: 'hongshan', title: '武汉站启用',
@@ -94,13 +94,16 @@
       { id: 'wuchang', name: '武昌（司门口·中南·积玉桥）', district: ['武昌区'], open: 2000, plan: 'mix' },
       { id: 'qingshan', name: '青山（武钢）', district: ['青山区'], open: 2004, plan: 'ind' },
       { id: 'hongshan', name: '洪山（街道口·徐东·南湖）', district: ['洪山区'], open: 2002, plan: 'mix' },
-      { id: 'zhuankou', name: '沌口（经济技术开发区）', district: ['武汉经济技术开发区'], open: 2004, plan: 'ind' },
+      { id: 'zhuankou', name: '沌口（经济技术开发区）', district: ['武汉经济技术开发区', '武汉经济技术开发区（汉南区）'], open: 2004, plan: 'ind' },
       { id: 'dongxihu', name: '东西湖（吴家山·金银湖）', district: ['东西湖区'], open: 2007, plan: 'resind', pop: 7.73e6 },
       { id: 'caidian', name: '蔡甸', district: ['蔡甸区'], open: 2011, plan: 'res', pop: 9.25e6 },
       // v2.1 扩大范围：北部的盘龙城与天河机场、西北角的孝感（境外）
       { id: 'tianhe', name: '天河机场', poly: tianhe, open: null, hub: true, lockNote: '民用机场照常运营，用地不开发', note: '重要交通枢纽：范围内可以地下设站与地下穿越（v2.2）' },
       { id: 'xiaogan', name: '孝感（境外）', district: ['孝南区'], open: null, passOnly: true, lockNote: '孝感市，不属于武汉的建设范围：线路可以穿过，不能设站' },
       { id: 'panlong', name: '盘龙城（黄陂南部）', district: ['黄陂区'], open: 2010, plan: 'res', pop: 8.59e6, note: '2000 年代中期起盘龙城一带建成大型居住区（史实）' },
+      // v3.5 扩大范围：江夏区在新增南缘条带里的部分（within：北缘正好在原图南界上）单独成片，原范围里的江夏仍属外围地区；
+      // 蔡甸、东西湖、汉南（经开区）在新增西缘与南缘里的部分并入同名片区
+      { id: 'zhifang', name: '江夏纸坊', district: ['江夏区'], within: [[0, 188], [216, 188], [216, 216], [0, 216]], open: 2005, plan: 'res', note: '纸坊是江夏区政府所在地，2000 年代起随武昌南部向南发展（估算）' },
     ],
     defaultRegion: { id: 'outer', name: '外围地区', open: 2013, plan: 'res', pop: 9.83e6 },
     plans: CM.DATA.plans,
@@ -134,8 +137,19 @@
       at(30.442, 114.45, { pop: 2500, jobs: 1800, r: 1.1 }),   // 流芳
       at(30.416, 114.368, { pop: 2300, jobs: 2100, r: 1 }),   // 庙山
       at(30.462, 114.248, { pop: 2300, jobs: 1900, r: 1 }),   // 青菱
+      // v3.5 扩大范围（2000 年估算，位置取 OSM 镇街地名；pop、jobs 为中心密度，已按本图的总量归一化倍率换算）
+      atW(30.5790, 114.0360, { pop: 3400, jobs: 2500, r: 1.3 }),   // 蔡甸街道（区政府所在地）
+      atW(30.6521, 114.0197, { pop: 1200, jobs: 1500, r: 0.9 }),   // 走马岭
+      atW(30.3991, 114.0702, { pop: 1100, jobs: 1400, r: 1 }),     // 军山
+      atW(30.3570, 114.3150, { pop: 3600, jobs: 2600, r: 1.3 }),   // 纸坊（江夏区政府所在地）
+      atW(30.3357, 114.1307, { pop: 1400, jobs: 900, r: 0.9 }),    // 金口
+      atW(30.3388, 114.3903, { pop: 1000, jobs: 700, r: 0.8 }),    // 五里界
+      atW(30.3327, 114.2540, { pop: 1000, jobs: 700, r: 0.8 }),    // 郑店
     ],
-    rural: { pop: 600, jobs: 150 },
+    // 新增范围（v3.5 原范围以外）的乡村底数略低：原值按近郊校准，放到蔡甸、江夏的农田与湖区偏高
+    rural: { pop: 600, jobs: 150, out: { box: [32, 0, 184, 188], k: 0.5 } },
+    // 新增范围的增长倍率（v3.5）：2010 年代蔡甸城区、中法生态城、纸坊与汉南金港随地铁和汽车产业较快成长（史实）；倍率为估算
+    growOut: { box: [32, 0, 184, 188], pop: [[2000, 1], [2008, 1.15], [2020, 1.15], [2030, 1]], jobs: [[2000, 1], [2008, 1.25], [2020, 1.25], [2030, 1]] },
     // 道路与过江桥隧通车年份（名称前缀匹配；2000 年已有的道路按所在区域开放年份出现）。长江大桥与隧道为史实，部分高架、隧道与新建大道为近似年份
     // 铁路通车年份（线路名或前缀 → 年份，或 [通车, 停运]）：开局后才通车或停运的线路，按公开通车时间整理
     railYears: { '沪蓉线': 2008, '京广高速线': 2009, '武汉站': 2009, '武咸城际线': 2013, '武孝城际线': 2016, '武九客专线': 2017 },
@@ -151,8 +165,8 @@
     simRoads: [],
     // 代表性的渡轮航线：两端都是地图上标注的码头（v2.9）
     bgViz: { ferries: [
-      { name: '长江轮渡（武汉关—中华路）', piers: ['武汉关码头', '中华路码头'], n: 2, color: '#f4f1e8', pts: [[75.98, 103.2], [76.72, 113.36]] },
-      { name: '长江轮渡（集家嘴—汉阳门）', piers: ['集家嘴码头', '汉阳门码头'], n: 2, color: '#f4f1e8', pts: [[70.77, 109.14], [74.98, 114.1]] },
+      { name: '长江轮渡（武汉关—中华路）', piers: ['武汉关码头', '中华路码头'], n: 2, color: '#f4f1e8', pts: [[107.98, 103.2], [108.72, 113.36]] },
+      { name: '长江轮渡（集家嘴—汉阳门）', piers: ['集家嘴码头', '汉阳门码头'], n: 2, color: '#f4f1e8', pts: [[102.77, 109.14], [106.98, 114.1]] },
     ] },
     landmarks: [
       Object.assign(atW(30.5471, 114.2971), { id: 'wh_yhl', name: '黄鹤楼', w: 60, d: 60, year: 1985, kind: 'tower', style: 'yellowcrane' }),
@@ -169,7 +183,7 @@
       Object.assign(atW(30.5025, 114.1661), { id: 'wh_sports', name: '武汉体育中心', w: 300, d: 260, year: 2002, kind: 'stadium' }),
       Object.assign(atW(30.5634, 114.2541), { id: 'wh_qintai', name: '琴台大剧院', w: 200, d: 160, year: 2007, kind: 'concert' }),
       Object.assign(atW(30.5968, 114.2670), { id: 'wh_minsheng', name: '民生银行大厦', w: 60, d: 50, year: 2007, kind: 'skyscraper', h: 331 }),
-      Object.assign(at(30.5395, 114.2440), { id: 'wh_expo', name: '武汉国际博览中心', w: 600, d: 400, year: 2011, kind: 'expo' }),
+      atW(30.5115, 114.2425, { id: 'wh_expo', name: '武汉国际博览中心', w: 600, d: 400, year: 2011, kind: 'expo' }),   // v3.5 校正：汉阳四新江边、地铁国博中心北站东侧（原坐标落在墨水湖）
       Object.assign(atW(30.59664, 114.23967), { id: 'wh_center', name: '武汉中心', w: 70, d: 70, year: 2019, kind: 'skyscraper', h: 438 }),
     ],
     // 重要设施（见 facility.js）：位置与启用 / 停用年份为史实参考（位置近似）；规模均为估算。
@@ -194,7 +208,7 @@
       { id: 'wh_central', n: '武汉市中心医院', t: 'hosp', at: ll(30.5880, 114.2925), w: 0.035 },
       { id: 'wh_jhl', n: '江汉路步行街', t: 'shop', at: llW(30.58308, 114.28628), w: 0.05 },
       { id: 'wh_hzj', n: '汉正街', t: 'shop', at: ll(30.5700, 114.2700), p: { sh: 0.9, lz: 0.1 }, w: [[2000, 0.06], [2015, 0.03]] },
-      { id: 'wh_wg', n: '武广商圈', t: 'shop', at: llW(30.58290, 114.26451), w: 0.04 },
+      { id: 'wh_wg', n: '武广商圈', t: 'shop', at: llW(30.58290, 114.26451), w: 0.04 },   // 按 OSM 的武汉广场（解放大道武广路口）定位，原手填坐标偏北约 340 m
       { id: 'wh_smk', n: '司门口·户部巷', t: 'shop', at: ll(30.5465, 114.3040), p: { sh: 0.6, lz: 0.4 }, w: 0.02 },
       { id: 'wh_xudong', n: '徐东商圈', t: 'shop', at: llW(30.59044, 114.34020), y0: 2003, w: 0.02 },
       { id: 'wh_ggsq', n: '光谷商圈', t: 'shop', at: ll(30.5055, 114.4000), y0: 2005, w: [[2005, 0.01], [2015, 0.04]] },
@@ -241,11 +255,14 @@
       { id: 'wh2', appear: [2003, 1], deadline: [2012, 12], type: 'connect', reward: 70000, title: '首条过江地铁', desc: '连接汉口火车站、江汉路、洪山广场、街道口与光谷广场。过长江段需要建设越江隧道。', anchors: [anchor('汉口火车站', 30.6180, 114.2560, 3), anchor('江汉路', 30.5825, 114.2885, 3), anchor('洪山广场', 30.5445, 114.3330, 3), anchor('街道口', 30.5275, 114.3540, 3), anchor('光谷广场', 30.5055, 114.3990, 3)] },
       { id: 'wh3', appear: [2006, 1], deadline: [2014, 12], type: 'connect', reward: 50000, title: '武汉站接驳', desc: '新的武汉站启用后，连接武汉站、徐家棚与武昌站。', anchors: [anchor('武汉站', 30.6075, 114.4245, 3), anchor('徐家棚', 30.5800, 114.3290, 3), anchor('武昌站', 30.5300, 114.3170, 3)] },
       { id: 'wh4', appear: [2008, 1], deadline: [2016, 12], type: 'connect', reward: 50000, title: '汉阳过汉江', desc: '连接王家湾、钟家村与江汉路，跨过汉江把汉阳接入汉口中心。', anchors: [anchor('王家湾', 30.5575, 114.2120, 3), anchor('钟家村', 30.5530, 114.2700, 3), anchor('江汉路', 30.5825, 114.2885, 3)] },
-      { id: 'wh5', appear: [2010, 1], deadline: [2016, 12], type: 'coverage', target: 0.26, reward: 60000, title: '地铁覆盖两成六人口', desc: '2016 年底前，步行 15 分钟可到达地铁站的人口不低于全市人口的 26%。' },
+      { id: 'wh5', appear: [2010, 1], deadline: [2016, 12], type: 'coverage', target: 0.24, reward: 60000, title: '地铁覆盖两成四人口', desc: '2016 年底前，步行 15 分钟可到达地铁站的人口不低于全市人口的 24%。' },   // v3.5 地图扩大后按人口比例由 26% 换算，难度不变
       { id: 'wh6', appear: [2014, 1], deadline: [2019, 9], type: 'connect', reward: 50000, title: '军运会主会场', desc: '军运会开幕前，连接武汉体育中心、王家湾与汉口火车站。', anchors: [anchor('武汉体育中心', 30.5085, 114.1885, 3), anchor('王家湾', 30.5575, 114.2120, 3), anchor('汉口火车站', 30.6180, 114.2560, 3)] },
-      { id: 'wh7', appear: [2015, 1], deadline: [2020, 12], type: 'coverage', target: 0.43, reward: 70000, title: '地铁覆盖四成三人口', desc: '2020 年底前，步行 15 分钟可到达地铁站的人口不低于全市人口的 43%。' },
+      { id: 'wh7', appear: [2015, 1], deadline: [2020, 12], type: 'coverage', target: 0.39, reward: 70000, title: '地铁覆盖三成九人口', desc: '2020 年底前，步行 15 分钟可到达地铁站的人口不低于全市人口的 39%。' },   // v3.5 地图扩大后按人口比例由 43% 换算，难度不变
       // v2.9 扩图新增范围的史实任务
       { id: 'wh8', appear: [2014, 1], deadline: [2021, 12], type: 'connect', reward: 60000, title: '光谷东进左岭', desc: '光谷向东发展到豹澥和左岭的新产业园。连接光谷广场、光谷火车站与左岭。', anchors: [anchor('光谷广场', 30.5055, 114.3990, 3), anchor('光谷火车站', 30.4985, 114.5080, 3), anchor('左岭', 30.5970, 114.5550, 3)] },
+      // v3.5 扩图新增范围的史实任务（4 号线西延蔡甸、7 号线南延纸坊均在 2018—2019 年通车，史实参考）
+      { id: 'wh9', appear: [2013, 1], deadline: [2020, 12], type: 'connect', reward: 55000, title: '蔡甸进城', desc: '蔡甸城区与中法生态城隔着后官湖与汉阳相望，进城只能走公路。连接蔡甸广场、知音与王家湾。', anchors: [anchor('蔡甸广场', 30.5753, 114.0350, 3), anchor('知音', 30.5591, 114.0874, 3), anchor('王家湾', 30.5575, 114.2120, 3)] },
+      { id: 'wh10', appear: [2012, 1], deadline: [2019, 12], type: 'connect', reward: 55000, title: '纸坊南延', desc: '江夏纸坊与武昌之间隔着汤逊湖和青菱湖，通勤路远。连接纸坊大街、野芷湖与武昌火车站。', anchors: [anchor('纸坊大街', 30.3477, 114.3191, 3), anchor('野芷湖', 30.4590, 114.3200, 3), anchor('武昌火车站', 30.5300, 114.3170, 3)] },
     ],
     dynTasks: [
       { id: 'whd1', from: [2002, 1], to: [2012, 12], type: 'connect', months: 36, reward: 40000, title: '武昌—汉口过江通勤', desc: '每天大量通勤者往返两岸。连接中南路、积玉桥与江汉路。', anchors: [anchor('中南路', 30.5400, 114.3350, 3), anchor('积玉桥', 30.5680, 114.3150, 3), anchor('江汉路', 30.5825, 114.2885, 3)] },
@@ -273,6 +290,7 @@
     ],
     // 线路配色参考武汉地铁
     lineColorsNice: ['#3080b7', '#ec83a8', '#c8a64a', '#8dc21f', '#a7354b', '#008b54', '#f08c00', '#9b8bb6', '#2a6b9c', '#c9d200', '#5a3f92'],
+    // 江岸区的车站街道，避免把缺少限定词的「车站」用作默认站名。
     stationNameCorrections: { '车站': '车站街' },
     places: (G.places || []).map(function (p) { return [p[0], p[1], p[2], p[3]]; }),
   };
@@ -282,15 +300,20 @@
   for (const f of data.facilities) if (f.at) { const p = nearSt(f.n, f.at[0], f.at[1]); if (p) f.at = [p[1], p[2]]; }
   for (const t of data.histTasks.concat(data.dynTasks)) for (const a of t.anchors || []) { const p = nearSt(a.name, a.x, a.y); if (p) { a.x = p[1]; a.y = p[2]; } }
 
+  // v3.5 地图向西、向南扩大：全图人口按新增范围的份额抬高（约 9%），提前开放的人口门槛同比放大，原有片区的开放时机不变
+  for (const rg of data.regions.concat([data.defaultRegion])) if (rg.pop) rg.pop = Math.round(rg.pop * 1.09 / 1e4) * 1e4;
+
   (CM.MAP_LIST = CM.MAP_LIST || []).push({
     id: 'wh', name: '武汉', title: '武汉 · 2000', sub: '真实地理 · 2000 年起 · 人民币',
     desc: '从 2000 年尚无地铁的武汉开始：长江与汉江把城市分成三镇，过江通道屈指可数。光谷、武汉站与王家墩商务区将陆续出现，三镇需要用越江线路连成一体。',
-    facts: [['范围', '46 km × 47 km'], ['起始', '2000 年'], ['人口', '约 661 万'], ['货币', '人民币（元）'], ['模式', '经营挑战 / 自由建造']],
-    modes: ['challenge', 'free'], kind: 'real', mapVersion: 5, extent: [{ from: 1, dx: 16, dy: 48, oldW: 120, oldH: 96, newW: 152, newH: 144, note: '地图向北扩大到盘龙城、天河机场，向西到吴家山，向东到武钢、左岭一带', oldRegionIds: ['donghu', 'guanggu', 'airport', 'hankou', 'houhu', 'jiangan', 'qiaokou', 'sixin', 'hanyang', 'wuchang', 'qingshan', 'hongshan', 'zhuankou', 'dongxihu', 'caidian', 'outer'], oldLandmarkIds: ['wh_yhl', 'wh_tv', 'wh_qingchuan', 'wh_guiyuan', 'wh_customs', 'wh_baotong', 'wh_whu', 'wh_hust', 'wh_hankou', 'wh_wuchang', 'wh_station', 'wh_sports', 'wh_qintai', 'wh_minsheng', 'wh_expo', 'wh_center'] },
+    facts: [['范围', '54 km × 54 km'], ['起始', '2000 年'], ['人口', '约 731 万'], ['货币', '人民币（元）'], ['模式', '经营挑战 / 自由建造']],
+    // 第 6 版（v3.5）：向西扩大 32 格到蔡甸城区，向南扩大 28 格到江夏纸坊；旧存档依次迁移（见 maps.js extentMigration）
+    modes: ['challenge', 'free'], kind: 'real', mapVersion: 6, extent: [{ from: 1, dx: 16, dy: 48, oldW: 120, oldH: 96, newW: 152, newH: 144, note: '地图向北扩大到盘龙城、天河机场，向西到吴家山，向东到武钢、左岭一带', oldRegionIds: ['donghu', 'guanggu', 'airport', 'hankou', 'houhu', 'jiangan', 'qiaokou', 'sixin', 'hanyang', 'wuchang', 'qingshan', 'hongshan', 'zhuankou', 'dongxihu', 'caidian', 'outer'], oldLandmarkIds: ['wh_yhl', 'wh_tv', 'wh_qingchuan', 'wh_guiyuan', 'wh_customs', 'wh_baotong', 'wh_whu', 'wh_hust', 'wh_hankou', 'wh_wuchang', 'wh_station', 'wh_sports', 'wh_qintai', 'wh_minsheng', 'wh_expo', 'wh_center'] },
       // 第 2 版与第 3 版格网相同（只调整了展示，见 maps.js），第 3→4 版向北扩大到天河机场北侧
       { from: 3, dx: 0, dy: 12, oldW: 152, oldH: 144, newW: 152, newH: 156, note: '地图向北扩大，天河机场完整位于图内',
         oldRegionIds: ['donghu', 'guanggu', 'airport', 'hankou', 'houhu', 'jiangan', 'qiaokou', 'sixin', 'hanyang', 'wuchang', 'qingshan', 'hongshan', 'zhuankou', 'dongxihu', 'caidian', 'tianhe', 'xiaogan', 'panlong', 'outer'] },
-      { from: 4, dx: 0, dy: 0, oldW: 152, oldH: 156, newW: 184, newH: 188, note: '地图向东扩大到阳逻、左岭与光谷东部，向南扩大到庙山与流芳一带', oldRegionIds: ['donghu', 'guanggu', 'airport', 'hankou', 'houhu', 'jiangan', 'qiaokou', 'sixin', 'hanyang', 'wuchang', 'qingshan', 'hongshan', 'zhuankou', 'dongxihu', 'caidian', 'tianhe', 'xiaogan', 'panlong', 'outer'], oldLandmarkIds: ['wh_yhl', 'wh_tv', 'wh_qingchuan', 'wh_guiyuan', 'wh_customs', 'wh_baotong', 'wh_whu', 'wh_hust', 'wh_hankou', 'wh_wuchang', 'wh_station', 'wh_sports', 'wh_qintai', 'wh_minsheng', 'wh_expo', 'wh_center'] }], scenario: 'wh-2000',
+      { from: 4, dx: 0, dy: 0, oldW: 152, oldH: 156, newW: 184, newH: 188, note: '地图向东扩大到阳逻、左岭与光谷东部，向南扩大到庙山与流芳一带', oldRegionIds: ['donghu', 'guanggu', 'airport', 'hankou', 'houhu', 'jiangan', 'qiaokou', 'sixin', 'hanyang', 'wuchang', 'qingshan', 'hongshan', 'zhuankou', 'dongxihu', 'caidian', 'tianhe', 'xiaogan', 'panlong', 'outer'], oldLandmarkIds: ['wh_yhl', 'wh_tv', 'wh_qingchuan', 'wh_guiyuan', 'wh_customs', 'wh_baotong', 'wh_whu', 'wh_hust', 'wh_hankou', 'wh_wuchang', 'wh_station', 'wh_sports', 'wh_qintai', 'wh_minsheng', 'wh_expo', 'wh_center'] },
+      { from: 5, dx: 32, dy: 0, oldW: 184, oldH: 188, newW: 216, newH: 216, note: '地图向西扩大到蔡甸城区与中法生态城，向南扩大到江夏纸坊与汉南军山', oldRegionIds: ['donghu', 'guanggu', 'airport', 'hankou', 'houhu', 'jiangan', 'qiaokou', 'sixin', 'hanyang', 'wuchang', 'qingshan', 'hongshan', 'zhuankou', 'dongxihu', 'caidian', 'tianhe', 'xiaogan', 'panlong', 'outer'], oldLandmarkIds: ['wh_yhl', 'wh_tv', 'wh_qingchuan', 'wh_guiyuan', 'wh_customs', 'wh_baotong', 'wh_whu', 'wh_hust', 'wh_hankou', 'wh_wuchang', 'wh_station', 'wh_sports', 'wh_qintai', 'wh_minsheng', 'wh_expo', 'wh_center'] }], scenario: 'wh-2000',
     region: '中国内地', tagline: '两江三镇，用地铁连成一城', difficulty: 2, tags: ['无地铁开局', '越江', '湖泊'],
     intro: '2000 年的武汉，长江与汉江把城市分成汉口、武昌、汉阳三镇，过江只能挤上两座长江大桥或轮渡。东湖与大大小小的湖泊占去许多土地，光谷、武汉站与王家墩商务区就要出现。你的任务是用越江线路把三镇连成一座城。',
     features: [['wave', '百湖之市', '东湖风景区不可开发，线路要绕湖或穿湖']],
@@ -298,8 +321,10 @@
     geo: G, data: data,
     econ: { devOffset: -6, money: 1 },   // 出行选择参数：武汉 2000 年约对应广州样本 1994 年的发展阶段
     cfg: {
-      W: 184, H: 188, START: { y: 2000, m: 1, d: 1, minute: 360 },   // v2.2：向北扩大 12 格，天河机场完整位于图内
-      growth: Object.assign({}, CM.CFG.growth, { popCurve: [[2000, 6.61e6], [2005, 7.41e6], [2010, 8.91e6], [2015, 10.4e6], [2020, 12.1e6], [2030, 13.36e6], [2050, 14.29e6], [2300, 14.86e6]], histEnd: 2020, jobsRatio: [[2000, 0.45], [2005, 0.478], [2010, 0.506], [2015, 0.517], [2020, 0.527], [2040, 0.545]] }),
+      W: 216, H: 216, START: { y: 2000, m: 1, d: 1, minute: 360 },   // v2.2 向北扩大 12 格，天河机场完整位于图内；v3.5 向西扩大 32 格、向南扩大 28 格
+      // v3.5 地图向西扩大到蔡甸、向南扩大到纸坊：曲线为扩图前曲线 ÷（1 − 新增范围的人口份额），份额按开局生成与增长模型实测（2000 年约 9.6%，2010 年约 8.7%，2020 年约 9.9%），
+      // 原有范围的人口与扩图前一致；岗位比例按人口与岗位份额同样换算，原有范围的岗位与扩图前一致
+      growth: Object.assign({}, CM.CFG.growth, { popCurve: [[2000, 7.312e6], [2005, 8.105e6], [2010, 9.755e6], [2015, 11.436e6], [2020, 13.428e6], [2030, 14.826e6], [2050, 15.858e6], [2300, 16.491e6]], histEnd: 2020, jobsRatio: [[2000, 0.425], [2005, 0.454], [2010, 0.481], [2015, 0.492], [2020, 0.501], [2040, 0.518]] }),
       money: { code: 'CNY', unit: '元', wan: '万元', yi: '亿元', sym: '¥' },
       econBase: 2000,
       // 造价（万元，2000 年价格；估算，参考轻轨 1 号线一期约 10 km、20 余亿元的量级）：长江越江隧道附加较高
@@ -316,8 +341,9 @@
       // 城市经济（macro.js）：2000 年地图范围 GDP 约 1000 亿元（估算：武汉全市约 1200 亿元，地图覆盖主城区、光谷与沌口）；
       // 重工业（钢铁、汽车）比重高，2005 年后「中部崛起」带动高速增长（体现在生产率趋势中）
       macro: {
-        area: '地图范围（三镇主城区、光谷、沌口与阳逻）', region: '中国内地',
-        gdp0: 13200000, revRatio: [[2000, 0.12], [2010, 0.16], [2020, 0.17], [2040, 0.16]], revElastic: 1.5,
+        area: '地图范围（三镇主城区、光谷、沌口、阳逻、蔡甸与纸坊）', region: '中国内地',
+        // gdp0：v3.5 地图扩大后按全图岗位增加的比例（约 4.5%）上调，人均产出不变（估算）
+        gdp0: 13800000, revRatio: [[2000, 0.12], [2010, 0.16], [2020, 0.17], [2040, 0.16]], revElastic: 1.5,
         prod: [[2000, 0.085], [2005, 0.095], [2010, 0.095], [2014, 0.075], [2018, 0.06], [2020, 0.045], [2030, 0.028], [2050, 0.015], [2080, 0.012]],
         infl: 'cn', longRun: { infl: 0.02 }, histEnd: 2020, ref: 'cn',
         struct: { trade: 0.4, fin: 0.35, ind: 0.65, tour: 0.4, prop: 0.55 },
@@ -334,6 +360,6 @@
         ],
       },
     },
-    cam: { cx: 77, cy: 110, zoom: 16 },
+    cam: { cx: 109, cy: 110, zoom: 16 },   // v3.5 地图向西扩大 32 格，镜头仍对准原处
   });
 })(window.CM);

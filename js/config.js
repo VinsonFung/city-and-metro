@@ -2,15 +2,15 @@
 // 全局参数。PRD 中标注"待确认"的数值在此给出可调整的默认值（DEFAULT），评审确认后只需修改本文件。
 (function (CM) {
   CM.CFG = {
-    GAME_VERSION: '3.0.0',
+    GAME_VERSION: '3.0.1',
     TRAFFIC_MODEL: 6,      // 背景交通与共用区段采用新模型，旧可重建缓存作废。
-    RULES_REVISION: 23,    // 区段预算与接驳口径更新，载入旧档前保留原存档备份。
+    RULES_REVISION: 24,    // 扩图、建设范围与城市项目，载入旧档前保留原存档备份。
     SAVE_FORMAT: 'city-metro-save',
     SAVE_VERSION: 2,
     SAVE_MIN_VERSION: 2,   // 1.1 起地图改为真实地理，旧版存档的城市数据与之不兼容
 
-    // 广州：每格 250 m，152×228 格对应 38 km × 57 km，交通小区边长为 4 格。
-    W: 152, H: 228, CELL_M: 250, ZONE: 4,
+    // 广州：每格 250 m，244×304 格对应 61 km × 76 km，交通小区边长为 4 格。
+    W: 244, H: 304, CELL_M: 250, ZONE: 4,
     START: { y: 1990, m: 1, d: 1, minute: 6 * 60 },
     // 货币与价格基年（各地图在 maps.js 中替换）：内部金额单位为「万 + 本城货币」，票价为本城货币
     money: { code: 'CNY', unit: '元', wan: '万元', yi: '亿元', sym: '¥' },

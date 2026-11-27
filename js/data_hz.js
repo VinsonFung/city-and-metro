@@ -96,7 +96,7 @@
       { id: 'linping', name: '临平（余杭城区·乔司·星桥）', streets: ['南苑街道', '临平街道', '东湖街道', '星桥街道', '乔司街道', '崇贤街道', '仁和街道', '塘栖镇', '许村镇'], district: ['临平区'], open: 2008, pop: 6.3e6, plan: 'resind', note: '2001 年 3 月余杭撤市设区，临平为区政府所在地（史实）' },
       { id: 'liangzhu', name: '良渚·瓶窑', streets: ['良渚街道', '瓶窑镇'], open: 2009, plan: 'res', pop: 6.3e6, note: '2000 年代良渚一带建成大型居住区（史实）' },
       { id: 'weilai', name: '未来科技城（五常·闲林·仓前）', streets: ['五常街道', '闲林街道', '仓前街道', '余杭街道', '中泰街道'], open: 2011, plan: 'mix', pop: 6.98e6, note: '2011 年起建设杭州未来科技城（史实）' },
-      { id: 'fuyang', name: '富阳（银湖）', district: ['富阳区'], open: 2014, plan: 'res', pop: 7.56e6, note: '2014 年富阳撤市设区（史实）' },
+      { id: 'fuyang', name: '富阳（富春·银湖）', district: ['富阳区'], open: 2014, plan: 'res', pop: 7.56e6, note: '2014 年富阳撤市设区（史实）' },
     ],
     defaultRegion: { id: 'outer', name: '外围（海宁·柯桥等）', open: 2012, plan: 'res', pop: 6.92e6 },
     plans: CM.DATA.plans,
@@ -128,8 +128,18 @@
       at(30.0990, 120.1990, { pop: 3500, jobs: 1800, r: 1.0 }),     // 义桥
       at(30.1150, 120.2790, { pop: 2500, jobs: 1500, r: 0.9 }),     // 所前
       at(30.1190, 120.4020, { pop: 3000, jobs: 2000, r: 1.0 }),     // 钱清
+      // v3.5 扩大范围（2000 年估算，OSM 坐标；临平老城的中心原本就在图内，北扩后补全）
+      at(30.4763, 120.1880, { pop: 4500, jobs: 2500, r: 1.0 }),     // 塘栖
+      at(30.4780, 120.2922, { pop: 1500, jobs: 1200, r: 0.8 }),     // 运河
+      at(30.0505, 119.9559, { pop: 9000, jobs: 5000, r: 1.3 }),     // 富阳城区（富春）
+      at(30.0753, 120.0171, { pop: 1500, jobs: 1500, r: 0.9 }),     // 东洲
+      at(30.0481, 120.2446, { pop: 3500, jobs: 2200, r: 0.9 }),     // 临浦
+      at(30.0628, 120.3575, { pop: 1200, jobs: 1200, r: 0.8 }),     // 夏履
     ],
-    rural: { pop: 600, jobs: 150 },
+    // 新增范围（v3.5 原范围以外）的乡村底数略低：原值按近郊校准，放到德清、富阳与萧山南部的农田山地偏高
+    rural: { pop: 600, jobs: 150, out: { box: [0, 24, 228, 152], k: 0.6 } },
+    // 新增范围的增长倍率（v3.5）：2010 年代临平新城、塘栖与富阳城区随撤市设区和城际铁路较快成长（史实）；倍率为估算
+    growOut: { box: [0, 24, 228, 152], pop: [[2000, 1], [2008, 1.3], [2020, 1.3], [2030, 1.1]], jobs: [[2000, 1], [2008, 1.4], [2020, 1.4], [2030, 1.1]] },
     // 片区设施（商业中心、区域医院、文体公园）出现门槛的人口基准：保持扩图前 2020 年的全图人口，原有片区不因 v2.9 扩图推迟出现（见 facility.js）
     facPopRef: 8.3e6,
     // 铁路通车年份（线路名或前缀 → 年份，或 [通车, 停运]）：开局后才通车或停运的线路，按公开通车时间整理
@@ -183,6 +193,7 @@
       { id: 'hz_zjph', n: '浙江省人民医院', t: 'hosp', at: ll(30.28755, 120.16392), w: 0.045 },
       { id: 'hz_srrsh', n: '邵逸夫医院', t: 'hosp', at: ll(30.2620, 120.2050), w: 0.04 },
       { id: 'hz_hz1', n: '杭州市第一人民医院', t: 'hosp', at: ll(30.25721, 120.16202), w: 0.035 },
+      // 商圈与商务区（v3.1 平衡：以前合计只有约 0.125 与 0.035，按武汉、南京的量级调高）
       { id: 'hz_hubin', n: '湖滨商圈', t: 'shop', at: ll(30.2580, 120.1660), w: [[2000, 0.06], [2010, 0.08]] },
       { id: 'hz_wulin', n: '武林商圈', t: 'shop', at: ll(30.2740, 120.1670), w: 0.06 },
       { id: 'hz_hefang', n: '河坊街·吴山', t: 'shop', at: ll(30.2430, 120.1700), p: { sh: 0.5, lz: 0.5 }, w: 0.025 },
@@ -222,8 +233,11 @@
       { id: 'hz3', appear: [2003, 1], deadline: [2014, 12], type: 'connect', reward: 50000, title: '下沙高教园区', desc: '连接下沙、九堡与钱江新城。', anchors: [anchor('下沙', 30.3080, 120.3400, 3), anchor('九堡', 30.3060, 120.2700, 3), anchor('钱江新城', 30.2465, 120.2125, 3)] },
       { id: 'hz4', appear: [2003, 1], deadline: [2012, 12], type: 'connect', reward: 40000, title: '紫金港新校区', desc: '连接浙江大学紫金港校区、黄龙与武林广场。', anchors: [anchor('紫金港', 30.3040, 120.0855, 3), anchor('黄龙', 30.2683, 120.1395, 3), anchor('武林广场', 30.2723, 120.1651, 3)] },
       { id: 'hz5', appear: [2010, 1], deadline: [2015, 12], type: 'connect', reward: 50000, title: '杭州东站枢纽', desc: '新的杭州东站启用后，连接东站、武林广场与城站。', anchors: [anchor('杭州东站', 30.2906, 120.2128, 3), anchor('武林广场', 30.2723, 120.1651, 3), anchor('城站', 30.2437, 120.1826, 3)] },
-      { id: 'hz6', appear: [2010, 1], deadline: [2016, 8], type: 'coverage', target: 0.27, reward: 70000, title: '迎接 G20 峰会', desc: '2016 年 9 月峰会前，步行 15 分钟可到达地铁站的人口不低于全市人口的 27%。' },   // v2.9 地图扩大后按人口比例由 30% 换算，难度不变
+      { id: 'hz6', appear: [2010, 1], deadline: [2016, 8], type: 'coverage', target: 0.25, reward: 70000, title: '迎接 G20 峰会', desc: '2016 年 9 月峰会前，步行 15 分钟可到达地铁站的人口不低于全市人口的 25%。' },   // v3.5 由 27% 换算；v2.9 地图扩大后按人口比例由 30% 换算，难度不变
       { id: 'hz7', appear: [2016, 1], deadline: [2023, 8], type: 'connect', reward: 60000, title: '亚运会：奥体中心', desc: '连接杭州奥体中心、钱江新城与杭州东站。', anchors: [anchor('奥体中心', 30.2290, 120.2280, 3), anchor('钱江新城', 30.2465, 120.2125, 3), anchor('杭州东站', 30.2906, 120.2128, 3)] },
+      // v3.5 扩图新增范围的史实任务
+      { id: 'hz8', appear: [2010, 1], deadline: [2021, 12], type: 'connect', reward: 60000, title: '临平与塘栖', desc: '临平新城与运河边的塘栖古镇人口越来越多，进城全靠公路。连接塘栖、临平与乔司。', anchors: [anchor('塘栖', 30.4786, 120.1958, 3), anchor('临平', 30.4095, 120.3002, 3), anchor('乔司', 30.3493, 120.2808, 3)] },
+      { id: 'hz9', appear: [2015, 1], deadline: [2021, 12], type: 'connect', reward: 60000, title: '富阳进城', desc: '2014 年底富阳撤市设区，富春江边的城区与主城隔着群山。连接富阳城区（桂花西路）、银湖与转塘。', anchors: [anchor('桂花西路', 30.0508, 119.9298, 3), anchor('银湖', 30.1421, 119.9840, 3), anchor('转塘', 30.1616, 120.0741, 3)] },
     ],
     taskNote: '历史主题任务参考杭州 2000 年起的发展需求（跨江、撤市设区、高教园区、东站枢纽、G20 与亚运会），不要求按真实线路走向建设，只需满足目标描述。',
     // 城市策略难题（v2.3，可选挑战）
@@ -249,17 +263,22 @@
     places: (G.places || []).map(function (p) { return [p[0], p[1], p[2], p[3]]; }),
   };
 
+  // v3.5 地图向北、向南扩大：全图人口按新增范围的份额抬高（约 9%–11%），提前开放的人口门槛同比放大，原有片区的开放时机不变
+  for (const rg of data.regions.concat([data.defaultRegion])) if (rg.pop) rg.pop = Math.round(rg.pop * 1.1 / 1e4) * 1e4;
+
   (CM.MAP_LIST = CM.MAP_LIST || []).push({
     id: 'hz', name: '杭州', title: '杭州 · 2000', sub: '真实地理 · 2000 年起 · 人民币',
     desc: '从 2000 年尚无地铁的杭州开始：城市围绕西湖与运河，钱塘江南岸的滨江、萧山即将并入市区。西湖风景区与西溪湿地不能开发，跨越钱塘江需要建设越江隧道。',
-    facts: [['范围', '57 km × 38 km'], ['起始', '2000 年'], ['人口', '约 500 万'], ['货币', '人民币（元）'], ['模式', '经营挑战 / 自由建造']],
-    modes: ['challenge', 'free'], kind: 'real', mapVersion: 5, extent: [{ from: 1, dx: 32, dy: 36, oldW: 112, oldH: 88, newW: 144, newH: 136, note: '地图向西扩大到余杭（闲林、五常方向），向北到良渚与临平方向，向南多覆盖萧山城区', oldRegionIds: ['westlake', 'xixi', 'jianqiao', 'qjxc', 'center', 'chengzhan', 'xiacheng', 'gongshu', 'jianggan', 'wenjiao', 'binjiang', 'xiasha', 'xiaoshan', 'chengdong', 'xihuwest', 'outer'], oldLandmarkIds: ['hz_liuhe', 'hz_lingyin', 'hz_zju', 'hz_station', 'hz_huanglong', 'hz_leifeng', 'hz_zjg', 'hz_opera', 'hz_icc', 'hz_east', 'hz_olympic'] },
+    facts: [['范围', '57 km × 50 km'], ['起始', '2000 年'], ['人口', '约 560 万'], ['货币', '人民币（元）'], ['模式', '经营挑战 / 自由建造']],
+    // 第 6 版（v3.5）：向北扩大 24 格到临平城区与塘栖，向南扩大 24 格到富阳城区与临浦；新增范围按街道与区并入临平、良渚、富阳、萧山与外围，不新设片区
+    modes: ['challenge', 'free'], kind: 'real', mapVersion: 6, extent: [{ from: 1, dx: 32, dy: 36, oldW: 112, oldH: 88, newW: 144, newH: 136, note: '地图向西扩大到余杭（闲林、五常方向），向北到良渚与临平方向，向南多覆盖萧山城区', oldRegionIds: ['westlake', 'xixi', 'jianqiao', 'qjxc', 'center', 'chengzhan', 'xiacheng', 'gongshu', 'jianggan', 'wenjiao', 'binjiang', 'xiasha', 'xiaoshan', 'chengdong', 'xihuwest', 'outer'], oldLandmarkIds: ['hz_liuhe', 'hz_lingyin', 'hz_zju', 'hz_station', 'hz_huanglong', 'hz_leifeng', 'hz_zjg', 'hz_opera', 'hz_icc', 'hz_east', 'hz_olympic'] },
       // 第 2 版与第 3 版格网相同（只调整了展示，见 maps.js），第 3→4 版向东扩大到萧山机场
       { from: 3, dx: 0, dy: 0, oldW: 144, oldH: 136, newW: 188, newH: 136, note: '地图向东扩大到萧山机场与大江东一带',
         oldRegionIds: ['westlake', 'xixi', 'jianqiao', 'qjxc', 'center', 'chengzhan', 'xiacheng', 'gongshu', 'jianggan', 'wenjiao', 'binjiang', 'xiasha', 'xiaoshan', 'chengdong', 'xihuwest', 'linping', 'liangzhu', 'weilai', 'fuyang', 'outer'] },
       // 第 5 版（v2.9）：向西扩大 40 格、向南扩大 16 格；新增范围按街道并入未来科技城、良渚、富阳、萧山与外围，不新设片区
       { from: 4, dx: 40, dy: 0, oldW: 188, oldH: 136, newW: 228, newH: 152, note: '地图向西扩大到余杭老城与中泰，向南扩大到富阳银湖与义桥一带',
-        oldRegionIds: ['xsair', 'westlake', 'xixi', 'jianqiao', 'qjxc', 'center', 'chengzhan', 'xiacheng', 'gongshu', 'jianggan', 'wenjiao', 'binjiang', 'dajiangdong', 'xiaoshane', 'xiasha', 'xiaoshan', 'chengdong', 'xihuwest', 'linping', 'liangzhu', 'weilai', 'fuyang', 'outer'], oldLandmarkIds: ['hz_liuhe', 'hz_lingyin', 'hz_zju', 'hz_station', 'hz_huanglong', 'hz_leifeng', 'hz_zjg', 'hz_opera', 'hz_icc', 'hz_east', 'hz_olympic'] }],
+        oldRegionIds: ['xsair', 'westlake', 'xixi', 'jianqiao', 'qjxc', 'center', 'chengzhan', 'xiacheng', 'gongshu', 'jianggan', 'wenjiao', 'binjiang', 'dajiangdong', 'xiaoshane', 'xiasha', 'xiaoshan', 'chengdong', 'xihuwest', 'linping', 'liangzhu', 'weilai', 'fuyang', 'outer'], oldLandmarkIds: ['hz_liuhe', 'hz_lingyin', 'hz_zju', 'hz_station', 'hz_huanglong', 'hz_leifeng', 'hz_zjg', 'hz_opera', 'hz_icc', 'hz_east', 'hz_olympic'] },
+      { from: 5, dx: 0, dy: 24, oldW: 228, oldH: 152, newW: 228, newH: 200, note: '地图向北扩大到临平城区与塘栖，向南扩大到富阳城区与临浦', oldRegionIds: ['xsair', 'westlake', 'xixi', 'jianqiao', 'qjxc', 'center', 'chengzhan', 'xiacheng', 'gongshu', 'jianggan', 'wenjiao', 'binjiang', 'dajiangdong', 'xiaoshane', 'xiasha', 'xiaoshan', 'chengdong', 'xihuwest', 'linping', 'liangzhu', 'weilai', 'fuyang', 'outer'], oldLandmarkIds: ['hz_liuhe', 'hz_lingyin', 'hz_zju', 'hz_station', 'hz_huanglong', 'hz_leifeng', 'hz_zjg', 'hz_opera', 'hz_icc', 'hz_east', 'hz_olympic'] }],
     scenario: 'hz-2000',
     region: '中国内地', tagline: '从西湖时代走向钱塘江时代', difficulty: 2, tags: ['无地铁开局', '越江', '风景区'],
     intro: '2000 年的杭州围着西湖与运河生长，还没有地铁。一年后萧山、余杭并入市区，钱江新城在江边破土，城市开始跨过钱塘江。西湖风景区与西溪湿地不能开发，你要在湖山与新城之间找到线路的走法。',
@@ -268,8 +287,10 @@
     geo: G, data: data,
     econ: { devOffset: 3, money: 1 },   // 出行选择参数：杭州 2000 年约对应广州样本 2003 年的发展阶段
     cfg: {
-      W: 228, H: 152, START: { y: 2000, m: 1, d: 1, minute: 360 },   // v2.2：向东扩大 44 格到萧山机场；v2.9：向西 40 格、向南 16 格（第 5 版地图数据）
-      growth: Object.assign({}, CM.CFG.growth, { popCurve: [[2000, 4.98e6], [2005, 5.68e6], [2010, 6.71e6], [2015, 7.67e6], [2020, 9.33e6], [2030, 10.45e6], [2050, 11.35e6], [2300, 12.02e6]], histEnd: 2020, jobsRatio: [[2000, 0.5], [2005, 0.53], [2010, 0.56], [2015, 0.58], [2020, 0.6], [2040, 0.62]] }),   // v3.1 平衡：岗位比例提高（杭州外来就业多，以前偏低，地铁客流强度只有武汉的一半）
+      W: 228, H: 200, START: { y: 2000, m: 1, d: 1, minute: 360 },   // v2.2：向东扩大 44 格到萧山机场；v2.9：向西 40 格、向南 16 格（第 5 版地图数据）；v3.5：向北 24 格、向南 24 格（第 6 版）
+      // v3.5 地图向北扩大到临平与塘栖、向南扩大到富阳城区：曲线为扩图前曲线 ÷（1 − 新增范围的人口份额），份额按开局生成与增长模型实测（2000 年约 11%，2010 年约 8.9%，2020 年约 8.8%），
+      // 原有范围的人口与扩图前一致；岗位比例按人口与岗位份额同样换算，原有范围的岗位与扩图前一致
+      growth: Object.assign({}, CM.CFG.growth, { popCurve: [[2000, 5.598e6], [2005, 6.304e6], [2010, 7.367e6], [2015, 8.404e6], [2020, 10.226e6], [2030, 11.453e6], [2050, 12.44e6], [2300, 13.174e6]], histEnd: 2020, jobsRatio: [[2000, 0.47], [2005, 0.501], [2010, 0.532], [2015, 0.553], [2020, 0.575], [2040, 0.594]] }),   // v3.1 平衡：岗位比例提高（杭州外来就业多，以前偏低，地铁客流强度只有武汉的一半）
       money: { code: 'CNY', unit: '元', wan: '万元', yi: '亿元', sym: '¥' },
       econBase: 2000,
       cost: Object.assign({}, CM.CFG.cost, {
@@ -285,9 +306,9 @@
       // 城市经济（macro.js）：2000 年地图范围 GDP 约 860 亿元（估算：杭州全市约 1380 亿元，地图覆盖主城、钱江两岸、余杭老城与富阳北部）；
       // 民营经济与外贸活跃，旅游消费比重高；数字经济在 2010 年代成为增长动力（体现在生产率趋势中）
       macro: {
-        area: '地图范围（主城、西湖周边、钱江两岸、滨江、余杭老城与富阳北部）', region: '中国内地',
-        // gdp0：v2.9 地图扩大后按全图岗位增加的比例（约 7%）上调，人均产出不变（估算）
-        gdp0: 12000000, revRatio: [[2000, 0.15], [2010, 0.19], [2020, 0.2], [2040, 0.18]], revElastic: 1.5,
+        area: '地图范围（主城、西湖周边、钱江两岸、滨江、余杭老城、临平与富阳）', region: '中国内地',
+        // gdp0：v2.9 与 v3.5 地图扩大后按全图岗位增加的比例（约 7%、5.6%）上调，人均产出不变（估算）
+        gdp0: 12680000, revRatio: [[2000, 0.15], [2010, 0.19], [2020, 0.2], [2040, 0.18]], revElastic: 1.5,
         prod: [[2000, 0.085], [2005, 0.085], [2008, 0.07], [2011, 0.06], [2015, 0.052], [2020, 0.04], [2030, 0.025], [2050, 0.015], [2080, 0.012]],
         infl: 'cn', longRun: { infl: 0.02 }, histEnd: 2020, ref: 'cn',
         struct: { trade: 0.6, fin: 0.35, ind: 0.5, tour: 0.6, prop: 0.5 },
@@ -304,6 +325,6 @@
         ],
       },
     },
-    cam: { cx: 114, cy: 78, zoom: 16 },   // v2.9 地图向西扩大 40 格，镜头仍对准原处
+    cam: { cx: 114, cy: 102, zoom: 16 },   // v2.9 地图向西扩大 40 格、v3.5 向北扩大 24 格，镜头仍对准原处
   });
 })(window.CM);

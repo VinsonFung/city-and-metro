@@ -5,7 +5,7 @@ const load=async f=>vm.runInContext(await fs.readFile(new URL(f,root),'utf8'),c,
 for(const[,f]of(await fs.readFile(new URL('index.html',root),'utf8')).matchAll(/<script src="([^"]+)"/g)){await load(f);if(f==='js/save.js')break;}
 const C=c.CM,M=C.Metro,copy=x=>JSON.parse(JSON.stringify(x)),sum=a=>a.reduce((s,n)=>s+n,0);C.UI=function(){};
 for(const f of ['settings','icons','pages','corp','fleet','opsapp','render','sites','scenery'])await load('js/'+f+'.js');
-assert.equal(C.CFG.GAME_VERSION,'3.0.0');assert.ok(C.CFG.RULES_REVISION>=15);assert.equal(C.MAP_ORDER.length,17);assert.equal(C.Fleet.MODELS.length,83);assert.ok(C.MAPS.sg&&C.MAPS.ny&&!C.Achievements&&!C.Desktop);
+assert.equal(C.CFG.GAME_VERSION,'3.0.1');assert.ok(C.CFG.RULES_REVISION>=15);assert.equal(C.MAP_ORDER.length,17);assert.equal(C.Fleet.MODELS.length,83);assert.ok(C.MAPS.sg&&C.MAPS.ny&&!C.Achievements&&!C.Desktop);
 C.useMap('tutorial');const g=C.Game.create({mode:'free',tutorial:true,seed:20000101}),F=C.Fleet;F.ensure(g);let fixture;
 for(let y=5;y<g.city.H-5&&!fixture;y++)for(let x=5;x<g.city.W-22&&!fixture;x++){
  if([0,4,8,12,16].some(d=>!M.checkSite(g.city,x+d,y,'underground').ok))continue;
@@ -128,7 +128,14 @@ console.log('PASS merged line trends, reset split-line trends and invalidated co
 const D=C.DATA,reclaim=D.reclaim,lockEnclaves=D.lockEnclaves,landmarks=D.landmarks,list=C.Fac.list,active=C.Fac.active;
 try{
  D.reclaim=[{year:2010,poly:[[0,0],[4,0],[4,4],[0,4]],holes:[[[1,1],[2,1],[2,2],[1,2]]]}];assert.equal(g.city.reclaimFeats(false)[0].rings[1].outer,false);
- const small=Object.create(C.City.prototype);Object.assign(small,{W:30,H:30,N:900,regions:[{id:'start',open:2000},{id:'later',open:2010},{id:'empty',open:null,empty:true}],region:new Uint16Array(900),landFrac:new Float32Array(900)});small.landFrac[62]=small.landFrac[465]=1;small.region[465]=1;D.lockEnclaves=false;assert.equal(small.lockMaskFor([1,0,0])[465],0);D.lockEnclaves=true;assert.equal(small.lockMaskFor([1,0,0])[465],1);small.landFrac[63]=1;small.region[63]=2;assert.equal(small.lockMaskFor([1,0,0])[63],1);
+ const small=Object.create(C.City.prototype);
+ Object.assign(small,{W:30,H:30,N:900,terrainVer:0,regions:[{id:'start',open:2000},{id:'later',open:2010},{id:'empty',open:null,empty:true}],region:new Uint16Array(900),landFrac:new Float32Array(900)});
+ small.landFrac[62]=small.landFrac[465]=1;small.region[465]=1;
+ D.lockEnclaves=false;assert.equal(small.lockMaskFor([1,0,0])[465],0);
+ D.lockEnclaves=true;assert.equal(small.lockMaskFor([1,0,0])[465],0,'Remove isolated fragments below 24 cells');
+ for(let y=13;y<18;y++)for(let x=13;x<18;x++){const c=y*30+x;small.landFrac[c]=1;small.region[c]=1;}
+ small.terrainVer++;assert.equal(small.lockMaskFor([1,0,0])[465],1,'Keep the planned island locked until its own date');
+ small.landFrac[63]=1;small.region[63]=2;small.terrainVer++;assert.equal(small.lockMaskFor([1,0,0])[63],1);
  small.regions[2].open=2000;assert.equal(small.lockMaskFor([1,0,1])[63],0);
  D.landmarks=[];const fc=Object.create(g.city);fc.regions=[{scenic:true}];fc.region=new Uint16Array(fc.N);fc.landmarkOn=[];
  const R=Object.create(C.Renderer.prototype);R.game={mapId:'tutorial'};const museum={id:'museum',lmK:-1,t:'scenic',name:'自然博物馆',x:5,y:5,r:1};C.Fac.list=()=>[museum,{...museum,id:'park',t:'park'},{...museum,id:'hidden',noModel:true}];C.Fac.active=()=>true;

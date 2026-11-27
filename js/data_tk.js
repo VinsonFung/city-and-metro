@@ -140,8 +140,8 @@
     ],
     // 背景交通的画面（bgtransit.js、agents.js）：都电（路面电车）1967–1972 年大部分废止（史实），干道上的电车比例为画面估算
     bgViz: { tram: { p: [[1950, 0.32], [1962, 0.28], [1967, 0.15], [1971, 0.04], [1972, 0]] }, ferries: [
-      { name: '东京水上巴士（日之出—台场）', piers: ['日之出栈桥', '台场海滨公园码头'], from: 1996, n: 2, color: '#f4f1e8', pts: [[147.21, 107.45], [153.15, 116.21]] },
-      { name: '东京水上巴士（浅草—日之出）', piers: ['浅草码头', '日之出栈桥'], river: '隅田川', n: 2, color: '#f4f1e8', pts: [[161.74, 80.86], [147.21, 107.45]] },
+      { name: '东京水上巴士（日之出—台场）', piers: ['日之出栈桥', '台场海滨公园码头'], from: 1996, n: 2, color: '#f4f1e8', pts: [[187.21, 107.45], [193.15, 116.21]] },
+      { name: '东京水上巴士（浅草—日之出）', piers: ['浅草码头', '日之出栈桥'], river: '隅田川', n: 2, color: '#f4f1e8', pts: [[201.74, 80.86], [187.21, 107.45]] },
     ] },
     // 背景交通（估算）：国铁（JR）、私铁与都电等不由玩家经营的轨道交通，承担大部分非地铁出行；票价为当年日元
     bg: { name: '国铁、私铁与都电', share: [[1950, 0.6], [1965, 0.6], [1975, 0.55], [1990, 0.5], [2005, 0.45], [2020, 0.45]], speed: [[1950, 15], [1965, 20], [1990, 26], [2020, 30]], wait: [[1950, 12], [1990, 10], [2020, 8]],
@@ -171,6 +171,8 @@
       { id: 'saitama', name: '埼玉南部（浦和·川口·所泽·草加）', district: ['川口市', '蕨市', '户田市', '和光市', '朝霞市', '新座市', '所泽市', '草加市', '八潮市', '三乡市', '埼玉市', '志木市', '富士见市', '三芳町', '越谷市', '吉川市'], open: 1965, plan: 'resind', pop: 13.86e6, note: '1960 年代起成为东京的卧城，草加松原团地 1962 年入住（史实）' },
       { id: 'chiba', name: '千叶西部（市川·浦安·松户）', district: ['市川市', '浦安市', '松户市'], open: 1965, plan: 'res', pop: 13.86e6, note: '1960 年代起住宅区沿总武线扩展；浦安 1960 年代后期起填海造地（史实）' },
       { id: 'yokohama', name: '横滨北部（港北·都筑·青叶）', streets: ['港北区', '都筑区', '青叶区'], open: 1972, plan: 'res', pop: 14.95e6, note: '1960 年代后期起东急田园都市线沿线开发，港北新城 1970 年代起建设（史实）' },
+      // v3.5 扩大范围：八王子、青梅等在新增西缘条带里的部分（within：东缘正好在原图西界上）单独成片，原范围里的八王子东部仍属都外；福生、瑞穗在条带里的部分并入多摩
+      { id: 'nishitama', name: '八王子·青梅（多摩西部）', district: ['八王子市', '青梅市', '羽村市', '秋留野市', '日之出町'], within: [[0, 0], [40, 0], [40, 168], [0, 168]], open: 1960, plan: 'res', note: '八王子是多摩的老城与纺织业中心，1960 年代起与青梅、羽村一带的郊外住宅地和工业园区一起成长（史实）' },
     ],
     defaultRegion: { id: 'outer', name: '都外（其他近郊）', open: 1968, plan: 'res', pop: 14.34e6 },
     plans: CM.DATA.plans,
@@ -227,10 +229,18 @@
       at(35.837, 139.58, { pop: 3700, jobs: 1600, r: 0.7 }),   // 志木
       at(35.886, 139.627, { pop: 5200, jobs: 2900, r: 0.8 }),   // 与野
       at(35.83, 139.872, { pop: 3600, jobs: 1700, r: 0.8 }),   // 三乡
+      // v3.5 扩大范围（1950 年估算，OSM 坐标）
+      at(35.6559, 139.3389, { pop: 5800, jobs: 5000, r: 1.4 }),   // 八王子
+      at(35.7880, 139.2750, { pop: 3000, jobs: 2200, r: 1 }),     // 青梅
+      at(35.7385, 139.3270, { pop: 2200, jobs: 1500, r: 0.9 }),   // 福生
+      at(35.7672, 139.3108, { pop: 1500, jobs: 1000, r: 0.8 }),   // 羽村
+      at(35.7286, 139.2950, { pop: 1500, jobs: 900, r: 0.8 }),    // 秋川
+      at(35.6320, 139.2820, { pop: 1200, jobs: 700, r: 0.7 }),    // 高尾
     ],
-    rural: { pop: 1200, jobs: 250, out: { box: [68, 36, 140, 132], k: 0.35 } },
+    // box 为 v2.9 扩图前的原范围（v3.5 西扩 40 格后整体右移），v2.9 与 v3.5 的新增范围同样适用
+    rural: { pop: 1200, jobs: 250, out: { box: [108, 36, 140, 132], k: 0.35 } },
     // 扩图新增范围的增长倍率（v2.9，见 city.js growMonth）：多摩与埼玉南部按史实是增长最快的郊区，不加倍率时到 2020 年只有现实的一半左右
-    growOut: { box: [68, 36, 140, 132], pop: 1.7 },
+    growOut: { box: [108, 36, 140, 132], pop: 1.7 },
     // 道路通车年份（名称前缀匹配；1950 年已有的旧街道按所在区域开放年份出现）
     // 铁路通车年份（线路名或前缀 → 年份，或 [通车, 停运]）：开局后才通车或停运的线路，按公开通车时间整理
     railYears: { '武藏野线': 1973, '京王新线': 1978, '北总线': 1979, '西武有乐町线': 1983, '东北新干线': 1985, '筑波快线': 2005, '东急新横滨线': 2023, '东急田园都市线': 1966 },
@@ -358,13 +368,15 @@
       { id: 'tk1', appear: [1951, 1], deadline: [1960, 12], type: 'connect', reward: 300000, title: '池袋直通都心', desc: '连接池袋、御茶之水与东京站，让城北的通勤者直达丸之内。', anchors: [anchor('池袋', 35.7295, 139.7109, 3), anchor('御茶之水', 35.6995, 139.7640, 3), anchor('东京站', 35.6812, 139.7671, 3)] },
       { id: 'tk2', appear: [1956, 1], deadline: [1964, 9], type: 'connect', reward: 400000, title: '奥运前：下町—银座—六本木', desc: '1964 年奥运会前，连接北千住、上野、银座与六本木。', anchors: [anchor('北千住', 35.7497, 139.8049, 3), anchor('上野', 35.7131, 139.7774, 3), anchor('银座', 35.6717, 139.7650, 3), anchor('六本木', 35.6628, 139.7314, 3)] },
       { id: 'tk3', appear: [1958, 1], deadline: [1968, 12], type: 'connect', reward: 400000, title: '东西贯通：中野—大手町—东阳町', desc: '连接中野、大手町与东阳町，跨越隅田川服务江东。', anchors: [anchor('中野', 35.7057, 139.6657, 3), anchor('大手町', 35.6848, 139.7661, 3), anchor('东阳町', 35.6696, 139.8170, 3)] },
-      { id: 'tk4', appear: [1960, 1], deadline: [1970, 12], type: 'coverage', target: 0.26, reward: 500000, title: '1970 年：地铁覆盖两成六人口', desc: '步行 15 分钟可到达地铁站的人口不低于全市人口的 26%。' },
+      { id: 'tk4', appear: [1960, 1], deadline: [1970, 12], type: 'coverage', target: 0.25, reward: 500000, title: '1970 年：地铁覆盖两成五人口', desc: '步行 15 分钟可到达地铁站的人口不低于全市人口的 25%。' },   // v3.5 地图扩大后按人口比例由 26% 换算，难度不变
       { id: 'tk5', appear: [1968, 1], deadline: [1980, 12], type: 'connect', reward: 500000, title: '新宿副都心', desc: '新宿副都心建成后，连接新宿、九段下与住吉。', anchors: [anchor('新宿', 35.6896, 139.6990, 3), anchor('九段下', 35.6955, 139.7514, 3), anchor('住吉', 35.6893, 139.8155, 3)] },
       { id: 'tk6', appear: [1990, 6], deadline: [2000, 12], type: 'connect', reward: 600000, title: '临海副都心', desc: '台场填海成陆后，连接台场与新桥，过海段可以建设隧道或桥梁。', anchors: [anchor('台场', 35.6262, 139.7760, 3), anchor('新桥', 35.6660, 139.7590, 3)] },
-      { id: 'tk7', appear: [1990, 1], deadline: [2002, 12], type: 'coverage', target: 0.5, reward: 600000, title: '千禧年：地铁覆盖一半人口', desc: '2000 年前后，步行 15 分钟可到达地铁站的人口不低于全市人口的 50%。' },
+      { id: 'tk7', appear: [1990, 1], deadline: [2002, 12], type: 'coverage', target: 0.47, reward: 600000, title: '千禧年：地铁覆盖四成七人口', desc: '2000 年前后，步行 15 分钟可到达地铁站的人口不低于全市人口的 47%。' },   // v3.5 地图扩大后按人口比例由 50% 换算，难度不变
       // v2.9 扩图新增范围的史实任务
       { id: 'tk8', appear: [1965, 1], deadline: [1980, 12], type: 'connect', reward: 500000, title: '多摩新城通勤', desc: '多摩新城 1971 年开始入住（史实）。连接多摩中心、调布与新宿。', anchors: [anchor('多摩中心', 35.6243, 139.4245, 3), anchor('调布', 35.6518, 139.5440, 3), anchor('新宿', 35.6896, 139.7006, 3)] },
       { id: 'tk9', appear: [1978, 1], deadline: [1988, 12], type: 'connect', reward: 500000, title: '埼玉南部到池袋', desc: '埼京线 1985 年通车（史实）。连接浦和、户田与池袋。', anchors: [anchor('浦和', 35.8586, 139.6570, 3), anchor('户田', 35.8176, 139.6779, 3), anchor('池袋', 35.7295, 139.7109, 3)] },
+      // v3.5 扩图新增范围的史实任务
+      { id: 'tk10', appear: [1970, 1], deadline: [1985, 12], type: 'connect', reward: 500000, title: '八王子到立川', desc: '八王子与立川是多摩西部的两个中心，郊外住宅地沿中央线越铺越远。连接八王子、日野与立川。', anchors: [anchor('八王子', 35.6559, 139.3389, 3), anchor('日野', 35.6797, 139.3936, 3), anchor('立川', 35.6980, 139.4136, 3)] },
     ],
     taskNote: '历史主题任务参考东京 1950 年代起的发展需求（城北通勤、奥运、江东、副都心与临海开发），不要求按真实线路走向建设，只需满足目标描述。',
     // 城市策略难题（v2.3，可选挑战）
@@ -386,6 +398,7 @@
     ],
     // 线路配色参考东京地铁与都营地铁：银座线橙色在前（开局的银座线即 1 号色）
     lineColorsNice: ['#f39700', '#e60012', '#9caeb7', '#00a7db', '#009944', '#d7c447', '#9b7cb6', '#00ada9', '#bb641d', '#e85298', '#0079c2', '#6cbb5a', '#b6007a'],
+    // 进出站标记按同位置的真实站名合并，并还原截断或错写的站名。
     stationNameCorrections: {
       '地下铁赤冢01': '地下铁赤冢', '地下铁赤冢02': '地下铁赤冢', '冰川台01': '冰川台', '冰川台02': '冰川台',
       '本乡三町目': '本乡三丁目', '都筑': '都筑交流之丘', '度假区总': '度假区总站', '戸冢安行': '户冢安行',
@@ -394,14 +407,19 @@
   };
   const INF = [[1950, 0.05], [1973, 0.12], [1976, 0.05], [1981, 0.025], [1991, 0.005], [1999, 0]];
 
+  // v3.5 地图向西扩大：全图人口按新增范围的份额抬高（约 5%），提前开放的人口门槛同比放大，原有片区的开放时机不变
+  for (const rg of data.regions.concat([data.defaultRegion])) if (rg.pop) rg.pop = Math.round(rg.pop * 1.05 / 1e4) * 1e4;
+
   (CM.MAP_LIST = CM.MAP_LIST || []).push({
     id: 'tk', name: '东京', title: '东京 · 1950', sub: '真实地理 · 1950 年起 · 日元 · 已有银座线',
     desc: '从 1950 年战后复兴中的东京开始：开局已有一条银座线（浅草—涩谷），归你运营，但之后的地铁需要自己规划。高速增长、东京奥运、副都心与东京湾填海将陆续到来。',
-    facts: [['范围', '52 km × 42 km'], ['起始', '1950 年'], ['人口', '约 950 万'], ['货币', '日元'], ['既有地铁', '银座线 18 站'], ['模式', '经营挑战 / 自由建造']],
-    modes: ['challenge', 'free'], kind: 'real', mapVersion: 4, extent: [{ from: 1, dx: 32, dy: 12, oldW: 96, oldH: 88, newW: 140, newH: 116, note: '地图向西扩大到三鹰、调布，向北到赤羽以北，向南到蒲田，向东到浦安', oldRegionIds: ['palace', 'yodobashi', 'rinkai', 'core', 'fukutoshin', 'shitamachi', 'koto', 'yamanote', 'jonan', 'josai', 'itabashi', 'joto', 'outer'], oldLandmarkIds: ['tk_tst', 'tk_utokyo', 'tk_waseda', 'tk_diet', 'tk_sensoji', 'tk_museum', 'tk_ns', 'tk_tower', 'tk_budokan', 'tk_yoyogi', 'tk_keio', 'tk_s60', 'tk_kokugikan', 'tk_dome', 'tk_tocho', 'tk_bigsight', 'tk_forum', 'tk_hills', 'tk_skytree'] },
+    facts: [['范围', '62 km × 42 km'], ['起始', '1950 年'], ['人口', '约 1008 万'], ['货币', '日元'], ['既有地铁', '银座线 18 站'], ['模式', '经营挑战 / 自由建造']],
+    // 第 5 版（v3.5）：向西扩大 40 格到八王子、青梅与福生；旧存档依次迁移（见 maps.js extentMigration）
+    modes: ['challenge', 'free'], kind: 'real', mapVersion: 5, extent: [{ from: 1, dx: 32, dy: 12, oldW: 96, oldH: 88, newW: 140, newH: 116, note: '地图向西扩大到三鹰、调布，向北到赤羽以北，向南到蒲田，向东到浦安', oldRegionIds: ['palace', 'yodobashi', 'rinkai', 'core', 'fukutoshin', 'shitamachi', 'koto', 'yamanote', 'jonan', 'josai', 'itabashi', 'joto', 'outer'], oldLandmarkIds: ['tk_tst', 'tk_utokyo', 'tk_waseda', 'tk_diet', 'tk_sensoji', 'tk_museum', 'tk_ns', 'tk_tower', 'tk_budokan', 'tk_yoyogi', 'tk_keio', 'tk_s60', 'tk_kokugikan', 'tk_dome', 'tk_tocho', 'tk_bigsight', 'tk_forum', 'tk_hills', 'tk_skytree'] },
       { from: 2, dx: 0, dy: 0, oldW: 140, oldH: 116, newW: 140, newH: 132, note: '地图向南扩大到羽田机场（东京国际机场）与川崎临海部',
         oldRegionIds: ['palace', 'yodobashi', 'rinkai', 'core', 'fukutoshin', 'shitamachi', 'koto', 'yamanote', 'jonan', 'josai', 'itabashi', 'joto', 'kawasaki', 'tama', 'saitama', 'chiba', 'yokohama', 'outer'] },
-      { from: 3, dx: 68, dy: 36, oldW: 140, oldH: 132, newW: 208, newH: 168, note: '地图向西扩大到立川、府中与町田，向北扩大到浦和与所泽', oldRegionIds: ['palace', 'yodobashi', 'rinkai', 'haneda', 'core', 'fukutoshin', 'shitamachi', 'koto', 'yamanote', 'jonan', 'josai', 'itabashi', 'joto', 'kawasaki', 'tama', 'saitama', 'chiba', 'yokohama', 'outer'], oldLandmarkIds: ['tk_tst', 'tk_utokyo', 'tk_waseda', 'tk_diet', 'tk_sensoji', 'tk_museum', 'tk_ns', 'tk_tower', 'tk_budokan', 'tk_yoyogi', 'tk_keio', 'tk_s60', 'tk_kokugikan', 'tk_dome', 'tk_tocho', 'tk_bigsight', 'tk_forum', 'tk_hills', 'tk_skytree'] }],
+      { from: 3, dx: 68, dy: 36, oldW: 140, oldH: 132, newW: 208, newH: 168, note: '地图向西扩大到立川、府中与町田，向北扩大到浦和与所泽', oldRegionIds: ['palace', 'yodobashi', 'rinkai', 'haneda', 'core', 'fukutoshin', 'shitamachi', 'koto', 'yamanote', 'jonan', 'josai', 'itabashi', 'joto', 'kawasaki', 'tama', 'saitama', 'chiba', 'yokohama', 'outer'], oldLandmarkIds: ['tk_tst', 'tk_utokyo', 'tk_waseda', 'tk_diet', 'tk_sensoji', 'tk_museum', 'tk_ns', 'tk_tower', 'tk_budokan', 'tk_yoyogi', 'tk_keio', 'tk_s60', 'tk_kokugikan', 'tk_dome', 'tk_tocho', 'tk_bigsight', 'tk_forum', 'tk_hills', 'tk_skytree'] },
+      { from: 4, dx: 40, dy: 0, oldW: 208, oldH: 168, newW: 248, newH: 168, note: '地图向西扩大到八王子、青梅与福生', oldRegionIds: ['palace', 'yodobashi', 'rinkai', 'haneda', 'core', 'fukutoshin', 'shitamachi', 'koto', 'yamanote', 'jonan', 'josai', 'itabashi', 'joto', 'kawasaki', 'tama', 'saitama', 'chiba', 'yokohama', 'outer'], oldLandmarkIds: ['tk_tst', 'tk_utokyo', 'tk_waseda', 'tk_diet', 'tk_sensoji', 'tk_museum', 'tk_ns', 'tk_tower', 'tk_budokan', 'tk_yoyogi', 'tk_keio', 'tk_s60', 'tk_kokugikan', 'tk_dome', 'tk_tocho', 'tk_bigsight', 'tk_forum', 'tk_hills', 'tk_skytree'] }],
     scenario: 'tk-1950',
     region: '日本', tagline: '接管银座线，迎接高速增长', difficulty: 4, tags: ['已有地铁', '填海', '高速增长'],
     intro: '1950 年的东京正在战后复兴，区部人口约 540 万。浅草到涩谷的银座线是唯一的地铁，开局就交给你运营。接下来是人口暴涨、东京奥运、新宿副都心与东京湾填海，地铁要追上一座飞速扩张的城市。',
@@ -410,11 +428,13 @@
     geo: G, data: data,
     econ: { devOffset: 40, money: 12 },   // 出行选择参数：东京 1950 年约对应广州样本 1990 年的发展阶段；时间价值等按日元换算
     cfg: {
-      W: 208, H: 168, START: { y: 1950, m: 1, d: 1, minute: 360 },   // v2.2：向南扩大 16 格到羽田机场
+      W: 248, H: 168, START: { y: 1950, m: 1, d: 1, minute: 360 },   // v2.2：向南扩大 16 格到羽田机场；v3.5：向西扩大 40 格到八王子
       // 工作周：公立学校 1992 年 9 月起每月一个周六休息、1995 年 4 月起每月两个、2002 年 4 月起全部周六休息（史实）；
       // 企业周休二日逐步普及、1992 年国家公务员全面实行（史实），周六上班的比例为估算
       workWeek: { sat: [[1950, 1], [1965, 0.9], [1980, 0.65], [1989, 0.45], [1992.4, 0.2], [2000, 0.1]], school: [[1950, 1], [1992.6, 1], [1992.7, 0.75], [1995.2, 0.75], [1995.3, 0.5], [2002.2, 0.5], [2002.3, 0]] },
-      growth: Object.assign({}, CM.CFG.growth, { popCurve: [[1950, 9.5e6], [1955, 11.52e6], [1960, 13.02e6], [1965, 14.33e6], [1970, 15.05e6], [1975, 15.06e6], [1980, 14.96e6], [1985, 15.13e6], [1990, 15.03e6], [1995, 14.92e6], [2000, 15.33e6], [2005, 16.29e6], [2010, 17.25e6], [2015, 18.18e6], [2020, 19.03e6], [2040, 19.17e6], [2300, 19.3e6]], histEnd: 2020, jobsRatio: [[1950, 0.394], [1955, 0.422], [1960, 0.453], [1965, 0.472], [1970, 0.494], [1975, 0.505], [1980, 0.519], [1985, 0.531], [1990, 0.546], [1995, 0.557], [2000, 0.571], [2005, 0.578], [2010, 0.585], [2015, 0.597], [2020, 0.603]] }),
+      // v3.5 地图向西扩大到八王子与青梅：曲线为扩图前曲线 ÷（1 − 新增范围的人口份额），份额按开局生成与增长模型实测（1950 年约 5.7%，1970 年约 5.2%，2020 年约 7.1%），
+      // 原有范围的人口与扩图前一致；岗位比例按人口与岗位份额同样换算，原有范围的岗位与扩图前一致
+      growth: Object.assign({}, CM.CFG.growth, { popCurve: [[1950, 10.077e6], [1955, 12.122e6], [1960, 13.592e6], [1965, 15.04e6], [1970, 15.881e6], [1975, 15.894e6], [1980, 15.791e6], [1985, 15.976e6], [1990, 15.876e6], [1995, 15.775e6], [2000, 16.224e6], [2005, 17.315e6], [2010, 18.414e6], [2015, 19.49e6], [2020, 20.478e6], [2040, 20.628e6], [2300, 20.768e6]], histEnd: 2020, jobsRatio: [[1950, 0.38], [1955, 0.408], [1960, 0.44], [1965, 0.457], [1970, 0.476], [1975, 0.487], [1980, 0.501], [1985, 0.513], [1990, 0.528], [1995, 0.538], [2000, 0.552], [2005, 0.557], [2010, 0.562], [2015, 0.574], [2020, 0.578]] }),
       money: { code: 'JPY', unit: '日元', wan: '万日元', yi: '亿日元', sym: '¥' },
       econBase: 1950,
       cost: Object.assign({}, CM.CFG.cost, {
@@ -434,7 +454,8 @@
       // 高速增长期的生产率趋势较高，1991 年泡沫破裂后转入长期低速增长（体现在生产率趋势中）
       macro: {
         area: '地图范围（东京区部、多摩、埼玉南部及湾岸填海地）', region: '日本',
-        gdp0: 72500000, revRatio: [[1950, 0.12], [1970, 0.14], [1990, 0.16], [2020, 0.17]], revElastic: 1.4,
+        // gdp0：v3.5 地图扩大后按全图岗位增加的比例（约 2%）上调，人均产出不变（估算）
+        gdp0: 74100000, revRatio: [[1950, 0.12], [1970, 0.14], [1990, 0.16], [2020, 0.17]], revElastic: 1.4,
         prod: [[1950, 0.06], [1955, 0.07], [1960, 0.085], [1970, 0.08], [1973, 0.07], [1974, 0.035], [1980, 0.035], [1990, 0.03], [1992, 0.02], [1995, 0.01], [2000, 0.008], [2010, 0.007], [2020, 0.006], [2050, 0.005]],
         infl: 'jp', longRun: { infl: 0.01 }, histEnd: 2020, ref: 'jp',
         struct: { trade: 0.5, fin: 0.65, ind: 0.6, tour: 0.3, prop: 0.75 },
@@ -455,6 +476,6 @@
         ],
       },
     },
-    cam: { cx: 147, cy: 92, zoom: 16 },
+    cam: { cx: 187, cy: 92, zoom: 16 },   // v3.5 地图向西扩大 40 格，镜头仍对准原处
   });
 })(window.CM);
