@@ -78,29 +78,63 @@ vm.runInContext(C.RoadKernel.worker.toString(), scope);
 I.carWorkerMain();
 for (const module of [null, C.RoadKernel.module]) {
   scope.onmessage({ data: { type: 'graph', G: structuredClone(G), kernel: module } });
-  scope.onmessage({ data: { type: 'block', gid: G.id, origins, tStart, tDest: ends, dem, time: timeByArc } });
-  assert.equal(!!workerResult.kernel, !!module);
-  for (const key of Object.keys(reference)) assert.deepEqual([...workerResult[key]], [...reference[key]], key);
+  const block = { type: 'block', req: 1, gid: G.id, origins, tStart, tDest: ends, dem };
+  for (const data of [{ ...block, time: timeByArc }, block]) {
+    scope.onmessage({ data });
+    assert.equal(!!workerResult.kernel, !!module);
+    for (const key of Object.keys(reference)) assert.deepEqual([...workerResult[key]], [...reference[key]], key);
+  }
+  scope.onmessage({ data: { ...block, req: 2 } });
+  assert.equal(workerResult.stale, true, 'A new request must supply its own road times');
+  const slower = Float32Array.from(timeByArc, t => t * 2);
+  scope.onmessage({ data: { ...block, req: 2, time: slower } });
+  assert.equal(workerResult.rowsT[1], 4, 'The cached time must be replaced between requests');
 }
 console.log('PASS disconnected and mixed road access with exact JS, Worker and WASM times, distances and flows');
 
 const pool = C.CarPool;
 const posts = [];
-const slots = () => Array.from({ length: 8 }, (_, i) => ({ n: 0, w: { postMessage: msg => { if (msg.type === 'block') posts.push(i); } } }));
+const slots = extra => Array.from({ length: 8 }, (_, i) => ({ n: 0, fastOnly: extra && i === 7, w: { postMessage: msg => { if (msg.type === 'block') posts.push({ i, time: msg.time }); } } }));
 const blocks = Array.from({ length: 16 }, () => ({ origins: int([0]), tStart: int([0, 1]), tDest: int([1]), dem: Float32Array.of(1) }));
-const checkSlots = (game, loading, interacting, expected) => {
+const checkSlots = (game, loading, interacting, expected, extra = false) => {
   C.game = game; C.isLoading = () => loading; C.R = { interacting };
-  pool.list = slots(); pool.queue.length = 0; pool.reqs.clear(); posts.length = 0;
+  pool.list = slots(extra); pool.queue.length = 0; pool.reqs.clear(); posts.length = 0;
   pool.submit(G, timeByArc, blocks, () => true);
-  assert.equal(new Set(posts).size, expected);
+  assert.equal(new Set(posts.map(post => post.i)).size, expected);
   assert.equal(posts.length, expected * 2);
+  for (let i = 0; i < expected; i++) assert.equal(posts.filter(post => post.i === i && post.time).length, 1);
 };
 checkSlots({}, false, false, 6);
 checkSlots({}, false, true, 4);
-checkSlots({ jumping: true }, false, true, 8);
+checkSlots({ jumping: true }, false, true, 8, true);
+checkSlots({}, true, true, 7, true);
 checkSlots({}, true, true, 8);
 checkSlots(null, false, false, 8);
 C.game = null; C.R = null; pool.list = null; pool.queue.length = 0; pool.reqs.clear();
+scope.Blob = class {};
+scope.URL = { createObjectURL: () => 'blob:road-worker-test', revokeObjectURL: () => {} };
+scope.Worker = class { terminate() {} };
+scope.navigator.hardwareConcurrency = 20;
+scope.navigator.deviceMemory = 8;
+C.game = { jumping: true, model: { net: { N: 80 } } };
+assert.equal(pool.ready(), true);
+assert.equal(pool.list.length, 12, 'A large desktop may borrow idle cores during a jump');
+delete C.game.jumping;
+assert.equal(pool.ready(), true);
+assert.equal(pool.list.length, 4, 'Return the extra threads when live simulation resumes');
+assert.equal(pool.release(), true);
+scope.matchMedia = () => ({ matches: true });
+C.game.jumping = true;
+assert.equal(pool.ready(), true);
+assert.equal(pool.list.length, 2, 'Touch devices keep their normal budget on larger rail networks');
+assert.equal(pool.release(), true);
+scope.navigator.deviceMemory = 2;
+assert.equal(pool.ready(), true);
+assert.equal(pool.list.length, 1, 'Low-memory devices do not spawn extra workers');
+assert.equal(pool.release(), true);
+C.game = null;
+delete scope.Worker;
+
 console.log('PASS session, drag, loading and fast-forward worker budgets');
 
 C.useMap('tutorial');

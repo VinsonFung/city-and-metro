@@ -168,11 +168,19 @@
   // 稀疏块用 JavaScript 提前结束，稠密块仍可由现有 WASM 内核计算。
   function carWorkerMain() {
     let G = null, W = null, kernel = null, module = null;
+    let requestId = null, roadTime = null, orderedTime = null;
     onmessage = function (e) {
       const m = e.data;
-      if (m.type === 'graph') { G = m.G; W = null; kernel = null; module = m.kernel; return; }
+      if (m.type === 'graph') {
+        G = m.G; W = kernel = null; module = m.kernel;
+        requestId = roadTime = orderedTime = null;
+        return;
+      }
       if (m.type !== 'block') return;
       if (!G || G.id !== m.gid) { postMessage({ req: m.req, b: m.b, stale: true }); return; }
+      // 同一轮分配的所有起点块共用路段时间。新轮次到来后重建按路段排列的时间表。
+      if (m.time) { requestId = m.req; roadTime = m.time; orderedTime = null; }
+      if (!roadTime || requestId !== m.req) { postMessage({ req: m.req, b: m.b, stale: true }); return; }
       // 本块各起点需要的终点：tDest[tStart[i]..tStart[i+1])，需求 dem 与之对齐；结果也只回传这些终点（v2.7.1）
       const n = m.origins.length, tStart = m.tStart, tDest = m.tDest, nt = tDest.length;
       const rowsT = new Float32Array(nt).fill(NaN), rowsK = new Float32Array(nt).fill(NaN);
@@ -181,7 +189,7 @@
           if (!kernel) kernel = roadKernelWorker(module, G);
           const dense = new Float32Array(n * G.Z);
           for (let i = 0; i < n; i++) for (let q = tStart[i]; q < tStart[i + 1]; q++) dense[i * G.Z + tDest[q]] = m.dem[q];
-          const result = kernel.solve({ origins: m.origins, dem: dense, time: m.time });
+          const result = kernel.solve({ origins: m.origins, dem: dense, time: roadTime });
           for (let i = 0; i < n; i++) for (let q = tStart[i]; q < tStart[i + 1]; q++) {
             const k = i * G.Z + tDest[q]; rowsT[q] = result.rowsT[k]; rowsK[q] = result.rowsK[k];
           }
@@ -190,7 +198,7 @@
         } catch (e) { module = kernel = null; }
       }
       if (!W) W = carWork(G);
-      const aux = new Float32Array(G.nA), tP = carTimes(G, m.time, W.tP);
+      const aux = new Float32Array(G.nA), tP = orderedTime || (orderedTime = carTimes(G, roadTime, W.tP));
       for (let i = 0; i < n; i++) carOriginRow(G, tP, m.origins[i], tDest, tStart[i], tStart[i + 1], m.dem, W, rowsT, rowsK, 0, aux);
       postMessage({ req: m.req, b: m.b, rowsT: rowsT, rowsK: rowsK, aux: aux }, [rowsT.buffer, rowsK.buffer, aux.buffer]);
     };
@@ -223,32 +231,47 @@
     const total = Math.max(1, Math.min(cap, cores - (cores >= 4 ? 2 : 1)));
     const mode = total >= 6 ? 2 : total >= 3 ? 1 : 0;
     const metro = total >= 6 ? 2 : total >= 4 ? 1 : 0;
-    return { road: total - mode - metro, mode: mode, metro: metro };
+    // 桌面快进期间地图降频，可临时借用更多线程；触屏及低内存设备仍用原来的总上限。
+    const fastCap = !touch && memory >= 8 && cores >= 12 ? 16 : cap;
+    const fastTotal = Math.max(total, Math.min(fastCap, cores - (cores >= 8 ? 2 : 1)));
+    return { road: total - mode - metro, mode, metro, fastTotal, fastPeriods: fastCap > cap ? 4 : PIPE_W };
   }
   const CAR_DEPTH = 2;
   const CarPool = {
     gseq: 0, rseq: 0, list: null, off: false, queue: [], reqs: new Map(), onReq: null, stats: {wasm:0,js:0},
-    size: function () { return workerPlan().road; },
     ready: function () {
       if (this.off) return false;
-      if (this.list) return true;
+      const plan = workerPlan(), game = CM.game;
+      const fast = game?.jumping && !this.extraUnavailable;
+      // 小线网用不到独立的地铁最短路线程，把其名额留给道路。
+      const metro = game?.model?.net?.N < 48 ? 0 : plan.metro;
+      const size = fast ? plan.fastTotal - plan.mode - metro : plan.road;
+      if (!game?.jumping) while (this.list?.length > size) {
+        const slot = this.list[this.list.length - 1];
+        if (!slot.fastOnly || slot.n) break;
+        this.list.pop().w.terminate();
+      }
+      if (this.list && this.list.length >= size) return true;
       let url;
       try {
         if (typeof Worker === 'undefined' || typeof Blob === 'undefined' || typeof URL === 'undefined' || !URL.createObjectURL) throw new Error('Worker 不可用');
         const kernel = CM.RoadKernel;
         const src = '"use strict";\nconst INF = 1e30;\n' + (kernel ? kernel.worker.toString() : 'function roadKernelWorker(){return null;}') + '\n' + [carTimes, carTree, carOriginRow, carWork, carWorkerMain].map(function (f) { return f.toString(); }).join('\n') + '\ncarWorkerMain();\n';
         url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
-        const self = this; this.list = [];
-        for (let i = 0; i < this.size(); i++) {
-          const w = new Worker(url), slot = { w: w, n: 0, gid: 0 };
+        const self = this;
+        this.list ||= [];
+        for (let i = this.list.length; i < size; i++) {
+          const w = new Worker(url), slot = { w: w, n: 0, gid: 0, fastOnly: i >= plan.road };
           w.onmessage = function (e) { self.done(slot, e.data); };
           w.onerror = function (e) { if (e && e.preventDefault) e.preventDefault(); self.fail('工作线程出错：' + ((e && e.message) || '未知错误')); };
           w.onmessageerror = function () { self.fail('工作线程消息无法读取'); };
           this.list.push(slot);
         }
         return true;
-      } catch (e) { this.fail(String(e && e.message || e)); return false; }
-      finally { if (url) URL.revokeObjectURL(url); }
+      } catch (e) {
+        if (this.list?.length >= plan.road) { this.extraUnavailable = true; return true; }
+        this.fail(String(e && e.message || e)); return false;
+      } finally { if (url) URL.revokeObjectURL(url); }
     },
     fail: function (why) {
       if (this.off) return;
@@ -279,7 +302,15 @@
     // 提交一次分配：blocks 为 [{ origins, dem }]；alive() 为假时（求解已被放弃）尚未发出的块直接丢弃
     submit: function (G, time, blocks, alive) {
       const req = { id: ++this.rseq, G: G, time: Float32Array.from(time), res: new Array(blocks.length), remaining: 0, failed: false, alive: alive };
-      blocks.forEach(function (b, i) { if (b.origins.length) { req.remaining++; this.queue.push({ req: req, b: i, origins: b.origins, tStart: b.tStart, tDest: b.tDest, dem: b.dem }); } else req.res[i] = null; }, this);
+      const pending = [];
+      blocks.forEach(function (b, i) {
+        if (b.origins.length) pending.push({ req: req, b: i, origins: b.origins, tStart: b.tStart, tDest: b.tDest, dem: b.dem });
+        else req.res[i] = null;
+      });
+      // 优先分给线程终点多的块，减少最后只剩一个慢块时的等待。结果仍按原块序号合并。
+      pending.sort((a, b) => b.tDest.length - a.tDest.length || a.b - b.b);
+      req.remaining = pending.length;
+      this.queue.push(...pending);
       if (req.remaining) this.reqs.set(req.id, req);
       this.pump();
       return req;
@@ -288,9 +319,10 @@
       if (!this.list) return;
       // 每个线程先领一块，再补第二块。实时求解给渲染留出核心，载入和快进使用整个道路线程池。
       const game = CM.game, n = this.list.length;
-      const full = !game || game.jumping || CM.isLoading?.();
       const share = CM.R && CM.R.interacting ? 0.5 : 0.75;
-      const slots = full ? n : Math.ceil(n * share);
+      const firstExtra = game?.jumping ? -1 : this.list.findIndex(slot => slot.fastOnly);
+      const normal = firstExtra < 0 ? n : firstExtra;
+      const slots = game?.jumping || !game || CM.isLoading?.() ? normal : Math.ceil(normal * share);
       for (let depth = 1; depth <= CAR_DEPTH; depth++) for (let si = 0; si < slots; si++) {
         const s = this.list[si];
         if (s.n >= depth) continue;
@@ -303,9 +335,15 @@
         }
         if (!t) return;
         try {
-          if (s.gid !== t.req.G.id) { const msg = { type: 'graph', G: t.req.G, kernel: CM.RoadKernel && CM.RoadKernel.module }; try { s.w.postMessage(msg); } catch (e) { msg.kernel = null; s.w.postMessage(msg); } s.gid = t.req.G.id; }
+          if (s.gid !== t.req.G.id) {
+            const msg = { type: 'graph', G: t.req.G, kernel: CM.RoadKernel && CM.RoadKernel.module };
+            try { s.w.postMessage(msg); } catch (e) { msg.kernel = null; s.w.postMessage(msg); }
+            s.gid = t.req.G.id; s.timeReq = null;
+          }
           s.n++;
-          s.w.postMessage({ type: 'block', req: t.req.id, b: t.b, gid: t.req.G.id, time: t.req.time, origins: t.origins, tStart: t.tStart, tDest: t.tDest, dem: t.dem }, [t.tStart.buffer, t.tDest.buffer, t.dem.buffer]);
+          const time = s.timeReq === t.req.id ? undefined : t.req.time;
+          s.w.postMessage({ type: 'block', req: t.req.id, b: t.b, gid: t.req.G.id, time: time, origins: t.origins, tStart: t.tStart, tDest: t.tDest, dem: t.dem }, [t.tStart.buffer, t.tDest.buffer, t.dem.buffer]);
+          s.timeReq = t.req.id;
         } catch (e) { this.fail('工作线程消息发送失败：' + (e && e.message || e)); return; }
       }
     },
@@ -2270,11 +2308,13 @@
 
   // ---------------- 时段流水线（v2.1） ----------------
   // 同一轮里各时段（工作日 / 周末 × 4）的迭代互不依赖：每个时段只读写自己的状态与独占的缓冲区，共享的城市、需求与路网只读。
-  // 有工作线程时最多 PIPE_W 个时段交错执行，结果与逐个执行逐位相同；同步求解或没有工作线程时逐个执行（只用一套缓冲区）。
+  // 实时最多 PIPE_W 个时段。高配桌面快进时可再并行两段，结果与逐个执行逐位相同。
   // start(job, buf) 返回该任务的生成器，onDone(job, 返回值) 在任务完成时调用（按完成顺序）。所有任务都在等工作线程时让出 WAIT
   Model.prototype.pipeline = function* (jobs, start, onDone, pred) {
     if(!jobs.length)return;
-    const width = this.syncSolve || !CarPool.ready() ? 1 : Math.min(PIPE_W, jobs.length);
+    const fast = !pred && CM.game?.model === this && CM.game.jumping && this.net?.N <= 250;
+    const limit = fast ? workerPlan().fastPeriods : PIPE_W;
+    const width = this.syncSolve || !CarPool.ready() ? 1 : Math.min(limit, jobs.length);
     const bufs = pred ? (this.predBufs || (this.predBufs = [this.predBuf])) : (this.pipeBufs || (this.pipeBufs = [this.liveBuf]));
     const mark = pred ? '_predAt' : '_liveAt';
     const act = [], free = [];

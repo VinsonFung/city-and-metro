@@ -244,6 +244,6 @@
     metroLed: { radius: 4, years: 4, base: 0.3, xfer: 0.5, flow: 0.6, flowFull: 60000, tod: [0, 0.15, 0.4, 0.8], cov0: 0.08, cov1: 0.45, wMin: 0.25, res: 1.0, jobs: 1.8, flatten: 0.6, capR: 0.35, capJ: 0.9 },
     saves: { prefix: 'cm1.', maxManual: 12 },
     // 动态对象上限（代表性展示）：汽车、车站行人、街道行人、列车上下车乘客（每帧）；声音：列车声部与同时播放的环境短音
-    perf: { solverInputMs: 1.5, solverBudgetMs: 5, solverBudgetMaxMs: 10, frameTargetMs: 13, jumpSliceMs: 10, trafficBuildMs: 8, jumpRenderMs: 250, chunkBudgetMs: 6, sharpBudgetMs: 8, movingBudgetMs: 3, prefetchMs: 2, warmBudgetMs: 10, cacheMaxPx: 24e6, maxCars: 320, maxPeds: 180, maxWalkers: 120, maxRiders: 120, trainVoices: 3, maxOneShots: 6 },
+    perf: { solverInputMs: 1.5, solverBudgetMs: 5, solverBudgetMaxMs: 10, frameTargetMs: 13, jumpSliceMs: 10, trafficBuildMs: 8, jumpRenderMs: 1500, chunkBudgetMs: 6, sharpBudgetMs: 8, movingBudgetMs: 3, prefetchMs: 2, warmBudgetMs: 10, cacheMaxPx: 24e6, maxCars: 320, maxPeds: 180, maxWalkers: 120, maxRiders: 120, trainVoices: 3, maxOneShots: 6 },
   };
 })(window.CM);
