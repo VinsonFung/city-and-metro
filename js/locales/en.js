@@ -21201,3 +21201,48 @@ Object.assign(window.CM.I18N_EN, {
   "找不到这段轨道接管时的线位：请用「撤销」退回改动": "The original taken-over alignment of this track can't be found: use Undo to revert the change",
   "已在草案中应用：恢复接管原状": "Applied to draft: Restore Taken-over Alignment",
 });
+
+// v3.7：地铁圈的人设与措辞按年代（早年的叫法与说法）
+Object.assign(window.CM.I18N_EN, {
+  "送货伙计": "delivery boy", "快递员": "courier", "做工的": "factory hand", "上班的": "office worker", "挤车的": "crushed commuter", "学生": "student",
+  "学徒": "apprentice", "挤早车的": "early-train squeezer", "赶马车的": "carter", "马车夫": "cab driver", "公共马车车夫": "omnibus driver",
+  "走路上工的": "walking commuter", "提行李的旅客": "traveller with luggage", "周末带孩子的": "weekend parent", "中学生": "secondary-school pupil",
+  "加班到十点，从地铁站回{p}还得雇马车，一个月光车钱就花不少。": "Working till ten, then hiring a cab from the station back to {p}. The fares add up fast.",
+  "带我妈去{s}站转了一圈，她说以后去医院不用再走那么远了。": "Took my mum round {s} station. She says she won't have to walk so far to the hospital any more.",
+  "{s}站开通第一天就去坐了一趟，出口正对着菜市场，太方便了。": "Rode from {s} on opening day. The exit faces the market. So handy.",
+  "提着行李从{s}走到{t}，{m} 米走了快十分钟，下次还是雇车吧。": "Carried my bags {m} m from {s} to {t}. Took nearly ten minutes. I'll hire a cab next time.",
+  "{s}站早上人太多了，检票口前挤成一团。": "{s} station is packed in the morning. Total crush at the ticket barrier.",
+  "{s}站的早高峰，报纸都打不开。": "Morning rush at {s}: you can't even open a newspaper.",
+  "又是在{l}上挤成沙丁鱼的一天。{s}到{t}这段，求多开几趟车。": "Another day packed like sardines on the {l}. {s} to {t}, please run more trains.",
+  "每天坐{l}通勤，比以前挤电车稳定多了。": "Commuting on the {l} every day is far more reliable than squeezing onto the tram.",
+  "下班坐{l}还能有个座，看几页报纸就到家了。": "I get a seat on the {l} after work. A few pages of the paper and I'm home.",
+  "能不能出个月票？天天来回 {f}，学生有点吃不消。": "Could we get a monthly ticket? {f} a day round trip is a lot for a student.",
+  "{r}又堵成停车场了，半天挪不了几米。": "{r} is a car park again. We've barely moved in ages.",
+  "{r}上的马车、电车挤成一团，半天挪不了几米。": "Carts and trams are jammed solid on {r}. We've barely moved in ages.",
+  "每天走{r}上班，人和车挤在一起，走走停停。": "My commute along {r} is stop-start every day, people and carts all squeezed together.",
+  "去{x}还得雇马车或转好几趟公共马车，附近没有地铁站。": "Getting to {x} means hiring a cab or changing omnibuses several times. No station nearby.",
+  "{x}门口就有{s}站，可我住的地方附近没有地铁，去一趟还得先走好远。": "{s} station is right outside {x}, but there's no metro near me, so it's a long walk first.",
+  "新线开通后再也不用挤电车了，每天坐地铁看看报也挺好。": "Since the new line opened I don't have to cram onto the tram. Reading the paper on the metro is nice.",
+  "地铁越修越好，出门基本都靠它了。": "The metro keeps getting better. I use it for nearly everything now.",
+  "街坊们见面就问地铁什么时候来。": "Whenever the neighbours meet, they ask when the metro is coming.",
+  "晚上雇车要等半天，车夫还不太愿意来。": "Hiring a cab at night takes forever, and the drivers don't want to come out here.",
+  "昨天去坐了，站里比外面暖和！": "Rode it yesterday. Warmer inside the station than out!",
+  "出口那边要是多开几家小店就好了。": "It'd be nice if a few more shops opened by the exit.",
+  "一样的早高峰，我已经练成单脚站立了。": "Same rush hour here. I've learned to stand on one foot.",
+  "每天早上都像打了一仗。": "Every morning feels like a battle.",
+  "算下来还是比打车便宜，就是每天心疼一下。": "Still cheaper than a taxi, it just hurts a little every day.",
+  "算下来还是比雇马车便宜，就是每天心疼一下。": "Still cheaper than hiring a cab, it just hurts a little every day.",
+  "同堵，我在车上把早饭都吃完了。": "Same jam here. I finished breakfast on board.",
+  "每天在这条路上能看完一整份报纸。": "I can read a whole newspaper on this road every day.",
+  "骑自行车都比开车快。": "A bicycle is faster than a car.",
+  "走路都比坐车快。": "Walking is faster than riding.",
+  "附近也不好叫车，只能走过去。": "Hard to find a cab around here too, so I walk.",
+  "我住在{a}，每天{b}去{c}一带送货，单程 {d} 分钟。": "I live in {a} and {b} to make deliveries around {c}: {d} min each way.",
+  "换了个东家，现在在{a}一带送货，{b}过去单程 {c} 分钟。": "New employer: now I deliver around {a} and {b} there, {c} min each way.",
+  "住在{a}，在{b}送货。": "Lives in {a}, delivers around {b}.",
+  "下次约着一起去坐一趟！": "Let's ride it together next time!",
+  "{m} 米大约要走 {min} 分钟，加上进出检票口更久。": "It takes about {min} minutes to walk {m} m, plus the time to pass through the ticket gates.",
+  "开局满 3 年、线网超过 12 km，并到了本城开放合同的年份后，政府开始招标：新线 PPP 和铁路＋物业。": "After three years, with over 12 km of track and once your city's contracts unlock, the government invites bids for new-line PPP and rail-plus-property projects."
+});
+Object.assign(window.CM.I18N_EN_MAP.ld, { "圣保罗": "St. Paul's" });
+Object.assign(window.CM.I18N_EN_MAP.pa, { "圣保罗": "Saint-Paul" });

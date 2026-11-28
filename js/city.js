@@ -898,7 +898,8 @@
       if (rg.scenic) continue;
       const hub = rg.hub || (air && rg.id === 'airport');
       if (open[k] || hub) el[c] = 1;
-      if (!R[k0].scenic && !hub && rg.open != null && rg.open <= y0) seed[c] = 1;
+      // 独立离岛开放后可自成一片，不参与开局主城区评选。
+      if (!R[k0].scenic && !hub && !rg.island && rg.open != null && rg.open <= y0) seed[c] = 1;
     }
     // 广度优先：陆地格按 pass 通行，水面最多连续跨越 LOCK_BRIDGE 格（wr 记该水面格到岸的最短跨越格数）
     const bfs = function (q, pass, vis, wr) {
@@ -1012,7 +1013,7 @@
   //  · 嵌在开放城区里（四周以可以建设的陆地为主）：不论大小都算「被可建设范围包围的规划用地」，可以建设（以前隔着河道、湖泊能通到地图边缘的仍不能建设，成了城里的飞地）；
   //  · 海上的岛（四周以水面为主）或 lockEnclaves 的岛屿地图：只有陆地不足 LOCK_FRAG 格（约 1.5 km²）的小块可以建设。
   // 只处理以后会开放的片区；境外、永不开放、空置与只能穿过的片区照旧不能建设。城市开发仍按各片区的参考年份进行
-  const LOCK_FRAG = 24;
+  const LOCK_FRAG = 24, EDGE_FRAG = 8;
   City.prototype.dropLockFragments = function (mask) {
     const W = this.W, H = this.H, N = this.N, LF = this.landFrac, lab = this.shoreOf().lab, R = this.regions, self = this;
     const on = function (c) { return LF[c] >= 0.5 ? mask[c] === 1 : (lab[c] >= 0 && mask[lab[c]] === 1); };
@@ -1033,7 +1034,8 @@
           if (on(n)) { seen[n] = 1; q.push(n); } else if (LF[n] >= 0.5) bl++; else bw++;
         }
       }
-      if (edge || !(land < LOCK_FRAG || (!D.lockEnclaves && bl >= bw))) continue;
+      // 贴边的片区按图外仍有延续处理，只有少于 8 格陆地的碎块可豁免。
+      if (edge ? land >= EDGE_FRAG : !(land < LOCK_FRAG || (!D.lockEnclaves && bl >= bw))) continue;
       for (const c of q) if (LF[c] >= 0.5 && later(c)) mask[c] = 0;
     }
   };

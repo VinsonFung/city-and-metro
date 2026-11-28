@@ -192,8 +192,11 @@
     loading = null;
     clearTimeout(job.timer);
     if (CM.CarPool && CM.CarPool.onReq === job.resume) CM.CarPool.onReq = null;
-    if (job.gen) job.gen.return();
-    if (job.releaseGeo) job.releaseGeo();
+    try { if (job.gen) job.gen.return(); }
+    finally {
+      if (job.releaseGeo) job.releaseGeo();
+      if (!CM.game) CM.MenuBg.run(true);
+    }
   }
   function runLoad(mapId, message, makeGen, isNew, what) {
     if (loading) return;   // 包括尚未开始的延时任务，防止快速重复点击启动两次载入
@@ -217,6 +220,9 @@
         if (job.geoError) throw job.geoError;
         if (!job.gen) {
           CM.useMap(mapId);
+          if (!prev) CM.MenuBg.run(false);
+          // 地图生成时并行启动需求线程，避免第一张需求表等线程冷启动。
+          if (mapId !== 'tutorial') CM.DemandPool.ready();
           if (job.releaseGeo) job.releaseGeo();
           job.gen = makeGen();
         }
@@ -245,7 +251,8 @@
       } catch (e) {
         try { if (job.gen) job.gen.return(); } catch (closeError) { console.error(closeError); }
         end();
-        if (e && e.code === 'LOAD_TIMEOUT') for (const pool of [CM.SkimPool, CM.OdPool, CM.CarPool]) if (pool) pool.fail('载入计算长时间未响应');
+        if (!prev) CM.MenuBg.run(true);
+        if (e && e.code === 'LOAD_TIMEOUT') for (const pool of [CM.SkimPool, CM.OdPool, CM.CarPool, CM.DemandPool]) if (pool) pool.fail('载入计算长时间未响应');
         CM.useMap(job.mapId || 'gz');
         CM.releaseGeos();
         if (prev && CM.game === prev) {
@@ -279,7 +286,7 @@
   let workerReleaseTimer;
   function releaseIdleWorkers() {
     if (CM.game || loading) return;
-    const settled = [CM.CarPool, CM.OdPool, CM.SkimPool].map(function (pool) { return !pool || pool.release(); });
+    const settled = [CM.CarPool, CM.OdPool, CM.SkimPool, CM.DemandPool].map(function (pool) { return !pool || pool.release(); });
     if (settled.includes(false)) workerReleaseTimer = setTimeout(releaseIdleWorkers, 500);
   }
   CM.endGame = function () {

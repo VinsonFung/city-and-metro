@@ -77,6 +77,8 @@
   --glass-edge: rgba(255, 255, 255, 0.06);
 }* { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; -webkit-font-smoothing: antialiased; }
+html, body { -webkit-user-select: none; user-select: none; }
+input, textarea, select, [contenteditable]:not([contenteditable="false"]) { -webkit-user-select: text; user-select: text; }
 /* 色盲辅助：状态仍保留文字 / 图标，避免只靠红绿表达成功、警告和错误。 */
 :root[data-color-blind="true"] { --good: #0072b2; --good-soft: rgba(0,114,178,.12); --warn: #8c5900; --warn-soft: rgba(166,106,0,.12); --bad: #84317d; --bad-soft: rgba(132,49,125,.12); }
 :root[data-color-blind="true"][data-theme="dark"] { --good: #66c2ff; --good-soft: rgba(102,194,255,.14); --warn: #f4bd53; --warn-soft: rgba(244,189,83,.14); --bad: #e3a0de; --bad-soft: rgba(227,160,222,.14); }

@@ -37,10 +37,9 @@
     if(namesReady||!CM.MAPS)return;namesReady=true;
     for(const m of Object.values(CM.MAPS)){
       const list=[...(m.geo.names||[]),...(m.data.landmarks||[]).map(x=>x.name),...(m.data.regions||[]).flatMap(x=>[x.name,...(x.streets||[]),...(x.district||[])]),...(m.data.facilities||[]).flatMap(x=>[x.n,x.label]),...((m.data.bgViz&&m.data.bgViz.ferries)||[]).map(x=>x.name),...(m.data.districtLabels||[]).map(x=>x[0]),...Object.keys(m.data.roadYears||{}),...Object.keys(m.data.bridgeYears||{}),...(m.data.places||[]).map(x=>Array.isArray(x)?x[0]:x.name)];
-      for(const p of m.data.places||[])if(typeof p[0]==='string')list.push(CM.U.stationLabel(p[0]));
       if(m.data.defaultRegion)list.push(m.data.defaultRegion.name);
       for(const task of m.data.histTasks||[])for(const anchor of task.anchors||[])list.push(anchor.name);
-      for(const raw of list)if(typeof raw==='string')for(const s of new Set([raw,raw.replace(/（.*?）/g,'').trim()]))if(hasHan(s)&&s.length>1&&s.length<80&&!en[s]){
+      for(const raw of list)if(typeof raw==='string')for(const s of new Set([raw,raw.replace(/（.*?）/g,'').trim(),CM.U.stationLabel(raw)]))if(hasHan(s)&&s.length>1&&s.length<80&&!en[s]){
         names.set(s,null);nameLengths.set(s[0],Math.max(nameLengths.get(s[0])||0,s.length));
       }
     }
@@ -74,12 +73,14 @@
       return null;
     };
     // Prefer the longest phrase; a place name inside a translated sentence must not break that sentence.
+    // Do not let a translated map title consume the year of a longer date.
+    const cut=function(e){return e<s.length&&/\d/.test(s[e-1])&&/^\s*[\d年月]/.test(s.slice(e,e+4));};
     let out='',i=0;while(i<s.length){
-      let n=trie,end=-1,value='';for(let j=i;j<s.length&&n.has(s[j]);j++){n=n.get(s[j]);if(n.out!==undefined){end=j+1;value=n.out;}}
+      let n=trie,end=-1,value='';for(let j=i;j<s.length&&n.has(s[j]);j++){n=n.get(s[j]);if(n.out!==undefined&&!cut(j+1)){end=j+1;value=n.out;}}
       // The map's own name replaces a catalogue match of the same or shorter length; a longer catalogue phrase still wins.
-      if(own){let m=mapTrie();for(let j=i;j<s.length&&m.has(s[j]);j++){m=m.get(s[j]);if(m.out!==undefined&&j+1>=end){end=j+1;value=m.out;}}}
+      if(own){let m=mapTrie();for(let j=i;j<s.length&&m.has(s[j]);j++){m=m.get(s[j]);if(m.out!==undefined&&j+1>=end&&!cut(j+1)){end=j+1;value=m.out;}}}
       // Fragments that start with a space (" 站", " 列") must not cut off a longer phrase that begins right after the space.
-      if(end>0&&s[i]===' '){let m=trie,e2=-1;for(let j=i+1;j<s.length&&m.has(s[j]);j++){m=m.get(s[j]);if(m.out!==undefined)e2=j+1;}if(e2>end){out+=' ';i++;continue;}}
+      if(end>0&&s[i]===' '){let m=trie,e2=-1;for(let j=i+1;j<s.length&&m.has(s[j]);j++){m=m.get(s[j]);if(m.out!==undefined&&!cut(j+1))e2=j+1;}if(e2>end){out+=' ';i++;continue;}}
       for(let len=Math.min(nameLengths.get(s[i])||0,s.length-i);len>Math.max(1,end-i);len--){
         const candidate=s.slice(i,i+len);if(!names.has(candidate))continue;
         value=names.get(candidate);if(!value){value=nameEnglish(candidate);names.set(candidate,value);}end=i+len;break;

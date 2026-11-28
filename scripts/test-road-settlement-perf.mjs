@@ -171,6 +171,73 @@ assert.ok(yields > model.Z / 16, 'Slow demand generation should yield more frequ
 assert.equal(JSON.stringify(model.od), baseline, 'Slicing must preserve demand and the skim fingerprint');
 console.log('PASS closed/open vacant land demand and time-sliced graph and OD equivalence');
 
+// Exercise the production Worker source and transfer semantics in an isolated VM.
+let demandSource, demandFault = '', demandBlocks = 0;
+scope.structuredClone = structuredClone;
+scope.Blob = class { constructor(parts) { demandSource = parts.join(''); } };
+scope.Worker = class {
+  constructor() {
+    this.workerScope = vm.createContext({ postMessage: (data, transfer) => {
+      const message = structuredClone(data, { transfer });
+      queueMicrotask(() => { if (!this.closed) this.onmessage({ data: message }); });
+    } });
+    vm.runInContext(demandSource, this.workerScope);
+  }
+  postMessage(data) {
+    const message = structuredClone(data);
+    queueMicrotask(() => {
+      if (this.closed) return;
+      if (message.type === 'block') {
+        demandBlocks++;
+        if (demandFault === 'message') { this.onmessageerror(); return; }
+        if (demandFault === 'hang') return;
+      }
+      this.workerScope.onmessage({ data: message });
+    });
+  }
+  terminate() { this.closed = true; }
+};
+scope.matchMedia = () => ({ matches: false });
+scope.navigator.deviceMemory = 8;
+tick = 0;
+model.zJobs.fill(200);
+for (let z = 0; z < model.Z; z++) model.zPop[z] = z % 4 ? 400 + z * 3.01 : 0;
+model.buildDemand();
+const syncDemand = JSON.stringify(model.od);
+const drainDemand = async (gen) => {
+  for (const result of gen) if (result === C.SIM_WAIT) await new Promise(setImmediate);
+};
+const demandPool = C.DemandPool, cancelled = model.buildDemandGen();
+let enteredWorker = false;
+for (const value of cancelled) {
+  if (value === C.SIM_WAIT) { enteredWorker = true; break; } // Iteration cancellation closes the generator.
+}
+assert.ok(enteredWorker);
+assert.equal(demandPool.requests.size, 0);
+assert.equal(demandPool.list, null);
+await drainDemand(model.buildDemandGen());
+assert.ok(demandBlocks > 1);
+assert.equal(JSON.stringify(model.od), syncDemand, 'Worker OD fingerprint and Float64 totals must match exactly');
+
+demandFault = 'hang';
+const timeout = model.buildDemandGen();
+let step;
+do { step = timeout.next(); } while (!step.done && step.value !== C.SIM_WAIT);
+assert.equal(step.value, C.SIM_WAIT);
+await new Promise(setImmediate);
+time += 30001;
+await drainDemand(timeout);
+assert.equal(demandPool.off, true);
+assert.equal(JSON.stringify(model.od), syncDemand, 'Timeout must rebuild the same demand on the main thread');
+
+demandFault = 'message';
+demandPool.off = false;
+await drainDemand(model.buildDemandGen());
+assert.equal(demandPool.off, true);
+assert.equal(JSON.stringify(model.od), syncDemand, 'Worker message failure must also fall back deterministically');
+delete scope.Worker;
+console.log('PASS demand Worker equality, cancellation, silent timeout and message-error fallback');
+
 tick = 0;
 const game = C.Game.create({ mode: 'challenge', tutorial: true, seed: 20000101 });
 const saved = JSON.parse(JSON.stringify(game.serialize()));

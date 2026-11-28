@@ -26,6 +26,18 @@
     grad: { role: '刚毕业的', kind: 'work', car: 0, dest: 'cbd', age: [22, 24] },
   };
   const ORDER = ['mom', 'auntie', 'uni', 'early', 'nurse', 'office', 'rider', 'teen', 'thrift', 'local', 'intern', 'grad'];
+  // 按年代（v3.7 玩家反馈：1900 年的地铁圈里有外卖小哥很出戏）：人设叫法按市民出场的年份（外卖小哥 → 快递员 → 送货伙计、学生党 → 中学生、实习生 → 学徒）；
+  // 有车的人随年代逐步买得起车（1905 年前没人开车，1975 年起按人设的比例）
+  const eraRoleOf = function (rid, y) {
+    const base = ROLES[rid] ? ROLES[rid].role : '';
+    if (rid === 'teen' && y < 2005) return '中学生';
+    return CM.Voices && CM.Voices.eraRole ? CM.Voices.eraRole(base, y) : base;
+  };
+  const yearOf = function (ym) { return Math.floor(ym / 12); };
+  const carEra = function (y) { return y < 1905 ? 0 : y < 1920 ? 0.05 : y < 1945 ? 0.15 : y < 1960 ? 0.35 : y < 1975 ? 0.7 : 1; };
+  const hasCar = function (c, y) { return !!c.car && (hash(c.handle || c.id || '') % 1000) / 1000 < carEra(y); };
+  // 送货的说法：外卖小哥、快递员「接单」，早年的送货伙计「送货」
+  const oldCourier = function (c) { return c.kind === 'courier' && c.role !== '外卖小哥' && c.role !== '快递员'; };
   const MODES = ['metro', 'bus', 'car', 'walk'];
   const HOW = { metro: '坐地铁', bus: '坐公交', car: '自己开车', walk: '走路' };
   const MAX_LOG = 240, MAX_HIST = 200, MAX_POSTS = 4;
@@ -38,6 +50,7 @@
     introNurse: '我住在{a}，每天{m}去{b}值夜班，单程 {c} 分钟。',
     introDaily: '我住在{a}，每天{m}去{b}，单程 {c} 分钟。',
     introCourier: '我住在{a}，每天{m}去{b}一带接单，单程 {c} 分钟。',
+    introCourierOld: '我住在{a}，每天{m}去{b}一带送货，单程 {c} 分钟。',
     metro: '终于能坐地铁了！从{a}到{b}坐{l}只要 {d} 分钟，以前{m}要 {c} 分钟。',
     better: '{l}开通以后，我从{a}到{b}只要 {d} 分钟了，以前要 {c} 分钟。',
     betterAny: '最近出门快多了，从{a}到{b}只要 {d} 分钟，以前要 {c} 分钟。',
@@ -49,6 +62,7 @@
     job: '换工作了，新单位在{b}。现在{m}上班单程 {d} 分钟，以前要 {e} 分钟。',
     nurseJob: '调到{b}了，现在{m}去值夜班单程 {d} 分钟，以前要 {e} 分钟。',
     courierJob: '换了个站点，现在在{b}一带接单，{m}过去单程 {d} 分钟。',
+    courierJobOld: '换了个东家，现在在{b}一带送货，{m}过去单程 {d} 分钟。',
     kid: '孩子上小学了，学校在{b}。每天{m}送孩子上学，单程 {d} 分钟。',
     kid2: '孩子升初中了，自己{m}去{b}上学，单程 {d} 分钟。',
     grad: '毕业了！在{b}找到了工作，现在{m}上班单程 {d} 分钟。',
@@ -123,9 +137,29 @@
   F.age = function (c, ym) { return Math.floor(c.age0 + (ym - c.since) / 12); };
 
   // 开局（或旧存档第一次打开）时挑选市民
+  function migrateEra(g) {
+    const state = g.folks;
+    if (state.era) return state;
+    for (const c of state.list) {
+      const base = ROLES[c.rid]?.role, year = Number.isFinite(c.since) ? yearOf(c.since) : g.clock.y;
+      const role = eraRoleOf(c.rid, year);
+      // 昵称按初次出场时的身份显示，当前身份可能已经随市民成长而变化。
+      if (base && role !== base) {
+        if (typeof c.nick === 'string' && c.nick.endsWith(base)) c.nick = c.nick.slice(0, -base.length) + role;
+        if (c.role === base) c.role = role;
+      }
+      if (c.cur?.mode === 'car' && !hasCar(c, g.clock.y)) c.netV = -1;
+    }
+    for (const p of state.log) {
+      const c = F.byId(g, p.fid);
+      if (c && oldCourier(c)) p.text = p.text.replace('一带接单', '一带送货').replace('换了个站点', '换了个东家');
+    }
+    state.era = 1;
+    return state;
+  };
   F.ensure = function (g) {
     if (!g || g.tutorial) return null;
-    if (g.folks && g.folks.list) return g.folks;
+    if (g.folks && g.folks.list) return migrateEra(g);
     const m = g.model; if (!m || !m.zPop || !m.Z || !m.zoneCells) return null;
     let pop = 0; for (let z = 0; z < m.Z; z++) pop += m.zPop[z];
     if (pop < 5000) return null;
@@ -136,8 +170,9 @@
       const R = ROLES[ORDER[k]];
       const home = pickHome(g, r, list.map(function (c) { return c.home; })); if (!home) continue;
       const dest = pickDest(g, r, R.dest, home); if (!dest) continue;
-      const age = R.age[0] + Math.floor(r() * (R.age[1] - R.age[0] + 1)), nick = home.name + R.role, sd = hash(nick + ':' + k);
-      const c = { id: 'f' + k, rid: ORDER[k], role: R.role, kind: R.kind, nick: nick, color: AVA[sd % AVA.length], handle: '@life_' + (1000 + sd % 9000),
+      const role = eraRoleOf(ORDER[k], g.clock.y);
+      const age = R.age[0] + Math.floor(r() * (R.age[1] - R.age[0] + 1)), nick = home.name + role, sd = hash(home.name + R.role + ':' + k);
+      const c = { id: 'f' + k, rid: ORDER[k], role: role, kind: R.kind, nick: nick, color: AVA[sd % AVA.length], handle: '@life_' + (1000 + sd % 9000),
         car: r() < R.car, age0: age, since: ym, stageAt: ym, home: home, dest: dest, kid: R.kid ? { age0: 2 + Math.floor(r() * 3), stage: 0 } : null,
         next: ym + 26 + Math.floor(r() * 46), hist: [], cur: null, netV: null, lastPost: -99, crowdAt: -99, nearSt: null };
       if (c.kind === 'student') c.next = ym + 40 + Math.floor(r() * 8);
@@ -151,7 +186,7 @@
       let t = evalTrip(g, c, c.home, c.dest); if (t && t.min <= 65) continue;
       for (let k = 0; k < 4; k++) { const d2 = pickDest(g, r, ROLES[c.rid].dest, c.home); const t2 = d2 && evalTrip(g, c, c.home, d2); if (t2 && (!t || t2.min < t.min)) { c.dest = d2; t = t2; if (t2.min <= 60) break; } }
     }
-    g.folks = { v: 1, ym0: ym, list: list, log: [], seen: ym - 1, seq: 0 };
+    g.folks = { v: 1, era: 1, ym0: ym, list: list, log: [], seen: ym - 1, seq: 0 };
     return g.folks;
   };
   // 默认头像（代码生成的插画）：按人设定发型、年龄与配饰（护士帽、外卖头盔、书包带、领带、工牌、耳机、眼镜……），
@@ -165,16 +200,17 @@
   };
   const avCache = new Map();
   F.avatar = function (c) {
-    const key = c.id + '|' + c.rid + '|' + c.kind + '|' + c.color + '|' + c.handle;
+    const headphones = yearOf(c.since) >= 1980;
+    const key = [c.id, c.rid, c.kind, c.color, c.handle, c.role, headphones].join('|');
     let svg = avCache.get(key); if (svg) return svg;
     const r = rng(hash(c.handle + ':face')), pk = function (a) { return a[Math.floor(r() * a.length)]; };
     const L = LOOK[c.rid] || LOOK.early, female = r() < L.f, old = !!L.old || (c.kind === 'retiree'), hs = pk(L.hs);
     const skin = pk(SKIN), hair = old ? pk(GRAY) : pk(HAIR);
     const tint = function (hex, k) { const v = parseInt(hex.slice(1), 16), R = v >> 16, G = (v >> 8) & 255, B = v & 255; const m = function (x) { return Math.round(x + (255 - x) * k); }; return 'rgb(' + m(R) + ',' + m(G) + ',' + m(B) + ')'; };
     const dark = function (hex, k) { const v = parseInt(hex.slice(1), 16), R = v >> 16, G = (v >> 8) & 255, B = v & 255; return 'rgb(' + Math.round(R * k) + ',' + Math.round(G * k) + ',' + Math.round(B * k) + ')'; };
-    const kind = c.kind, role = c.rid;
-    // 衣服：护士白、外卖黄 / 蓝、学生校服、上班族深色西装，其余按种子
-    const shirt = kind === 'nurse' ? '#f4f7fb' : role === 'rider' && kind === 'courier' ? pk(['#f2b705', '#2f80ed']) : kind === 'teen' ? pk(['#3b6db3', '#2f8f6b', '#b33b3b']) :
+    const kind = c.kind, role = c.rid, helmet = kind === 'courier' && c.role === '外卖小哥', oldC = kind === 'courier' && c.role === '送货伙计';
+    // 衣服：护士白、外卖黄 / 蓝（早年的送货伙计为棕灰工装）、学生校服、上班族深色西装，其余按种子
+    const shirt = kind === 'nurse' ? '#f4f7fb' : role === 'rider' && kind === 'courier' ? pk(oldC ? ['#7a5c3e', '#5d6670'] : ['#f2b705', '#2f80ed']) : kind === 'teen' ? pk(['#3b6db3', '#2f8f6b', '#b33b3b']) :
       (kind === 'work' && (role === 'office' || c.role === '上班族')) ? pk(['#2f3b52', '#3a4660', '#4b3f36']) : kind === 'retiree' ? pk(['#b5546b', '#7b6bb0', '#5a8f7b', '#c07a3a']) : pk(['#5b8def', '#e07a5f', '#6aa66f', '#8e6fc1', '#d4a017', '#4aa3a2']);
     const out = [];
     out.push('<svg viewBox="5 4 54 54" xmlns="http://www.w3.org/2000/svg" class="fk-face" aria-hidden="true">');
@@ -197,9 +233,13 @@
     out.push('<circle cx="19.5" cy="30" r="3" fill="' + dark(skin, 0.94) + '"/><circle cx="44.5" cy="30" r="3" fill="' + dark(skin, 0.94) + '"/>');
     out.push('<ellipse cx="32" cy="29" rx="12.5" ry="13.5" fill="' + skin + '"/>');
     // 头发 / 帽子 / 头盔
-    if (kind === 'courier') {
+    if (helmet) {   // 外卖头盔（只有外卖小哥）
       const hc = shirt;
       out.push('<path d="M18 28c0-10 6-16 14-16s14 6 14 16v1H18z" fill="' + hc + '"/><path d="M18 27h28" stroke="rgba(0,0,0,.25)" stroke-width="2"/><rect x="21" y="24" width="22" height="4" rx="2" fill="rgba(30,40,60,.55)"/>');
+    } else if (kind === 'courier') {   // 快递员、送货伙计：短发戴帽（送货伙计为深棕鸭舌帽）
+      const hc = oldC ? '#4a3a2c' : shirt;
+      out.push('<path d="M19.5 27c0-9 5.5-14 12.5-14s12.5 5 12.5 13c-3-4-7-6-12.5-6s-9 2-12.5 7z" fill="' + hair + '"/>');
+      out.push('<path d="M19 24c0-7 6-11 13-11s13 4 13 11z" fill="' + hc + '"/><path d="M18 24.5h' + (oldC ? '29' : '33') + '" stroke="' + hc + '" stroke-width="3" stroke-linecap="round"/>');
     } else {
       if (hs === 'short') out.push('<path d="M19.5 27c0-9 5.5-14 12.5-14s12.5 5 12.5 13c-3-4-7-6-12.5-6s-9 2-12.5 7z" fill="' + hair + '"/>');
       else if (hs === 'long' || hs === 'bob') out.push('<path d="M19 30c0-10 6-17 13-17s13 7 13 17c-2-6-6-10-13-10s-11 4-13 10z" fill="' + hair + '"/>' + (hs === 'bob' ? '<path d="M19 30c-1 5 0 9 2 11M45 30c1 5 0 9-2 11" stroke="' + hair + '" stroke-width="3.5" stroke-linecap="round"/>' : ''));
@@ -211,27 +251,29 @@
     // 五官：眼睛、眉毛、微笑、腮红；老人、部分人设戴眼镜，部分大学生戴耳机
     const ey = 30, glasses = old ? r() < 0.75 : (role === 'uni' || role === 'intern' || role === 'thrift') && r() < 0.45;
     out.push('<circle cx="27" cy="' + ey + '" r="1.5" fill="#2b2b2b"/><circle cx="37" cy="' + ey + '" r="1.5" fill="#2b2b2b"/>');
-    if (kind !== 'courier') out.push('<path d="M24.5 ' + (ey - 4) + 'q2.5-1.6 5 0M34.5 ' + (ey - 4) + 'q2.5-1.6 5 0" fill="none" stroke="' + dark(old ? '#7a7570' : hair.charAt(0) === '#' ? hair : '#333333', 0.9) + '" stroke-width="1.2" stroke-linecap="round"/>');
+    if (!helmet) out.push('<path d="M24.5 ' + (ey - 4) + 'q2.5-1.6 5 0M34.5 ' + (ey - 4) + 'q2.5-1.6 5 0" fill="none" stroke="' + dark(old ? '#7a7570' : hair.charAt(0) === '#' ? hair : '#333333', 0.9) + '" stroke-width="1.2" stroke-linecap="round"/>');
     out.push('<path d="M28.5 35.5q3.5 3 7 0" fill="none" stroke="#9a5a48" stroke-width="1.4" stroke-linecap="round"/>');
     if (female || kind === 'teen') out.push('<circle cx="24.5" cy="34" r="2" fill="#f19c8f" opacity=".45"/><circle cx="39.5" cy="34" r="2" fill="#f19c8f" opacity=".45"/>');
     if (old) out.push('<path d="M24 37.5q1.5 1 3 0M37 37.5q1.5 1 3 0" fill="none" stroke="' + dark(skin, 0.78) + '" stroke-width="0.8"/>');
     if (glasses) out.push('<g fill="none" stroke="#3a3a3a" stroke-width="1.2"><circle cx="27" cy="' + ey + '" r="3.6"/><circle cx="37" cy="' + ey + '" r="3.6"/><path d="M30.6 ' + ey + 'h2.8"/></g>');
-    if (role === 'uni' && kind === 'student' && !glasses && r() < 0.6) out.push('<path d="M18 30c0-11 6-17 14-17s14 6 14 17" fill="none" stroke="#333" stroke-width="2.2"/><rect x="15.5" y="27" width="5" height="8" rx="2.2" fill="#e04f5f"/><rect x="43.5" y="27" width="5" height="8" rx="2.2" fill="#e04f5f"/>');
+    if (role === 'uni' && kind === 'student' && !glasses && r() < 0.6 && headphones) out.push(   // 头戴耳机：随身听流行以后
+'<path d="M18 30c0-11 6-17 14-17s14 6 14 17" fill="none" stroke="#333" stroke-width="2.2"/><rect x="15.5" y="27" width="5" height="8" rx="2.2" fill="#e04f5f"/><rect x="43.5" y="27" width="5" height="8" rx="2.2" fill="#e04f5f"/>');
     if (female && old && r() < 0.5) out.push('<circle cx="19.5" cy="34" r="1.2" fill="#f5f0e6"/><circle cx="44.5" cy="34" r="1.2" fill="#f5f0e6"/>');
     out.push('</svg>');
     svg = out.join(''); avCache.set(key, svg);
     if (avCache.size > 256) avCache.delete(avCache.keys().next().value);
     return svg;
   };
+  F.hasCar = hasCar;   // 主页的「家里有车」与换一种走法按年代判断
   F.byId = function (g, id) { const S = g && g.folks; return S ? S.list.find(function (c) { return c.id === id; }) || null : null; };
   const perOf = function (c) { return c.kind === 'nurse' ? 3 : (c.kind === 'retiree' ? 1 : 0); };
   F.perOf = perOf;
   // 他会怎么走：有地铁且不慢就坐地铁（略偏好，准点），没有车的人不开车（开车略偏不爱，停车与油费），30 分钟以内能走到就走路
-  const choose = function (c, P) {
+  const choose = function (c, P, y) {
     const cs = [];
     if (P.metro) cs.push(['metro', P.metro.min * 0.97, P.metro.min]);
     if (P.bus) cs.push(['bus', P.bus.min, P.bus.min]);
-    if (c.car && P.car) cs.push(['car', P.car.min * 1.08, P.car.min]);
+    if (hasCar(c, y) && P.car) cs.push(['car', P.car.min * 1.08, P.car.min]);
     if (P.walk && P.walk.min <= 30) cs.push(['walk', P.walk.min * 0.9, P.walk.min]);
     cs.sort(function (a, b) { return a[1] - b[1]; });
     return cs.length ? { mode: cs[0][0], min: cs[0][2] } : null;
@@ -239,7 +281,7 @@
   const evalTrip = function (g, c, from, to) {
     const P = CM.Journey.plan(g, from, to, { per: perOf(c) });
     if (!P.ok) return null;
-    const ch = choose(c, P); if (!ch) return null;
+    const ch = choose(c, P, g.clock.y); if (!ch) return null;
     const rides = ch.mode === 'metro' ? P.metro.legs.filter(function (l) { return l.k === 'ride'; }) : [];
     let worst = null; for (const l of rides) if (!worst || l.crowd > worst.crowd) worst = l;
     return { ym: g.ym(), mode: ch.mode, min: ch.min, metro: P.metro ? P.metro.min : null, bus: P.bus ? P.bus.min : null, car: P.car ? P.car.min : null, walk: P.walk ? P.walk.min : null,
@@ -259,7 +301,7 @@
     return p;
   };
   const introText = function (c, cur) {
-    const t = c.kind === 'student' || c.kind === 'teen' ? T.introSchool : c.kind === 'nurse' ? T.introNurse : c.kind === 'retiree' ? T.introDaily : c.kind === 'courier' ? T.introCourier : T.introWork;
+    const t = c.kind === 'student' || c.kind === 'teen' ? T.introSchool : c.kind === 'nurse' ? T.introNurse : c.kind === 'retiree' ? T.introDaily : c.kind === 'courier' ? (oldCourier(c) ? T.introCourierOld : T.introCourier) : T.introWork;
     return fill(t, { a: c.home.name, b: c.dest.name, m: HOW[cur.mode], c: mins(cur.min) });
   };
   // 线网变化后的通勤动态
@@ -309,7 +351,7 @@
     } else if (ev === 'job') {
       const type = c.kind === 'nurse' ? 'hosp' : c.kind === 'courier' ? 'cbd' : (ROLES[c.rid] && ROLES[c.rid].dest === 'cbd' ? 'cbd' : 'job');
       const d2 = pickBest(function () { return pickDest(g, r, type, c.home, c.dest.name); }); if (!d2) { c.next = ym + 12; return null; }
-      c.dest = d2; tpl = c.kind === 'nurse' ? T.nurseJob : c.kind === 'courier' ? T.courierJob : T.job;
+      c.dest = d2; tpl = c.kind === 'nurse' ? T.nurseJob : c.kind === 'courier' ? (oldCourier(c) ? T.courierJobOld : T.courierJob) : T.job;
     } else if (ev === 'kid' || ev === 'kid2') {
       tripTo = pickDest(g, r, ev === 'kid' ? 'primary' : 'school', c.home);
       if (!tripTo) { c.next = ym + 12; return null; }
@@ -329,7 +371,7 @@
     }
     // 孩子上学：家长主页另记一条孩子的上学路（家长自己的通勤不变）
     if (tripTo) {
-      const kt = evalTrip(g, { car: c.car && ev === 'kid', kind: 'teen' }, c.home, tripTo);
+      const kt = evalTrip(g, { car: c.car && ev === 'kid', kind: 'teen', handle: c.handle }, c.home, tripTo);
       if (!kt) { c.next = ym + 1; return null; }
       c.kid.school = tripTo; c.kid.stage = ev === 'kid' ? 1 : 2;
       c.kid.trip = { mode: kt.mode, min: kt.min, ym: ym };
@@ -379,7 +421,14 @@
   F.sync = function (g) {
     const S = F.ensure(g); if (!S || !CM.Journey || !CM.Journey.ready(g)) return S;
     S._ym = g.ym();
-    for (const c of S.list) if (!c.cur) { const nw = evalTrip(g, c, c.home, c.dest); if (!nw) continue; c.cur = nw; c.netV = g.netVersion; pushHist(c, nw); post(S, c, 'intro', 'life', introText(c, nw), { ym: S._ym, b: nw.min, mode: nw.mode }); }
+    for (const c of S.list) {
+      const old = c.cur;
+      if (old && (old.mode !== 'car' || hasCar(c, g.clock.y))) continue;
+      const nw = evalTrip(g, c, c.home, c.dest);
+      if (!nw) continue;
+      c.cur = nw; c.netV = g.netVersion; pushHist(c, nw);
+      if (!old) post(S, c, 'intro', 'life', introText(c, nw), { ym: S._ym, b: nw.min, mode: nw.mode });
+    }
     return S;
   };
   F.restore = function (g, state) {
@@ -391,12 +440,13 @@
       netV: state.netVersion != null && c.netV != null && c.netV !== state.netVersion ? -1 : g.netVersion,
     }));
     if (!list.length) return;
-    g.folks = { ...state, list, log: state.log.filter(p => p && typeof p.text === 'string').slice(-MAX_LOG) };
+    g.folks = { ...state, list, log: state.log.filter(p => p && typeof p.text === 'string').slice(-MAX_LOG).map(p => ({ ...p })) };
+    migrateEra(g);
   };
   F.posts = function (g, fid) { const S = g && g.folks; if (!S) return []; const out = S.log.filter(function (p) { return !fid || p.fid === fid; }); return out.reverse(); };
   F.newCount = function (g) { const S = g && g.folks; if (!S) return 0; let n = 0; for (const p of S.log) if (p.ym > S.seen) n++; return n; };
   F.markSeen = function (g) { if (g && g.folks) g.folks.seen = g.ym(); };
-  F.purpose = function (c) { return c.kind === 'student' || c.kind === 'teen' ? '上学' : c.kind === 'nurse' ? '值夜班' : c.kind === 'retiree' ? '常去' : c.kind === 'courier' ? '接单' : '上班'; };
+  F.purpose = function (c) { return c.kind === 'student' || c.kind === 'teen' ? '上学' : c.kind === 'nurse' ? '值夜班' : c.kind === 'retiree' ? '常去' : c.kind === 'courier' ? (oldCourier(c) ? '送货' : '接单') : '上班'; };
   // 主页用：完整的路线（含开车路线的几何）
   F.plan = function (g, c, to) { return CM.Journey.plan(g, c.home, to || c.dest, { per: perOf(c), geom: true }); };
 })(window.CM);

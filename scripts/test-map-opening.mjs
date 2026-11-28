@@ -90,3 +90,39 @@ for (const [map, id] of [['gz', 'newair'], ['sh', 'pvgair'], ['ny', 'lga_air'], 
   assert.equal(checkSite(city, cell, 'elevated').ok, false);
 }
 console.log('PASS underground hub construction in Guangzhou, Shanghai, New York and Sydney');
+
+const edge = Object.create(CM.City.prototype);
+Object.assign(edge, {
+  W: 20, H: 9, N: 180,
+  landFrac: new Float32Array(180).fill(1),
+  regions: [{ open: 2030 }, { open: null }, { open: 2030, passOnly: true }],
+  region: new Uint8Array(180),
+  lockRegion(c) { return this.region[c]; },
+  shoreOf() { return { lab: new Int32Array(this.N).fill(-1) }; },
+});
+const mask = new Uint8Array(edge.N);
+mask.fill(1, 0, 7); // Seven land cells touching the map edge.
+mask.fill(1, 10, 18); // Eight land cells stay locked.
+edge.region[0] = 1;
+edge.region[1] = 2;
+edge.dropLockFragments(mask);
+assert.deepEqual([...mask.slice(0, 7)], [1, 1, 0, 0, 0, 0, 0]);
+assert.ok(mask.slice(10, 18).every(x => x === 1));
+console.log('PASS small edge fragments open without unlocking permanent or pass-through cells');
+
+const coast = Object.create(CM.City.prototype);
+Object.assign(coast, {
+  W: 32, H: 3, N: 96,
+  landFrac: new Float32Array(96),
+  regions: [{ open: 1980 }, { open: 1980, island: true }],
+  region: new Uint8Array(96),
+});
+for (let y = 0; y < coast.H; y++) {
+  coast.landFrac.fill(1, y * coast.W, y * coast.W + 4);
+  coast.landFrac.fill(1, y * coast.W + 24, y * coast.W + 32);
+  coast.region.fill(1, y * coast.W + 24, y * coast.W + 32);
+}
+const first = coast.lockMaskFor(Uint8Array.of(1, 1));
+assert.equal(first[0], 0, 'The larger independent island must not lock the original mainland');
+assert.equal(first[24], 0, 'The already open island remains independently buildable');
+console.log('PASS independent island stays open without replacing the starting mainland');

@@ -21,35 +21,70 @@
   };
   const AVA = ['#e4572e', '#2e86ab', '#7a5195', '#16a085', '#f18f01', '#c0392b', '#3b8ea5', '#8e44ad', '#2f9e44', '#d35400'];
   const HANDLE = { cover: 'home', newst: 'newbie', xfer: 'transfer', crowd: 'rushhour', fare: 'budget', road: 'driver', fac: 'weekend', line: 'commuter', city: 'citizen' };
-  const author = function (topic, place, seed, role) { const nick = (place ? short(place) : '') + (role || pick(ROLE[topic] || ROLE.city, seed)); return { nick: nick, color: AVA[seed % AVA.length], ch: nick.charAt(0), handle: '@' + (HANDLE[topic] || 'rider') + '_' + (1000 + seed % 9000) }; };
+  // 按年代的叫法（v3.7 玩家反馈：1900 年的地铁圈里出现外卖小哥很出戏）：[早于该年, 当时的叫法]，依次取第一个符合的；folks.js 共用
+  const ERA_ROLE = {
+    '外卖小哥': [[1990, '送货伙计'], [2010, '快递员']],
+    '打工人': [[1950, '做工的'], [2015, '上班的']],
+    '沙丁鱼本鱼': [[2010, '挤车的']],
+    '学生党': [[2005, '学生']],
+    '实习生': [[1950, '学徒']],
+    '早高峰幸存者': [[2005, '挤早车的']],
+    '开车上班的': [[1910, '赶马车的']],
+    '出租车师傅': [[1910, '马车夫']],
+    '公交司机': [[1910, '公共马车车夫']],
+    '骑车通勤族': [[1890, '走路上工的']],
+    '拖箱子的旅客': [[1970, '提行李的旅客']],
+    '周末遛娃的': [[2010, '周末带孩子的']],
+  };
+  const eraRole = function (w, y) { const L = ERA_ROLE[w]; if (L && y) for (const e of L) if (y < e[0]) return e[1]; return w; };
+  // 带年代的说法：字符串任何年代都可用；{ t, a（从该年起）, b（早于该年）} 只在对应年代出现。curY 为生成时的游戏年份
+  let curY = 2020;
+  const okEra = function (e) { return typeof e === 'string' || ((!e.a || curY >= e.a) && (!e.b || curY < e.b)); };
+  const txt = function (e) { return typeof e === 'string' ? e : e.t; };
+  const eraList = function (arr) { const L = arr.filter(okEra).map(txt); return L.length ? L : arr.map(txt); };
+  const pickEra = function (arr, seed) { return pick(eraList(arr), seed); };
+  const author = function (topic, place, seed, role) { const nick = (place ? short(place) : '') + eraRole(role || pick(ROLE[topic] || ROLE.city, seed), curY); return { nick: nick, color: AVA[seed % AVA.length], ch: nick.charAt(0), handle: '@' + (HANDLE[topic] || 'rider') + '_' + (1000 + seed % 9000) }; };
   // 设施类反馈的发帖人按设施类型（医院、商圈、景点、球场、大学…）
   const FAC_ROLE = { hosp: '带老人看病的', shop: '周末逛街的', cbd: '写字楼上班族', scenic: '来旅游的', park: '周末遛娃的', stadium: '看球的球迷', venue: '看展的', uni: '大学生' };
   // 反馈措辞（v3.0 玩家建议「要有活人感」）：每个话题四到六种说法，带上接孩子、加班、下雨天、拖行李这些日常细节；按对象与月份稳定选取
+  // 带年代的说法（v3.7）：手机、刷剧、导航、打卡、共享单车、电动车、私家车、闸机这些只在相应年代以后出现，早年换成当时的说法
   const SAY = {
     cover: ['{p}住了这么多人，最近的地铁站还要走二十多分钟，什么时候能修到我们这儿？', '每天从{p}出门先挤公交再换地铁，单程一个多小时。', '{p}这边连个地铁站都没有，下雨天出门太难了。',
-      '送完孩子再去赶公交，{p}的早上永远在跑。地铁要是能修过来，至少能省半小时。', '搬到{p}三年了，朋友问坐地铁怎么来，我都不知道怎么回答。', '加班到十点，从地铁站回{p}还得打车，一个月光打车就花不少。'],
+      '送完孩子再去赶公交，{p}的早上永远在跑。地铁要是能修过来，至少能省半小时。', '搬到{p}三年了，朋友问坐地铁怎么来，我都不知道怎么回答。',
+      { a: 1910, t: '加班到十点，从地铁站回{p}还得打车，一个月光打车就花不少。' }, { b: 1910, t: '加班到十点，从地铁站回{p}还得雇马车，一个月光车钱就花不少。' }],
     newst: ['我家附近终于有地铁了！{s}站开通，出门走几分钟就到。', '{s}站开通后上班少走好远，早上能多睡二十分钟。', '第一次从{s}站坐地铁，车站很新，人也不多。',
-      '带我妈去{s}站转了一圈，她说以后去医院不用再等我开车送了。', '{s}站开通第一天就去打卡了，出口正对着菜市场，太方便了。', '以前去市区要倒两趟公交，现在从{s}站一坐就到，周末终于愿意出门了。'],
+      { a: 1950, t: '带我妈去{s}站转了一圈，她说以后去医院不用再等我开车送了。' }, { b: 1950, t: '带我妈去{s}站转了一圈，她说以后去医院不用再走那么远了。' },
+      { a: 2015, t: '{s}站开通第一天就去打卡了，出口正对着菜市场，太方便了。' }, { b: 2015, t: '{s}站开通第一天就去坐了一趟，出口正对着菜市场，太方便了。' },
+      '以前去市区要倒两趟公交，现在从{s}站一坐就到，周末终于愿意出门了。'],
     xfer: ['在{s}换乘到{t}要出站走 {m} 米再进站，太绕了。', '{s}和{t}要是能在一个站里换乘就好了，现在要走 {m} 米。',
-      '拖着行李箱从{s}走到{t}，{m} 米走了快十分钟，下次还是打车吧。', '每天在{s}出站换{t}，夏天走一趟一身汗。'],
+      { a: 1970, t: '拖着行李箱从{s}走到{t}，{m} 米走了快十分钟，下次还是打车吧。' }, { b: 1970, t: '提着行李从{s}走到{t}，{m} 米走了快十分钟，下次还是雇车吧。' },
+      '每天在{s}出站换{t}，夏天走一趟一身汗。'],
     level: ['在{s}站换乘要上下好几层，每次多走两三分钟。', '{s}站换乘的楼梯太长了，提着东西很累。', '{s}站换乘一会儿上一会儿下，第一次来的人肯定会迷路。'],
-    crowd: ['早高峰{s}站排队进站排到了出口外面。', '{s}站早上人太多了，闸机前挤成一团。', '八点在{s}站等车，前面排了三层人，眼睁睁看着车开走。', '{s}站的早高峰，手机都掏不出来。'],
+    crowd: ['早高峰{s}站排队进站排到了出口外面。', { a: 1965, t: '{s}站早上人太多了，闸机前挤成一团。' }, { b: 1965, t: '{s}站早上人太多了，检票口前挤成一团。' },
+      '八点在{s}站等车，前面排了三层人，眼睁睁看着车开走。', { a: 2000, t: '{s}站的早高峰，手机都掏不出来。' }, { b: 2000, t: '{s}站的早高峰，报纸都打不开。' }],
     linecrowd: ['{l}早高峰太挤了，在{s}站等了两趟才挤上去。', '{l}从{s}到{t}这段车厢里转身都难，能不能加车？',
-      '{l}每天早上从{s}挤到{t}，包都挤变形了。', '又是被{l}挤成照片的一天。{s}到{t}这段，求多开几趟车。'],
-    linegood: ['{l}准点又快，从{s}坐到{t}很省心。', '每天坐{l}通勤，比以前开车稳定多了。', '{l}越坐越喜欢，{s}到{t}从来没迟到过。', '下班坐{l}还能有个座，刷两集剧就到家了。'],
-    fare: ['票价有点贵，每天来回要 {f}。', '地铁是方便，可每月光车费就要不少钱。', '每天来回 {f}，一个月算下来比午饭还贵。', '能不能出个月票？天天来回 {f}，学生党有点吃不消。'],
-    road: ['{r}早高峰堵得动不了，要是有地铁就好了。', '每天在{r}上堵半小时，羡慕住在地铁边的同事。', '{r}又堵成停车场了，导航说还要四十分钟。', '开车走{r}上班，一路刹车踩到脚酸。'],
-    roadok: ['{r}最近好像没那么堵了，地铁分走了不少人。', '今天走{r}居然一路绿灯，是不是大家都去坐地铁了？'],
-    fac: ['去{x}还得打车或转好几趟公交，附近没有地铁站。', '{x}离最近的地铁站太远了，希望能修过去。', '每次去{x}都要提前一小时出门，路上全靠公交。'],
+      '{l}每天早上从{s}挤到{t}，包都挤变形了。', { a: 2015, t: '又是被{l}挤成照片的一天。{s}到{t}这段，求多开几趟车。' }, { b: 2015, t: '又是在{l}上挤成沙丁鱼的一天。{s}到{t}这段，求多开几趟车。' }],
+    linegood: ['{l}准点又快，从{s}坐到{t}很省心。', { a: 1950, t: '每天坐{l}通勤，比以前开车稳定多了。' }, { b: 1950, t: '每天坐{l}通勤，比以前挤电车稳定多了。' },
+      '{l}越坐越喜欢，{s}到{t}从来没迟到过。', { a: 2012, t: '下班坐{l}还能有个座，刷两集剧就到家了。' }, { b: 2012, t: '下班坐{l}还能有个座，看几页报纸就到家了。' }],
+    fare: ['票价有点贵，每天来回要 {f}。', '地铁是方便，可每月光车费就要不少钱。', '每天来回 {f}，一个月算下来比午饭还贵。',
+      { a: 2005, t: '能不能出个月票？天天来回 {f}，学生党有点吃不消。' }, { b: 2005, t: '能不能出个月票？天天来回 {f}，学生有点吃不消。' }],
+    road: ['{r}早高峰堵得动不了，要是有地铁就好了。', '每天在{r}上堵半小时，羡慕住在地铁边的同事。',
+      { a: 2008, t: '{r}又堵成停车场了，导航说还要四十分钟。' }, { a: 1930, b: 2008, t: '{r}又堵成停车场了，半天挪不了几米。' }, { b: 1930, t: '{r}上的马车、电车挤成一团，半天挪不了几米。' },
+      { a: 1950, t: '开车走{r}上班，一路刹车踩到脚酸。' }, { b: 1950, t: '每天走{r}上班，人和车挤在一起，走走停停。' }],
+    roadok: ['{r}最近好像没那么堵了，地铁分走了不少人。', { a: 1925, t: '今天走{r}居然一路绿灯，是不是大家都去坐地铁了？' }],
+    fac: [{ a: 1910, t: '去{x}还得打车或转好几趟公交，附近没有地铁站。' }, { b: 1910, t: '去{x}还得雇马车或转好几趟公共马车，附近没有地铁站。' },
+      '{x}离最近的地铁站太远了，希望能修过去。', '每次去{x}都要提前一小时出门，路上全靠公交。'],
     // 设施旁边已有车站（v2.9 玩家反馈：龙翔桥站走 5 分钟就到湖滨商圈，乘客却抱怨接驳要走很远）：问题在到访者住的地方
-    facnear: ['{x}门口就有{s}站，可我住的地方附近没有地铁，去一趟还得先打车。', '去{x}坐地铁倒是方便，就是从我家到地铁站太远。'],
-    impact: ['新线开通后，地铁出行多了 {d}，身边越来越多人改坐地铁。', '新线开通以后上班终于不用堵在路上了。', '新线开通后我把车卖了，每天坐地铁看看书也挺好。'],
+    facnear: [{ a: 1910, t: '{x}门口就有{s}站，可我住的地方附近没有地铁，去一趟还得先打车。' }, { b: 1910, t: '{x}门口就有{s}站，可我住的地方附近没有地铁，去一趟还得先走好远。' },
+      '去{x}坐地铁倒是方便，就是从我家到地铁站太远。'],
+    impact: ['新线开通后，地铁出行多了 {d}，身边越来越多人改坐地铁。', '新线开通以后上班终于不用堵在路上了。',
+      { a: 1950, t: '新线开通后我把车卖了，每天坐地铁看看书也挺好。' }, { b: 1950, t: '新线开通后再也不用挤电车了，每天坐地铁看看报也挺好。' }],
     satlow: ['地铁修得太慢了，城市都长这么大了。', '希望地铁规划多听听乘客的声音。', '说真的，这几年地铁的进步没赶上城市的变化。'],
-    sathigh: ['这几年坐地铁越来越方便了，给地铁点个赞。', '地铁越修越好，出门基本不用开车了。', '外地朋友来玩都说这里地铁方便，挺自豪的。'],
+    sathigh: ['这几年坐地铁越来越方便了，给地铁点个赞。', { a: 1950, t: '地铁越修越好，出门基本不用开车了。' }, { b: 1950, t: '地铁越修越好，出门基本都靠它了。' }, '外地朋友来玩都说这里地铁方便，挺自豪的。'],
   };
-  // 同一话题的多条反馈依次换用不同说法
+  // 同一话题的多条反馈依次换用不同说法（只在当前年代可用的说法里轮换）
   let used = {};
-  const say = function (arr, seed) { const k = arr[0]; used[k] = used[k] == null ? seed % arr.length : used[k] + 1; return arr[used[k] % arr.length]; };
+  const say = function (arr, seed) { const k = txt(arr[0]), L = eraList(arr); used[k] = used[k] == null ? seed % L.length : used[k] + 1; return L[used[k] % L.length]; };
   // 金额（当地货币）：10 以上取整，1 以上一位小数，更小的两位小数
   const money = function (v) { const a = Math.abs(v); return (a >= 10 ? String(Math.round(v)) : a >= 1 ? v.toFixed(1) : v.toFixed(2)) + ' ' + CFG.money.unit; };
   const fill = function (t, v) { return t.replace(/\{(\w)\}/g, function (m, k) { return v[k] != null ? v[k] : ''; }); };
@@ -60,7 +95,7 @@
     const key = g.ym() + ':' + g.netVersion + ':' + (g.impactReport && g.impactReport.version || 0);
     if (Voices.cache && Voices.cache.g === g && Voices.cache.key === key) return Voices.cache.list;
     const out = [], C = m.net.C, acc = m.net.acc, ym = g.ym(), sd = m.stDailyWk || m.stDaily;
-    used = {};
+    used = {}; curY = g.clock.y;
     // 回复里用到的小工具：片区最近的运营车站、车站的线路、道路的早高峰拥堵指数
     const nearSt = function (z) { const cells = m.zoneCells[z] || []; let x = 0, y = 0; for (const c of cells) { x += c % g.city.W + 0.5; y += Math.floor(c / g.city.W) + 0.5; } if (!cells.length) return null; x /= cells.length; y /= cells.length; let best = null, bd = 1e9; C.stations.forEach(function (s, k) { if (!C.serviced[k]) return; const dd = U.dist(s.x, s.y, x, y); if (dd < bd) { bd = dd; best = s.name; } }); return best ? { name: best, km: bd * CFG.CELL_M / 1000 } : null; };
     const lineNames = function (i) { return Array.from(C.stationLines[i] || []).map(function (l) { return g.net.lines[l] ? g.net.lines[l].name : ''; }).filter(Boolean); };
@@ -114,7 +149,7 @@
     Array.from(byName.entries()).sort(function (a, b) { return b[1] - a[1]; }).slice(0, 2).forEach(function (e) { const name = g.city.roadNames[e[0]]; if (name) post('bad', 'road', fill(say(SAY.road, hash(name) + ym), { r: name }), e[1] * 2, { road: name }, ['堵车'], '', null, ['road', { r: name }], { r: name, ci: roadCi(e[0]) }); });
     const ir = g.impactReport;
     if (ir && ir.status === 'done' && ym - U.ymIndex(ir.at[0], ir.at[1]) <= 3) {
-      if (ir.roads && ir.roads.length) post('good', 'road', fill(SAY.roadok[0], { r: ir.roads[0].name }), 6000, { road: ir.roads[0].name }, ['堵车'], '', null, ['roadok'], { r: ir.roads[0].name, ok: true });
+      if (ir.roads && ir.roads.length) post('good', 'road', fill(txt(SAY.roadok[0]), { r: ir.roads[0].name }), 6000, { road: ir.roads[0].name }, ['堵车'], '', null, ['roadok'], { r: ir.roads[0].name, ok: true });
       const ds = (ir.draft.metroShare - ir.base.metroShare) * 100;
       if (ds > 0.2) post('good', 'line', fill(say(SAY.impact, ym), { d: U.fmtNum(ds, 1) + ' 个百分点' }), ir.draft.metro - ir.base.metro, null, ['新线'], '', null, ['impact'], { share: ir.draft.metroShare, add: ir.draft.metro - ir.base.metro });
     }
@@ -139,8 +174,8 @@
       }
     }
     // 总体口碑
-    if (g.econ.sat >= 75) post('good', 'city', pick(SAY.sathigh, ym), 5000, null, ['点赞'], CM.DATA.city, null, ['line', {}], { sat: g.econ.sat, share: d.metroShare || 0 });
-    else if (g.econ.sat < 45) post('bad', 'city', pick(SAY.satlow, ym), 5000, null, ['建议'], CM.DATA.city, null, null, { sat: g.econ.sat, share: d.metroShare || 0 });
+    if (g.econ.sat >= 75) post('good', 'city', pickEra(SAY.sathigh, ym), 5000, null, ['点赞'], CM.DATA.city, null, ['line', {}], { sat: g.econ.sat, share: d.metroShare || 0 });
+    else if (g.econ.sat < 45) post('bad', 'city', pickEra(SAY.satlow, ym), 5000, null, ['建议'], CM.DATA.city, null, null, { sat: g.econ.sat, share: d.metroShare || 0 });
     out.sort(function (a, b) { return b.likes - a.likes; });
     const list = out.slice(0, 14);
     // 配图：按动态固定约三成带图，同一种涂鸦只出现一次；靠前的几条里至少一条带图
@@ -192,6 +227,7 @@
     coverOff: '已收到。{p}的居住人口与通勤需求已经记录，线网规划会优先研究这一带。',
     newst: ['{s}站开通后，日均进出站约 {flow}人次，比想象中热闹。', '在这里还能换乘 {lines}，方便多了。', '终于不用再转两趟公交了！'],
     xfer: ['{m} 米大约要走 {min} 分钟，加上进出闸机更久。', '同感，{s}和{t}要是能同站换乘就好了。'],
+    xferOld: '{m} 米大约要走 {min} 分钟，加上进出检票口更久。',
     xferOff: '两站之间步行约 {min} 分钟，每天约 {xf}人次在这里换乘，已转交规划研究同站换乘。',
     level: ['天地换乘要走一段垂直通道，高峰时电梯口排长队。', '每天约 {xf}人次在{s}站换乘，确实该优化。'],
     crowd: ['{s}站高峰小时进出站约 {peak} 人次，设计容量 {cap}，负荷 {pct}。', '建议把{s}站扩建成大型站。', '我现在都提前二十分钟出门。'],
@@ -208,19 +244,25 @@
   };
   // 路人闲聊（v3.0）：不引用数据的日常回复，按帖子固定选取；楼主接话按话题
   const CHAT = {
-    cover: ['同一片的，早上公交站排队排到马路上。', '我们小区群里天天在问地铁什么时候来。', '前几年就说要规划了，到现在还没动静。', '晚上打车要等半天，司机还不太愿意来。'],
-    newst: ['昨天去坐了，站里很凉快！', '房东已经在说要涨房租了……', '出口那边能不能多放点共享单车？', '恭喜恭喜，我们那儿还在等。'],
+    cover: ['同一片的，早上公交站排队排到马路上。', { a: 2010, t: '我们小区群里天天在问地铁什么时候来。' }, { b: 2010, t: '街坊们见面就问地铁什么时候来。' }, '前几年就说要规划了，到现在还没动静。',
+      { a: 1910, t: '晚上打车要等半天，司机还不太愿意来。' }, { b: 1910, t: '晚上雇车要等半天，车夫还不太愿意来。' }],
+    newst: [{ a: 1980, t: '昨天去坐了，站里很凉快！' }, { b: 1980, t: '昨天去坐了，站里比外面暖和！' }, '房东已经在说要涨房租了……',
+      { a: 2016, t: '出口那边能不能多放点共享单车？' }, { b: 2016, t: '出口那边要是多开几家小店就好了。' }, '恭喜恭喜，我们那儿还在等。'],
     xfer: ['下雨天走这段最难受。', '第一次来还以为自己走错了。', '换乘通道要是能加个顶棚就好了。', '老人小孩走这一段真的累。'],
-    crowd: ['同款早高峰，我已经练成单脚站立了。', '每天早上都在怀疑人生。', '错峰吧，八点半以后会好一点。', '上周差点被挤下车……'],
+    crowd: [{ a: 2015, t: '同款早高峰，我已经练成单脚站立了。' }, { b: 2015, t: '一样的早高峰，我已经练成单脚站立了。' }, { a: 2010, t: '每天早上都在怀疑人生。' }, { b: 2010, t: '每天早上都像打了一仗。' },
+      '错峰吧，八点半以后会好一点。', '上周差点被挤下车……'],
     line: ['确实，比公交靠谱多了。', '这条线开得很稳，站着都能看书。', '晚上回家还能有座，幸福。', '早上能准点到公司，全靠它。'],
-    fare: ['学生能打折就好了。', '算下来还是比开车便宜，就是每天心疼一下。', '公司有交通补贴的举个手。', '多坐几站少坐几站，价格差不了多少。'],
-    road: ['同堵，我在车里把早饭都吃完了。', '每天在这条路上能听完一整张专辑。', '骑电动车都比开车快。', '下雨天更别提了。'],
-    fac: ['上次去等公交等了半个小时。', '周末带孩子去，公交挤得不行。', '修个站吧，真的很需要。', '附近停车也难，只能打车。'],
+    fare: ['学生能打折就好了。', { a: 1950, t: '算下来还是比开车便宜，就是每天心疼一下。' }, { a: 1910, b: 1950, t: '算下来还是比打车便宜，就是每天心疼一下。' }, { b: 1910, t: '算下来还是比雇马车便宜，就是每天心疼一下。' },
+      '公司有交通补贴的举个手。', '多坐几站少坐几站，价格差不了多少。'],
+    road: ['同堵，我在车上把早饭都吃完了。', { a: 1970, t: '每天在这条路上能听完一整张专辑。' }, { b: 1970, t: '每天在这条路上能看完一整份报纸。' },
+      { a: 1995, t: '骑电动车都比开车快。' }, { a: 1950, b: 1995, t: '骑自行车都比开车快。' }, { b: 1950, t: '走路都比坐车快。' }, '下雨天更别提了。'],
+    fac: ['上次去等公交等了半个小时。', '周末带孩子去，公交挤得不行。', '修个站吧，真的很需要。', { a: 1950, t: '附近停车也难，只能打车。' }, { b: 1950, t: '附近也不好叫车，只能走过去。' }],
     city: ['确实，这几年变化挺大的。', '外地朋友也这么说。', '还有进步空间，继续加油。', '希望明年更好。'],
   };
-  const OP = { cover: '谢谢大家顶，希望规划的人能看到。', newst: '下次约着一起去打卡！', xfer: '是啊，尤其是拿着东西的时候。', crowd: '看来不止我一个人这样……', line: '对，推荐给大家。', fare: '主要是天天都要坐，积少成多。', road: '明天试试坐地铁。', fac: '对，就差一个站。', city: '一起加油。' };
+  const OP = { cover: '谢谢大家顶，希望规划的人能看到。', newst: [{ a: 2015, t: '下次约着一起去打卡！' }, { b: 2015, t: '下次约着一起去坐一趟！' }], xfer: '是啊，尤其是拿着东西的时候。', crowd: '看来不止我一个人这样……', line: '对，推荐给大家。', fare: '主要是天天都要坐，积少成多。', road: '明天试试坐地铁。', fac: '对，就差一个站。', city: '一起加油。' };
   const fillN = function (t, v) { return t.replace(/\{(\w+)\}/g, function (m, k) { return v[k] != null ? v[k] : ''; }); };
   Voices.replies = function (g, p) {
+    curY = Number.isFinite(p.ym) ? Math.floor(p.ym / 12) : g.clock.y;
     const M = p.meta || {}, out = [], off = { nick: (CM.DATA.city || '') + '地铁', handle: '@metro_official', color: 'var(--x-blue)', ch: '', official: true };
     const add = function (tpl, v, official, who, to) {
       const sd = hash(p.id + ':' + out.length);
@@ -230,7 +272,7 @@
     switch (p.topic) {
       case 'cover': { const nr = M.near || {}; const v = { p: M.p || p.place, pop: ppl(M.pop || 0), st: nr.name || '', km: nr.km != null ? U.fmtNum(nr.km, 1) : '?' }; if (nr.name) add(RP.cover[0], v); add(RP.cover[1], v); add(RP.coverOff, v, true); break; }
       case 'newst': { const v = { s: M.s, flow: ppl(M.flow || 0), lines: (M.lines || []).join('、') }; add(RP.newst[0], v); if ((M.lines || []).length > 1) add(RP.newst[1], v); add(RP.newst[2], v); break; }
-      case 'xfer': if (M.levels) { const v = { s: M.s, xf: ppl(M.xf || 0) }; add(RP.level[0], v); add(RP.level[1], v); } else { const v = { s: M.s, t: M.t, m: M.m, min: Math.ceil((M.m || 0) / CFG.walk.mPerMin), xf: ppl(M.xf || 0) }; add(RP.xfer[0], v); add(RP.xfer[1], v); add(RP.xferOff, v, true); } break;
+      case 'xfer': if (M.levels) { const v = { s: M.s, xf: ppl(M.xf || 0) }; add(RP.level[0], v); add(RP.level[1], v); } else { const v = { s: M.s, t: M.t, m: M.m, min: Math.ceil((M.m || 0) / CFG.walk.mPerMin), xf: ppl(M.xf || 0) }; add(curY < 1965 ? RP.xferOld : RP.xfer[0], v); add(RP.xfer[1], v); add(RP.xferOff, v, true); } break;
       case 'crowd': if (M.l) { const v = { l: M.l, lf: pct(M.lf || 0), riders: ppl(M.riders || 0) }; add(RP.lineCrowd[0], v); add(RP.lineCrowd[1], v); add(RP.lineCrowd[2], v); } else { const v = { s: M.s, peak: U.fmtInt(M.peak || 0), cap: U.fmtInt(M.cap || 0), pct: pct((M.peak || 0) / Math.max(1, M.cap || 1)) }; add(RP.crowd[0], v); add(RP.crowd[1], v); add(RP.crowdOff, v, true); } break;
       case 'line': if (M.l) { const v = { l: M.l, riders: ppl(M.riders || 0), lf: pct(M.lf || 0) }; add(RP.lineGood[0], v); add(RP.lineGood[1], v); } else { const v = { share: pct(M.share || 0), add: ppl(Math.max(0, M.add || 0)) }; add(RP.impact[0], v); add(RP.impact[1], v); } break;
       case 'fare': { const v = { fu: M.fu || (M.f ? M.f + ' ' + CFG.money.unit : '') }; if (v.fu) add(RP.fare[0], v); add(RP.fare[1], v); add(RP.fare[2], v, true); break; }
@@ -240,11 +282,12 @@
     }
     // 路人闲聊插在第二条，有时回复的是楼上；约三分之一的帖子楼主接一句（官方说明保持在最后）
     const tk = CHAT[p.topic] ? p.topic : 'city', hs = hash('chat' + p.id), offi = out.length && out[out.length - 1].official ? out.pop() : null;
-    const prev = out.length ? out[0] : null; add(CHAT[tk][hs % CHAT[tk].length], {}, false, null, prev && hs % 2 ? prev.who.handle : null);
-    if (hs % 3 === 0 && OP[tk]) add(OP[tk], {}, false, p.who, out[out.length - 1].who.handle);
+    const prev = out.length ? out[0] : null, chat = eraList(CHAT[tk]); add(chat[hs % chat.length], {}, false, null, prev && hs % 2 ? prev.who.handle : null);
+    if (hs % 3 === 0 && OP[tk]) add(Array.isArray(OP[tk]) ? eraList(OP[tk])[0] : OP[tk], {}, false, p.who, out[out.length - 1].who.handle);
     if (offi) out.push(offi);
     return out;
   };
+  Voices.eraRole = eraRole;   // folks.js 的固定市民用同一套年代叫法
   CM.Voices = Voices;
 
   // ======================== 「地铁圈」App：乘客之声（v2.3，仿社交平台） ========================
@@ -650,7 +693,7 @@
         h('div', { class: 'vx-prow' }, h('span', { class: 'vx-ava xl', style: { background: c.color } }, AVF(c)), h('span', { class: 'grow' })),
         h('b', { class: 'vx-pn' }, c.nick), h('div', { class: 'vx-hd' }, c.handle),
         h('p', { class: 'vx-bio' }, '住在' + c.home.name + '，' + (c.kind === 'retiree' ? '常去' + c.dest.name : '在' + c.dest.name + FK.purpose(c)) + '。'),
-        h('div', { class: 'fk-tags' }, h('span', null, c.role + ' · ' + FK.age(c, ym) + ' 岁'), h('span', null, c.car ? '家里有车' : '家里没有车'), h('span', null, ymText(c.since) + ' 起'))));
+        h('div', { class: 'fk-tags' }, h('span', null, c.role + ' · ' + FK.age(c, ym) + ' 岁'), h('span', null, FK.hasCar(c, g.clock.y) ? '家里有车' : '家里没有车'), h('span', null, ymText(c.since) + ' 起'))));
       const P = J.ready(g) ? FK.plan(g, c) : null, cur = c.cur;
       const sec = h('section', { class: 'fk-sec' }, h('h4', null, '每天的路', h('small', null, J.PER[FK.perOf(c)][0] + ' · 单程')));
       if (P && cur) {
@@ -666,7 +709,7 @@
           h('button', { class: 'btn sm', onclick: then(function () { J.showOnMap(self, route, pins, c.nick); }) }, ic('locate', 13), '在城市地图上看')));
         if (mode === 'metro' && P.metro) { sec.appendChild(segLegend(P.metro)); sec.appendChild(h('div', { class: 'nv-legs' }, P.metro.legs.map(legRow))); }
         sec.appendChild(h('h5', null, '换一种走法'));
-        sec.appendChild(cmpRow(P, mode, !c.car));
+        sec.appendChild(cmpRow(P, mode, !FK.hasCar(c, g.clock.y)));
         if (!P.metro && P.why) sec.appendChild(h('p', { class: 'fk-note' }, '坐地铁：' + P.why));
       } else sec.appendChild(h('div', { class: 'vx-empty' }, h('span', null, '交通数据正在更新，稍后再来看看。')));
       nodes.push(sec);

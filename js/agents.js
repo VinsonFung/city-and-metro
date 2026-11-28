@@ -65,6 +65,8 @@
   Agents.prototype.reset = function () { this.groups.clear(); this.trains = []; this.cars = []; this.carIndex.clear(); this.carOrder.length = this.carMoves.length = 0; this.peds = []; this.walkers = []; this.netRef = null; this.treeMaps.clear(); this.carBuckets = null; this.visibleRoads = null; this.roadRef = null; this.carPaths = new WeakMap(); this.roadEnds = null; this.screenRoads = null; this.crossings = null; this.tunCity = null; this.fillPending = true; this.linkInfo = null; this.carSpawnClock=this.pedSpawnClock=this.walkSpawnClock=0;this.trafficSample=null;this.turnCache=null; };
 
   Agents.prototype.update = function (dt, game, R) {
+    // 快进期间只保留已有动画状态，结算结束后由下一帧更新到当前线网。
+    if (game.jumping) return;
     const dtv = dt * game.visualRate() * CFG.time.visualPerSec;
     this.vt += dtv;
     const model = game.model;

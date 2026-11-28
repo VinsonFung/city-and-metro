@@ -859,11 +859,157 @@
     }
   }
   // 需求表的输出缓冲区：目的地编号与六个目的的往返次数
-  function odBuffer(cap) { return { cap: cap, dest: new Int32Array(cap), t: [0, 1, 2, 3, 4, 5].map(function () { return new Float32Array(cap); }) }; }
+  function odBuffer(cap, FloatType = Float32Array) { return { cap, dest: new Int32Array(cap), t: Array.from({ length: 6 }, () => new FloatType(cap)) }; }
   function odGrow(b, n, cap) {
-    const nb = odBuffer(cap);
+    const nb = odBuffer(cap, b.t[0].constructor);
     nb.dest.set(b.dest.subarray(0, n)); for (let q = 0; q < 6; q++) nb.t[q].set(b.t[q].subarray(0, n));
     return nb;
+  }
+  // 出行需求按起点独立求解。各段保留双精度出行量，合并时按原起点顺序累加。
+  function demandWorkerMain() {
+    let basis, req;
+    onmessage = function (e) {
+      const m = e.data;
+      if (m.type === 'basis') { basis = m.data; req = m.req; return; }
+      if (m.type === 'clear') { basis = null; req = null; return; }
+      if (!basis || req !== m.req) throw new Error('需求表输入不匹配');
+      const per = m.per, rows = m.end - m.begin, start = new Int32Array(rows + 1);
+      const D = demandWork(basis, odBuffer(Math.max(per, rows * 120), Float64Array));
+      for (let i = m.begin; i < m.end; i++) {
+        if (D.out.cap - D.n < per) D.out = odGrow(D.out, D.n, Math.max(D.out.cap * 2, D.n + per * 64));
+        demandOrigin(D, i);
+        start[i - m.begin + 1] = D.n;
+      }
+      const dest = D.out.dest.subarray(0, D.n), t = D.out.t.map(a => a.subarray(0, D.n));
+      postMessage({ req, part: m.part, start, dest, t }, [start.buffer, dest.buffer, ...t.map(a => a.buffer)]);
+    };
+  }
+  const DEMAND_IDLE_MS = 15000;
+  const DemandPool = {
+    list: null, off: false, seq: 0, queue: [], requests: new Map(), idleTimer: 0,
+    ready: function () {
+      const plan = workerPlan();
+      const count = Math.min(8, CM.game?.jumping || CM.isLoading?.() ? plan.fastTotal : plan.road + plan.mode + plan.metro);
+      if (this.off || count < 2 || typeof Worker === 'undefined' || typeof structuredClone !== 'function') return false;
+      this.cancelInactive();
+      if (this.list) return true;
+      let url;
+      try {
+        const source = [odBuffer, odGrow, demandWork, demandOrigin, demandWorkerMain].map(String).join('\n');
+        url = URL.createObjectURL(new Blob(['"use strict";\n', source, '\ndemandWorkerMain();'], { type: 'text/javascript' }));
+        this.list = [];
+        for (let i = 0; i < count; i++) {
+          const worker = new Worker(url), slot = { worker, job: null, basis: 0 };
+          worker.onmessage = e => this.done(slot, e.data);
+          worker.onerror = e => { e.preventDefault?.(); this.fail(e.message || '工作线程出错'); };
+          worker.onmessageerror = () => this.fail('工作线程消息无法读取');
+          this.list.push(slot);
+        }
+        this.idleTimer = setTimeout(() => this.release(), DEMAND_IDLE_MS);
+        return true;
+      } catch (e) { this.fail(e.message); return false; }
+      finally { if (url) URL.revokeObjectURL(url); }
+    },
+    close: function () {
+      clearTimeout(this.idleTimer);
+      for (const slot of this.list || []) {
+        slot.worker.onmessage = slot.worker.onerror = slot.worker.onmessageerror = null;
+        slot.worker.terminate();
+      }
+      this.list = null;
+    },
+    cancelInactive: function () {
+      for (const req of this.requests.values()) if (!req.active()) this.cancel(req);
+    },
+    release: function () {
+      this.cancelInactive();
+      if (this.queue.length || this.list?.some(slot => slot.job)) return false;
+      this.close();
+      return true;
+    },
+    fail: function (why) {
+      if (this.off) return;
+      this.off = true;
+      this.close();
+      for (const req of this.requests.values()) { req.failed = true; req.data = null; }
+      this.requests.clear();
+      this.queue = [];
+      console.warn('需求表改为主线程计算：' + why);
+      CarPool.notify();
+    },
+    submit: function (data, per, active) {
+      clearTimeout(this.idleTimer);
+      const req = { id: ++this.seq, data, per, active, results: [], remaining: 0, failed: false };
+      // 没有人口的小区计算量小，按权重划分工作量相近的任务。
+      const weight = p => p >= 20 ? 20 : 1;
+      const step = data.zPop.reduce((n, p) => n + weight(p), 0) / (this.list.length * 4);
+      let begin = 0, n = 0;
+      for (let i = 0; i < data.Z; i++) {
+        n += weight(data.zPop[i]);
+        if (n < step * (req.results.length + 1) && i + 1 < data.Z) continue;
+        this.queue.push({ req, part: req.results.length, begin, end: i + 1 });
+        req.results.push(null);
+        begin = i + 1;
+      }
+      req.remaining = req.results.length;
+      this.requests.set(req.id, req);
+      this.pump();
+      return req;
+    },
+    cancel: function (req) {
+      if (!this.requests.delete(req.id)) return;
+      req.failed = true;
+      req.data = null;
+      this.queue = this.queue.filter(job => job.req !== req);
+      if (!this.requests.size) this.close();
+      else this.pump();
+    },
+    pump: function () {
+      for (const slot of this.list || []) {
+        if (slot.job || !this.queue.length) continue;
+        const job = slot.job = this.queue.shift(), { req, part, begin, end } = job;
+        try {
+          if (slot.basis !== req.id) {
+            slot.worker.postMessage({ type: 'basis', req: req.id, data: req.data });
+            slot.basis = req.id;
+          }
+          slot.worker.postMessage({ type: 'block', req: req.id, per: req.per, part, begin, end });
+        } catch (e) { this.fail(e.message); return; }
+      }
+      if (this.list && !this.requests.size && !this.list.some(slot => slot.job)) {
+        // 保留已启动的线程供下一月复用，但先释放各线程里的城市输入快照。
+        try {
+          for (const slot of this.list) {
+            if (slot.basis) slot.worker.postMessage({ type: 'clear' });
+            slot.basis = 0;
+          }
+        } catch (e) { this.fail(e.message); return; }
+        clearTimeout(this.idleTimer);
+        this.idleTimer = setTimeout(() => this.release(), DEMAND_IDLE_MS);
+      }
+    },
+    done: function (slot, m) {
+      const job = slot.job;
+      if (!job || job.req.id !== m?.req || job.part !== m.part) { this.fail('需求表请求不匹配'); return; }
+      slot.job = null;
+      const req = job.req;
+      if (!req.failed && !req.active()) { this.cancel(req); return; }
+      if (!req.failed) {
+        req.results[job.part] = m;
+        if (--req.remaining === 0) { req.data = null; this.requests.delete(req.id); CarPool.notify(); }
+      }
+      this.pump();
+    },
+  };
+  CM.DemandPool = DemandPool;
+  function demandWork(basis, out) {
+    const { Z, F } = basis;
+    return Object.assign({}, basis, {
+      w: Array.from({ length: 5 }, () => new Float64Array(Z)),
+      wf: [null, ...Array.from({ length: 4 }, () => new Float64Array(F))],
+      scores: new Float64Array(Z), s: new Float64Array(5), kk: new Float64Array(5),
+      cand: new Int32Array(Z), candF: new Int32Array(F), out, n: 0, tot: new Float64Array(6),
+    });
   }
   // 单个起点的分目的出行分布（生产约束重力模型）：小区按各目的的吸引与距离衰减，重要设施作为独立目的地；
   // 候选目的地取综合份额最高的 240 个小区与份额足够的设施，各目的在候选中按比例分配；最后加上枢纽接驳
@@ -1209,7 +1355,7 @@
     }
   };
   Model.prototype.buildDemand = function () {
-    const g = this.buildDemandGen();
+    const g = this.buildDemandGen(true);
     while (!g.next().done) { /* run */ }
   };
   // 每人每日的出行率（来回各一次计为一次往返）：通勤、上学、购物、医疗、休闲
@@ -1232,7 +1378,7 @@
   // 时间切片版本：每 16 个起点让出一次；结果在最后一次性替换 this.od
   // 生产约束的重力模型：各目的的出行总量只由居住人口与出行率决定，设施只改变去向（不凭空增加出行）；
   // 枢纽接驳由设施给定（外生的铁路与航空旅客），按人口与岗位分布到全市
-  Model.prototype.buildDemandGen = function* () {
+  Model.prototype.buildDemandGen = function* (sync) {
     const Z = this.Z, y = this.year, c = CFG.choice, T = CFG.trips, Fac = CM.Fac;
     const fn = this.fn, F = fn.F, NZ = fn.NZ;
     // 历史发展阶段（v2.2，eras.js）：各目的出行强度、通勤与生活出行的距离、枢纽接驳与区域间走廊随年代平滑变化
@@ -1298,15 +1444,42 @@
     // 距离衰减表（见 demandOrigin）：覆盖整张地图的对角距离，步长 5 m
     const LH = 0.005, nT = Math.ceil(Math.hypot(CFG.W, CFG.H) * kmPerCell / LH) + 1;
     const lut = { inv: 1 / LH, n: nT, t: Ls.map(function (Lk) { const t = new Float64Array(nT + 1); for (let k = 0; k <= nT; k++) t[k] = Math.exp(-k * LH / Lk); return t; }) };
-    const D = { Z: Z, F: F, A: A, Ls: Ls, lut: lut, act, corr: corr, RN: RN, zReg: this.zReg, fA: fA, fL: fL, rate: rate, rw: rate.map(function (r) { return r / rsum; }), zPop: this.zPop, zJobs: this.zJobs,
-      zCx: this.zCx, zCy: this.zCy, nx: fn.nx, ny: fn.ny, hostZ: fn.hostZ, kmPerCell: kmPerCell, hubs: hubs, hubTours: hubTours,
-      w: [new Float64Array(Z), new Float64Array(Z), new Float64Array(Z), new Float64Array(Z), new Float64Array(Z)],
-      wf: [null, new Float64Array(F), new Float64Array(F), new Float64Array(F), new Float64Array(F)],
-      scores: new Float64Array(Z), s: new Float64Array(5), kk: new Float64Array(5), cand: new Int32Array(Z), candF: new Int32Array(Math.max(1, F)),
-      out: ob, n: 0, tot: new Float64Array(NPK) };
-    const start = new Int32Array(Z + 1);
+    const basis = { Z, F, A, Ls, lut, act, corr, RN, zReg: this.zReg, fA, fL, rate, rw: rate.map(r => r / rsum),
+      zPop: this.zPop, zCx: this.zCx, zCy: this.zCy, nx: fn.nx, ny: fn.ny, hostZ: fn.hostZ, kmPerCell, hubs, hubTours };
+    const D = demandWork(basis, ob), start = new Int32Array(Z + 1);
     let sliceAt = performance.now();
-    for (let i = 0; i < Z; i++) {
+    let pooled = false;
+    if (!sync && !this.syncSolve && act.length >= 64 && DemandPool.ready()) {
+      // 各线程按需领取分块，但使用同一次提交时的小区数据。
+      const epoch = this.epoch;
+      const req = DemandPool.submit(structuredClone(basis), per, () => !this.retired && this.epoch === epoch);
+      try {
+        yield* waitForWorker(DemandPool, req, () => req.remaining);
+        if (!req.failed) {
+          const total = req.results.reduce((n, r) => n + r.dest.length, 0);
+          if (D.out.cap < total) D.out = this._odBufs[this._odFlip] = odBuffer(total);
+          const { dest, t } = D.out;
+          let origin = 0;
+          sliceAt = performance.now();
+          for (const part of req.results) {
+            const len = part.dest.length;
+            dest.set(part.dest, D.n);
+            for (let p = 0; p < NPK; p++) {
+              const v = part.t[p];
+              t[p].set(v, D.n);
+              let sum = D.tot[p];
+              for (let k = 0; k < len; k++) sum += v[k];
+              D.tot[p] = sum;
+            }
+            for (let k = 1; k < part.start.length; k++) start[++origin] = D.n + part.start[k];
+            D.n += len;
+            if (performance.now() - sliceAt >= CFG.perf.trafficBuildMs) { yield; sliceAt = performance.now(); }
+          }
+          pooled = true;
+        }
+      } finally { DemandPool.cancel(req); }
+    }
+    if (!pooled) for (let i = 0; i < Z; i++) {
       if (i > 0 && (i & 3) === 0 && performance.now() - sliceAt >= CFG.perf.trafficBuildMs) { yield; sliceAt = performance.now(); }
       if (D.out.cap - D.n < per) D.out = this._odBufs[this._odFlip] = odGrow(D.out, D.n, Math.max(D.out.cap * 2, D.n + per * 64));
       demandOrigin(D, i);
@@ -1319,12 +1492,12 @@
   };
   // 分步版本（月度处理中使用，避免单帧长时间停顿）。进行期间暂停实时求解与预测（见 step），
   // 使其不会读到新旧混合的小区/需求/路网状态；计算结果与一次性执行相同。
-  Model.prototype.refreshCityGen = function* (C) {
+  Model.prototype.refreshCityGen = function* (C, sync) {
     this.refreshing = true;
     this.cancelPredict();
     try {
       this.buildZones();
-      yield* this.buildDemandGen();
+      yield* this.buildDemandGen(sync);
       if (this.city.roadVersion !== this.roadVer) { this.syncRoad(); yield; }
       if (this.net || C) { const NC = C || this.net.C, acc = yield* this.computeAccessGen(NC); this.setNetwork(NC, true, acc); } // 步行网络与覆盖随城市变化重算
       this.gen = null;

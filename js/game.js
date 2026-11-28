@@ -51,11 +51,13 @@
       lp(0.06, '准备地图');
       yield* g.city.generateGen(g.seed, g.clock.y);
       lp(0.2, '生成城市与道路');
-      g.model = new CM.Model(g.city);
+      g.model = new CM.Model(g.city, { deferDemand: true });
       g.model.habitAge = Game.habitAge(g);
       g.model.setYear(g.clock.y);
       g.model.setDayType(CM.Model.dayType(g.clock.y, g.clock.m, g.clock.d));
       g.traffic = { v: CFG.TRAFFIC_MODEL };
+      g.model.buildZones();
+      yield* g.model.buildDemandGen(sync);
       g.net = M.empty();
       g.mapInit = buildInitialNetwork(g);   // 开局既有地铁（东京 1950 年等），只在新建时生成一次，随存档保存
       g.compiled = M.compile(g.net, g.city);
@@ -177,14 +179,14 @@
       // 周末各时段与工作日各自独立迭代，不算它们推演出的城市逐格相同；周末留到推演结束时与工作日一起完整求解
       if (m === 1 && (y - y0) % 5 === 0) {
         city.buildGraphs(); const C = M.compile(this.net, city);
-        yield* model.refreshCityGen(C);
+        yield* model.refreshCityGen(C, sync);
         this.compiled = C; if (sync) model.solveNow(1, ['wd']); else yield* model.solveGen(1, ['wd']);
       }
       if ((++n & 3) === 0) yield;
     }
     city.updateStreets(); city.buildGraphs();
     const C = M.compile(this.net, city);
-    yield* model.refreshCityGen(C);
+    yield* model.refreshCityGen(C, sync);
     this.compiled = C;
     model.setYear(this.clock.y); model.setDayType(CM.Model.dayType(this.clock.y, this.clock.m, this.clock.d));
     model.onSolveProgress = function (f) { lp(0.84 + 0.12 * f, '计算居民出行'); };
@@ -1192,7 +1194,8 @@
       g.model.fare = g.econ.fare; g.model.crossFee = g.econ.cross;
       g.model.setYear(s.trafficYear != null ? s.trafficYear : g.clock.y + (g.clock.m - 1) / 12);   // 不刷新的月份里，交通结果对应的年份早于当前日期（v2.6）
       g.model.setDayType(CM.Model.dayType(g.clock.y, g.clock.m, g.clock.d));
-      g.model.buildZones(); g.model.buildDemand();
+      g.model.buildZones();
+      yield* g.model.buildDemandGen(sync);
       g.net = s.net;
       M.repairStationNames(g.net, g.city);
       // 扩图后旧接驳站保留在线网中。接驳口迁移或机场进入图内时，原站按普通车站运营。

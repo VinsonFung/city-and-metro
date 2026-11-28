@@ -12,7 +12,7 @@ for(const[,src]of(await readFile(new URL('index.html',root),'utf8')).matchAll(/<
 const C=c.CM,M=C.Metro,copy=v=>JSON.parse(JSON.stringify(v));
 C.UI=function(){};for(const f of ['settings','corp','fleet','netlayout','netreplay','review'])await load('js/'+f+'.js');
 const F=C.Fleet;
-assert.equal(C.CFG.GAME_VERSION,'3.0.2');assert.ok(C.CFG.RULES_REVISION>=15);
+assert.equal(C.CFG.GAME_VERSION,'3.0.3');assert.ok(C.CFG.RULES_REVISION>=15);
 assert.equal(C.MAP_ORDER.length,17);assert.equal(F.MODELS.length,83);
 assert.equal(F.MODELS.filter(m=>m.maps?.includes('ld')).length,11);
 assert.equal(F.MODELS.filter(m=>m.maps?.includes('sz')).length,2);
@@ -51,7 +51,7 @@ console.log('PASS XL unlock/capacity/cost and historic-lake / narrow-river bound
 C.useMap('sz');const sz=C.Game.create({mode:'challenge',seed:20000101});F.ensure(sz);sz.clock.y=2020;sz.model.setYear(2020);
 assert.equal(C.Corp.flavor(sz),C.Traits.FLAVOR.cn);assert.equal(C.Corp.flavor(sz).from,2002);assert.equal(C.Corp.enabled(sz),true);
 sz.econ.fare={mode:'flat',flat:9};sz.model.fare=sz.econ.fare;
-assert.equal(sz.city.W,244);assert.equal(sz.city.H,144);
+assert.equal(sz.city.W,352);assert.equal(sz.city.H,164);
 const gate=C.Fac.list(sz.city).find(f=>f.ext?.gate&&f.open<=2020),P=C.Fac.portal(gate);
 assert.ok(gate);assert.equal(C.CityLink.connected(sz),false);
 const lid=M.newLine(sz.net),a=M.addStation(sz.net,P.x,P.y,{size:'M',type:'underground'},sz.city),b=M.addStation(sz.net,P.x+4,P.y+4,{size:'M',type:'underground'},sz.city);
